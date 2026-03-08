@@ -428,7 +428,10 @@ class Audio:
         if not os.path.exists(path):
             return
         self.sound_paths[key] = path
-        self.hrtf.register_sound(key, path)
+        try:
+            self.hrtf.register_sound(key, path)
+        except Exception:
+            pass
         if not self._mixer_ready:
             return
         try:

@@ -3,6 +3,7 @@ import tempfile
 import unittest
 import copy
 import json
+import wave
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
@@ -493,6 +494,24 @@ class AudioTests(unittest.TestCase):
         self.assertEqual(catalog["menu"], "assets/music/menu_intro.ogg")
         self.assertEqual(catalog["gameplay"], "assets/music/theme.ogg")
 
+    def test_load_sound_keeps_running_when_hrtf_registration_fails(self):
+        audio = Audio.__new__(Audio)
+        audio.settings = {"sfx_volume": 1.0}
+        audio.sounds = {}
+        audio.sound_paths = {}
+        audio._mixer_ready = False
+
+        class RaisingHrtf:
+            def register_sound(self, key: str, path: str) -> None:
+                raise RuntimeError("boom")
+
+        audio.hrtf = RaisingHrtf()
+
+        with patch("subway_blind.audio.os.path.exists", return_value=True):
+            audio._load_sound("coin", "coin.wav")
+
+        self.assertEqual(audio.sound_paths["coin"], "coin.wav")
+
     def test_update_starts_pending_track_after_music_fades_out(self):
         audio = Audio.__new__(Audio)
         audio._mixer_ready = True
@@ -660,6 +679,13 @@ class FakeOpenALModule:
 
 
 class HrtfEngineTests(unittest.TestCase):
+    def _write_wav(self, path: Path, channels: int) -> None:
+        with wave.open(str(path), "wb") as writer:
+            writer.setnchannels(channels)
+            writer.setsampwidth(2)
+            writer.setframerate(44100)
+            writer.writeframes((b"\x00\x00" * channels) * 64)
+
     def test_changing_buffer_stops_source_before_rebinding(self):
         source = FakeOpenALSource()
         engine = OpenALHrtfEngine.__new__(OpenALHrtfEngine)
@@ -722,6 +748,64 @@ class HrtfEngineTests(unittest.TestCase):
         self.assertEqual(source.calls[-2], ("set_position", (1.2, -0.1, -4.0)))
         self.assertEqual(source.calls[-1], ("set_velocity", (0.0, 0.0, 0.0)))
         self.assertTrue(source.relative)
+
+    def test_prepare_openal_path_stages_unicode_wav_into_ascii_cache(self):
+        engine = OpenALHrtfEngine.__new__(OpenALHrtfEngine)
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            source_directory = root / ("profile_" + chr(0x0130))
+            source_directory.mkdir(parents=True, exist_ok=True)
+            program_data = root / "ProgramData"
+            source_path = source_directory / "coin.wav"
+            self._write_wav(source_path, channels=2)
+
+            with patch("subway_blind.hrtf_audio.BASE_DIR", source_directory), patch.dict(
+                os.environ,
+                {"PROGRAMDATA": str(program_data)},
+                clear=False,
+            ):
+                prepared_path = Path(engine._prepare_openal_path(source_path))
+
+            self.assertNotEqual(prepared_path, source_path)
+            self.assertTrue(prepared_path.exists())
+            self.assertTrue(str(prepared_path).isascii())
+            with wave.open(str(prepared_path), "rb") as reader:
+                self.assertEqual(reader.getnchannels(), 1)
+
+            try:
+                import pyopenalsoft as openal
+            except Exception:
+                openal = None
+
+            if openal is not None and os.name == "nt":
+                with self.assertRaises(RuntimeError):
+                    openal.AudioData(str(source_path))
+                self.assertEqual(openal.AudioData(str(prepared_path)).channels, 1)
+
+    def test_register_sound_returns_without_raising_when_openal_load_fails(self):
+        class FailingOpenALModule:
+            def AudioData(self, path: str):
+                raise RuntimeError("invalid audio")
+
+            def Buffer(self, audio_data):
+                raise AssertionError("Buffer should not be created when AudioData fails")
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            source_path = Path(temp_root) / "coin.wav"
+            self._write_wav(source_path, channels=1)
+            engine = OpenALHrtfEngine.__new__(OpenALHrtfEngine)
+            engine.available = True
+            engine._al = FailingOpenALModule()
+            engine._buffers = {}
+            engine._buffer_paths = {}
+            engine._sources = {}
+            engine._channel_keys = {}
+            engine._listener_gain = 1.0
+
+            engine.register_sound("coin", str(source_path))
+
+            self.assertNotIn("coin", engine._buffers)
+            self.assertNotIn("coin", engine._buffer_paths)
 
 
 class SpatialAudioTests(unittest.TestCase):

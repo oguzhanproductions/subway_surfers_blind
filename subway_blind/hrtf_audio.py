@@ -3,6 +3,9 @@ from __future__ import annotations
 import audioop
 import hashlib
 import os
+import shutil
+import tempfile
+import uuid
 import wave
 from pathlib import Path
 
@@ -56,19 +59,38 @@ class OpenALHrtfEngine:
     def register_sound(self, key: str, path: str) -> None:
         if not self.available or self._al is None:
             return
-        if not Path(path).exists():
+        source_path = Path(path)
+        if not source_path.exists():
             return
-        mono_path = self._prepare_mono_path(path)
-        if self._buffer_paths.get(key) == mono_path and key in self._buffers:
+        prepared_path = self._prepare_openal_path(source_path)
+        if self._buffer_paths.get(key) == prepared_path and key in self._buffers:
             return
-        audio_data = self._al.AudioData(mono_path)
-        self._buffers[key] = self._al.Buffer(audio_data)
-        self._buffer_paths[key] = mono_path
+        try:
+            audio_data = self._al.AudioData(prepared_path)
+            buffer = self._al.Buffer(audio_data)
+        except Exception:
+            if prepared_path != str(source_path):
+                self._discard_cached_asset(Path(prepared_path))
+                try:
+                    prepared_path = self._prepare_openal_path(source_path, refresh=True)
+                    audio_data = self._al.AudioData(prepared_path)
+                    buffer = self._al.Buffer(audio_data)
+                except Exception:
+                    return
+            else:
+                return
+        self._buffers[key] = buffer
+        self._buffer_paths[key] = prepared_path
 
-    def _prepare_mono_path(self, path: str) -> str:
-        source = Path(path)
-        if source.suffix.lower() != ".wav":
-            return path
+    def _prepare_openal_path(self, source: Path, refresh: bool = False) -> str:
+        if source.suffix.lower() == ".wav":
+            return self._prepare_wav_path(source, refresh=refresh)
+        if self._is_ascii_safe_path(source):
+            return str(source)
+        return self._stage_original_asset(source, refresh=refresh)
+
+    def _prepare_wav_path(self, source: Path, refresh: bool = False) -> str:
+        requires_ascii_cache = not self._is_ascii_safe_path(source)
         try:
             with wave.open(str(source), "rb") as reader:
                 channels = reader.getnchannels()
@@ -76,30 +98,35 @@ class OpenALHrtfEngine:
                 frame_rate = reader.getframerate()
                 frames = reader.readframes(reader.getnframes())
         except Exception:
-            return path
+            if requires_ascii_cache:
+                return self._stage_original_asset(source, refresh=refresh)
+            return str(source)
 
-        if channels == 1:
-            return path
+        if channels == 1 and not requires_ascii_cache:
+            return str(source)
 
-        cache_directory = BASE_DIR / "data" / "openal_cache"
-        cache_directory.mkdir(parents=True, exist_ok=True)
-        fingerprint = hashlib.sha1(
-            f"{source.resolve()}::{source.stat().st_mtime_ns}::{source.stat().st_size}".encode("utf-8")
-        ).hexdigest()[:16]
-        cache_path = cache_directory / f"{source.stem}_{fingerprint}_mono.wav"
-        if cache_path.exists():
+        fingerprint = self._source_fingerprint(source)
+        cache_suffix = ".wav"
+        stem_suffix = "_mono" if channels != 1 else ""
+        cache_path = self._openal_cache_root() / f"{self._ascii_file_stem(source.stem)}_{fingerprint}{stem_suffix}{cache_suffix}"
+        if not refresh and self._is_valid_cached_wav(cache_path, expected_channels=1):
             return str(cache_path)
 
         try:
-            mono_frames = self._downmix_to_mono(frames, channels, sample_width)
-            with wave.open(str(cache_path), "wb") as writer:
-                writer.setnchannels(1)
-                writer.setsampwidth(sample_width)
-                writer.setframerate(frame_rate)
-                writer.writeframes(mono_frames)
+            if channels == 1:
+                self._copy_file_atomically(source, cache_path)
+            else:
+                mono_frames = self._downmix_to_mono(frames, channels, sample_width)
+                self._write_wav_atomically(
+                    cache_path,
+                    channels=1,
+                    sample_width=sample_width,
+                    frame_rate=frame_rate,
+                    frames=mono_frames,
+                )
             return str(cache_path)
         except Exception:
-            return path
+            return str(source)
 
     def _downmix_to_mono(self, frames: bytes, channels: int, sample_width: int) -> bytes:
         if channels <= 1:
@@ -116,6 +143,116 @@ class OpenALHrtfEngine:
             mono = audioop.tomono(frame[: sample_width * 2], sample_width, 0.5, 0.5)
             mono_chunks.append(mono)
         return b"".join(mono_chunks)
+
+    def _openal_cache_root(self) -> Path:
+        preferred_root = BASE_DIR / "data" / "openal_cache"
+        candidates = [preferred_root]
+
+        program_data = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
+        candidates.append(program_data / "VireonInteractive" / "SubwaySurfersBlindEdition" / "openal_cache")
+
+        temp_root = Path(tempfile.gettempdir())
+        candidates.append(temp_root / "VireonInteractive" / "SubwaySurfersBlindEdition" / "openal_cache")
+
+        for candidate in candidates:
+            if not self._is_ascii_safe_path(candidate):
+                continue
+            try:
+                candidate.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                continue
+            return candidate
+        preferred_root.mkdir(parents=True, exist_ok=True)
+        return preferred_root
+
+    def _stage_original_asset(self, source: Path, refresh: bool = False) -> str:
+        cache_path = self._openal_cache_root() / f"{self._ascii_file_stem(source.stem)}_{self._source_fingerprint(source)}{source.suffix.lower()}"
+        if not refresh and self._is_usable_cached_asset(cache_path):
+            return str(cache_path)
+        try:
+            self._copy_file_atomically(source, cache_path)
+            return str(cache_path)
+        except Exception:
+            return str(source)
+
+    def _source_fingerprint(self, source: Path) -> str:
+        stats = source.stat()
+        try:
+            resolved_source = source.resolve()
+        except Exception:
+            resolved_source = source
+        return hashlib.sha1(
+            f"{resolved_source}::{stats.st_mtime_ns}::{stats.st_size}".encode("utf-8")
+        ).hexdigest()[:16]
+
+    def _is_ascii_safe_path(self, path: Path) -> bool:
+        try:
+            value = str(path.resolve(strict=False))
+        except Exception:
+            value = str(path)
+        return value.isascii()
+
+    def _ascii_file_stem(self, value: str) -> str:
+        sanitized = "".join(character if character.isascii() and character.isalnum() else "_" for character in value)
+        return sanitized.strip("_") or "sound"
+
+    def _is_usable_cached_asset(self, path: Path) -> bool:
+        try:
+            return path.is_file() and path.stat().st_size > 0
+        except Exception:
+            return False
+
+    def _is_valid_cached_wav(self, path: Path, expected_channels: int) -> bool:
+        if not self._is_usable_cached_asset(path):
+            return False
+        try:
+            with wave.open(str(path), "rb") as reader:
+                return reader.getnchannels() == expected_channels and reader.getnframes() >= 0
+        except Exception:
+            return False
+
+    def _copy_file_atomically(self, source: Path, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = destination.with_name(f"{destination.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        try:
+            shutil.copyfile(source, temp_path)
+            os.replace(temp_path, destination)
+        finally:
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception:
+                    pass
+
+    def _write_wav_atomically(
+        self,
+        destination: Path,
+        channels: int,
+        sample_width: int,
+        frame_rate: int,
+        frames: bytes,
+    ) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = destination.with_name(f"{destination.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        try:
+            with wave.open(str(temp_path), "wb") as writer:
+                writer.setnchannels(channels)
+                writer.setsampwidth(sample_width)
+                writer.setframerate(frame_rate)
+                writer.writeframes(frames)
+            os.replace(temp_path, destination)
+        finally:
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception:
+                    pass
+
+    def _discard_cached_asset(self, path: Path) -> None:
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            return
 
     def set_listener_gain(self, sfx_volume: float) -> None:
         self._listener_gain = max(0.0, min(1.0, float(sfx_volume)))
