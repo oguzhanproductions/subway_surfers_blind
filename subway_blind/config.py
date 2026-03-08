@@ -8,6 +8,7 @@ import shutil
 import sys
 from typing import Any
 
+from subway_blind.controls import default_controller_bindings, default_keyboard_bindings
 from subway_blind.version import APP_NAME
 
 BUNDLED_RESOURCE_BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
@@ -62,6 +63,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "season_hunt_id": "",
     "season_tokens": 0,
     "season_reward_stage": 0,
+    "keyboard_bindings": default_keyboard_bindings(),
+    "controller_bindings": default_controller_bindings(),
 }
 
 

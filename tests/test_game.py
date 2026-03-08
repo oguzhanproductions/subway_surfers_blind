@@ -25,6 +25,7 @@ from subway_blind.audio import (
     SYSTEM_DEFAULT_OUTPUT_LABEL,
 )
 from subway_blind.balance import SPEED_PROFILES, speed_profile_for_difficulty
+from subway_blind.controls import ConnectedController, PLAYSTATION_FAMILY, XBOX_FAMILY, family_label
 from subway_blind.features import HEADSTART_SPEED_BONUS, HOVERBOARD_DURATION, headstart_duration_for_uses
 from subway_blind.features import SHOP_PRICES
 from subway_blind.game import (
@@ -254,6 +255,15 @@ class DummyUpdater:
     def launch_restart_script(self, restart_script_path: str | None) -> bool:
         self.launch_restart_calls.append(restart_script_path)
         return restart_script_path is not None
+
+
+class DummyControllerDevice:
+    def __init__(self, name: str):
+        self.name = name
+        self.quit_calls = 0
+
+    def quit(self) -> None:
+        self.quit_calls += 1
 
 
 def make_release_info(version: str = "0.2.0") -> ReleaseInfo:
@@ -1027,6 +1037,9 @@ class GameTests(unittest.TestCase):
             game.main_menu,
             game.shop_menu,
             game.options_menu,
+            game.controls_menu,
+            game.keyboard_bindings_menu,
+            game.controller_bindings_menu,
             game.pause_menu,
             game.pause_confirm_menu,
             game.loadout_menu,
@@ -1038,6 +1051,19 @@ class GameTests(unittest.TestCase):
             menu.audio = audio
         game._sync_music_context()
         return game, speaker, audio
+
+    def attach_controller(self, game: SubwayBlindGame, family: str = XBOX_FAMILY, name: str | None = None, instance_id: int = 41):
+        controller_name = name or family_label(family)
+        device = DummyControllerDevice(controller_name)
+        game.controls.connected[instance_id] = ConnectedController(
+            instance_id=instance_id,
+            name=controller_name,
+            family=family,
+            controller=device,
+        )
+        game.controls.active_controller_instance_id = instance_id
+        game._refresh_control_menus()
+        return device
 
     def test_main_menu_is_english(self):
         game, _, _ = self.make_game()
@@ -1063,6 +1089,7 @@ class GameTests(unittest.TestCase):
                 "SAPI Rate: 0",
                 "SAPI Pitch: 0",
                 "Difficulty: Normal",
+                "Controls",
                 "Back",
             ],
         )
@@ -1466,7 +1493,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_on_back_only_plays_edge_feedback(self):
         game, _, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 11
+        game.options_menu.index = 12
 
         game._adjust_selected_option(1)
 
@@ -1476,7 +1503,7 @@ class GameTests(unittest.TestCase):
     def test_enter_on_back_returns_to_main_menu_from_options(self):
         game, _, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 11
+        game.options_menu.index = 12
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -1484,6 +1511,140 @@ class GameTests(unittest.TestCase):
         self.assertIs(game.active_menu, game.main_menu)
         self.assertEqual(game.main_menu.index, 0)
         self.assertIn(("menuclose", "ui", False), audio.played)
+
+    def test_controls_menu_only_shows_keyboard_bindings_without_controller(self):
+        game, _, _ = self.make_game()
+
+        game._refresh_control_menus()
+
+        self.assertEqual(
+            [item.label for item in game.controls_menu.items],
+            ["Active Input: Keyboard", "Keyboard Bindings", "Back"],
+        )
+
+    def test_controls_menu_shows_connected_controller_family(self):
+        game, _, _ = self.make_game()
+        self.attach_controller(game, family=PLAYSTATION_FAMILY, name="Wireless Controller")
+
+        game._refresh_control_menus()
+
+        self.assertEqual(
+            [item.label for item in game.controls_menu.items],
+            ["Active Input: Keyboard", "Keyboard Bindings", "PlayStation Controller Bindings", "Back"],
+        )
+
+    def test_options_controls_entry_opens_controls_menu(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 11
+
+        result = game._handle_active_menu_key(pygame.K_RETURN)
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.controls_menu)
+
+    def test_keyboard_binding_capture_updates_menu_confirm(self):
+        game, speaker, _ = self.make_game()
+        game._build_keyboard_bindings_menu()
+        game.active_menu = game.keyboard_bindings_menu
+
+        game._begin_binding_capture("keyboard", "menu_confirm")
+        game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_f}))
+
+        self.assertEqual(game.controls.keyboard_binding_for_action("menu_confirm"), pygame.K_f)
+        self.assertIn(("Confirm set to F.", True), speaker.messages)
+
+    def test_remapped_menu_up_uses_new_key_only(self):
+        game, _, _ = self.make_game()
+        game.controls.update_keyboard_binding("menu_up", pygame.K_j)
+        game.active_menu = game.main_menu
+        game.main_menu.index = 1
+
+        game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_UP}))
+        self.assertEqual(game.main_menu.index, 1)
+
+        game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_j}))
+        self.assertEqual(game.main_menu.index, 0)
+
+    def test_remapped_menu_confirm_disables_enter(self):
+        game, _, audio = self.make_game()
+        game.controls.update_keyboard_binding("menu_confirm", pygame.K_f)
+        game.active_menu = game.main_menu
+        game.main_menu.index = 0
+
+        game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_RETURN}))
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertNotIn(("confirm", "ui", False), audio.played)
+
+        game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_f}))
+        self.assertIs(game.active_menu, game.loadout_menu)
+
+    def test_remapped_option_adjustment_disables_old_arrow(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 0
+        game.settings["sfx_volume"] = 0.4
+        game.controls.update_keyboard_binding("option_increase", pygame.K_l)
+
+        game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_RIGHT}))
+        self.assertEqual(game.settings["sfx_volume"], 0.4)
+
+        game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_l}))
+        self.assertEqual(game.settings["sfx_volume"], 0.5)
+
+    def test_controller_binding_capture_updates_playstation_jump_label(self):
+        game, speaker, _ = self.make_game()
+        self.attach_controller(game, family=PLAYSTATION_FAMILY, name="Wireless Controller")
+        game._build_controller_bindings_menu()
+        game.active_menu = game.controller_bindings_menu
+
+        game._begin_binding_capture("controller", "game_jump")
+        game._handle_controller_event(
+            pygame.event.Event(
+                pygame.CONTROLLERBUTTONDOWN,
+                {"instance_id": 41, "button": pygame.CONTROLLER_BUTTON_X},
+            )
+        )
+
+        self.assertEqual(game.controls.controller_binding_for_action("game_jump", PLAYSTATION_FAMILY), "button:x")
+        self.assertIn(("Jump set to Square.", True), speaker.messages)
+
+    def test_controller_a_button_triggers_jump_in_gameplay(self):
+        game, _, _ = self.make_game()
+        self.attach_controller(game, family=XBOX_FAMILY, name="Xbox Wireless Controller")
+        game.start_run()
+
+        game._handle_controller_event(
+            pygame.event.Event(
+                pygame.CONTROLLERBUTTONDOWN,
+                {"instance_id": 41, "button": pygame.CONTROLLER_BUTTON_A},
+            )
+        )
+
+        self.assertGreater(game.player.vy, 0.0)
+
+    def test_controller_left_stick_moves_player_left(self):
+        game, _, _ = self.make_game()
+        self.attach_controller(game, family=XBOX_FAMILY, name="Xbox Wireless Controller")
+        game.start_run()
+
+        game._handle_controller_event(
+            pygame.event.Event(
+                pygame.CONTROLLERAXISMOTION,
+                {"instance_id": 41, "axis": pygame.CONTROLLER_AXIS_LEFTX, "value": -0.95},
+            )
+        )
+
+        self.assertEqual(game.player.lane, -1)
+
+    def test_menu_hint_uses_playstation_labels_after_controller_input(self):
+        game, _, _ = self.make_game()
+        self.attach_controller(game, family=PLAYSTATION_FAMILY, name="Wireless Controller")
+        game.controls.last_input_source = "controller"
+
+        hint_text = game._menu_navigation_hint()
+
+        self.assertEqual(hint_text, "Use D-Pad Up/D-Pad Down, Cross to select, Circle to go back.")
 
     def test_adjust_selected_option_toggles_menu_sound_hrtf(self):
         game, speaker, audio = self.make_game()

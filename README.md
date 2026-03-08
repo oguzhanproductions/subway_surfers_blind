@@ -106,6 +106,8 @@ The main menu includes a dedicated sound library browser so players can preview 
 
 ## Controls
 
+The game now supports keyboard plus SDL-compatible Xbox and PlayStation controllers on both wired and Bluetooth connections. Open `Options -> Controls` to review the active device, see device-specific button labels, and remap keyboard or controller bindings.
+
 ### In menus
 
 - `Up` / `W`: move up
@@ -125,6 +127,16 @@ The main menu includes a dedicated sound library browser so players can preview 
 - `Space`: activate hoverboard
 - `Escape`: pause
 - `M`: toggle speech
+
+### Default controller layout
+
+- `D-Pad Up` / `D-Pad Down`: move through menus
+- `A` / `Cross`: confirm in menus and jump during a run
+- `B` / `Circle`: go back in menus and roll during a run
+- `Left Stick Left` / `Left Stick Right`: change lanes during a run
+- `X` / `Square`: activate hoverboard
+- `Y` / `Triangle`: toggle speech
+- `Menu` / `Options`: pause during a run
 
 ## Menu Surface
 
@@ -154,6 +166,11 @@ The current user-facing menus include:
   - SAPI rate
   - SAPI pitch
   - Difficulty
+  - Controls
+- Controls
+  - Active input summary
+  - Keyboard bindings
+  - Connected controller bindings
 - Shop
   - Hoverboards
   - Mystery boxes
