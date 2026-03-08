@@ -83,7 +83,7 @@ class SpatialThreatAudio:
             if cue.prompt is not None:
                 signature = (cue.kind, cue.prompt)
                 if self._spoken_signatures.get(cue.lane) != signature:
-                    speaker.speak(cue.prompt, interrupt=False)
+                    speaker.speak(cue.prompt, interrupt=True)
                     self._spoken_signatures[cue.lane] = signature
 
     def build_threat_cues(self, player_lane: int, speed: float, obstacles: list[Obstacle]) -> list[ThreatCue]:
@@ -93,7 +93,7 @@ class SpatialThreatAudio:
             threat = lane_threats.get(lane)
             if threat is None:
                 continue
-            cues.append(self._build_cue(player_lane, speed, threat))
+            cues.append(self._build_cue(player_lane, speed, threat, lane_threats))
         return cues
 
     def _nearest_hazard_per_lane(self, obstacles: list[Obstacle]) -> dict[int, Obstacle]:
@@ -121,7 +121,13 @@ class SpatialThreatAudio:
     def _threat_metric(self, obstacle: Obstacle) -> tuple[int, float, int]:
         return (0 if obstacle.z > 0 else 1, abs(obstacle.z), PRIORITY.get(obstacle.kind, 99))
 
-    def _build_cue(self, player_lane: int, speed: float, obstacle: Obstacle) -> ThreatCue:
+    def _build_cue(
+        self,
+        player_lane: int,
+        speed: float,
+        obstacle: Obstacle,
+        lane_threats: dict[int, Obstacle],
+    ) -> ThreatCue:
         range_limit = TRAIN_FRONT_TRACKING_DISTANCE if obstacle.kind == "train" else OBSTACLE_FRONT_TRACKING_DISTANCE
         signed_distance = obstacle.z
         distance = min(range_limit, abs(signed_distance))
@@ -151,7 +157,7 @@ class SpatialThreatAudio:
         pitch = 0.92 + closeness * 0.24
         if signed_distance < 0:
             pitch = max(0.82, pitch - 0.08)
-        prompt = self._prompt_for_obstacle(player_lane, obstacle, signed_distance, speed_factor)
+        prompt = self._prompt_for_obstacle(player_lane, obstacle, signed_distance, speed_factor, lane_threats)
         return ThreatCue(
             lane=obstacle.lane,
             kind=obstacle.kind,
@@ -175,18 +181,36 @@ class SpatialThreatAudio:
         obstacle: Obstacle,
         signed_distance: float,
         speed_factor: float,
+        lane_threats: dict[int, Obstacle],
     ) -> Optional[str]:
-        base_prompt_distance = {"train": 15.5, "low": 13.5, "high": 13.5, "bush": 13.5}[obstacle.kind]
-        prompt_distance = base_prompt_distance + speed_factor * (4.5 if obstacle.kind == "train" else 3.5)
+        base_prompt_distance = {"train": 18.0, "low": 15.0, "high": 15.0, "bush": 15.0}[obstacle.kind]
+        prompt_distance = base_prompt_distance + speed_factor * (6.0 if obstacle.kind == "train" else 4.5)
         if signed_distance <= 0 or signed_distance > prompt_distance:
             return None
         if obstacle.lane != player_lane:
             return None
+        if obstacle.kind == "train":
+            direction = self._preferred_turn_direction(player_lane, lane_threats)
+            return f"turn {direction}" if speed_factor >= 0.72 else f"turn {direction} now"
         if speed_factor >= 0.72:
-            maneuver = {"train": "switch", "low": "jump", "high": "roll", "bush": "jump"}[obstacle.kind]
-        else:
-            maneuver = {"train": "switch now", "low": "jump soon", "high": "roll soon", "bush": "jump soon"}[obstacle.kind]
-        return maneuver
+            return {"low": "jump", "high": "roll", "bush": "jump"}[obstacle.kind]
+        return {"low": "jump now", "high": "roll now", "bush": "jump now"}[obstacle.kind]
+
+    def _preferred_turn_direction(self, player_lane: int, lane_threats: dict[int, Obstacle]) -> str:
+        if player_lane <= -1:
+            return "right"
+        if player_lane >= 1:
+            return "left"
+        left_score = self._escape_lane_score(lane_threats.get(-1))
+        right_score = self._escape_lane_score(lane_threats.get(1))
+        return "left" if left_score >= right_score else "right"
+
+    def _escape_lane_score(self, obstacle: Optional[Obstacle]) -> tuple[int, float, int]:
+        if obstacle is None:
+            return (2, float("inf"), 0)
+        if obstacle.z <= 0:
+            return (1, abs(obstacle.z), -PRIORITY.get(obstacle.kind, 99))
+        return (0, float(obstacle.z), -PRIORITY.get(obstacle.kind, 99))
 
     @staticmethod
     def _speed_factor(speed: float) -> float:

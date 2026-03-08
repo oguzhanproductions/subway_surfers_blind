@@ -13,6 +13,8 @@ env/
 
 dist/
 build/
+dist_openalfix/
+build_openalfix/
 *.egg-info/
 
 data/settings.json

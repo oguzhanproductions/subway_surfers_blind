@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 import copy
+import json
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
@@ -12,21 +13,59 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame
 
 from subway_blind import config as config_module
-from subway_blind.audio import Audio, Speaker
+from subway_blind.audio import (
+    Audio,
+    Speaker,
+    SAPI_PITCH_MAX,
+    SAPI_PITCH_MIN,
+    SAPI_RATE_MAX,
+    SAPI_RATE_MIN,
+    SAPI_SPEAK_IS_XML,
+    SYSTEM_DEFAULT_OUTPUT_LABEL,
+)
 from subway_blind.balance import SPEED_PROFILES, speed_profile_for_difficulty
-from subway_blind.features import HEADSTART_SPEED_BONUS
+from subway_blind.features import HEADSTART_SPEED_BONUS, HOVERBOARD_DURATION, headstart_duration_for_uses
 from subway_blind.features import SHOP_PRICES
-from subway_blind.game import SubwayBlindGame, cycle_volume
+from subway_blind.game import (
+    ACTIVE_GAMEPLAY_SOUND_KEYS,
+    HEADSTART_SHAKE_CHANNEL,
+    HEADSTART_SPRAY_CHANNEL,
+    LEARN_SOUND_LOOP_PREVIEW_DURATION,
+    LEARN_SOUND_PREVIEW_CHANNEL,
+    MENU_REPEAT_INITIAL_DELAY,
+    MENU_REPEAT_INTERVAL,
+    SubwayBlindGame,
+)
 from subway_blind.hrtf_audio import OpenALHrtfEngine
 from subway_blind.menu import Menu, MenuItem
 from subway_blind.models import Obstacle, lane_name
 from subway_blind.spatial_audio import SpatialThreatAudio
 from subway_blind.spawn import PATTERNS, PatternEntry, RoutePattern, SpawnDirector
+from subway_blind.updater import (
+    GitHubReleaseUpdater,
+    ReleaseAsset,
+    ReleaseInfo,
+    UpdateCheckResult,
+    UpdateInstallProgress,
+    UpdateInstallResult,
+    normalize_version,
+    version_key,
+)
+from subway_blind.version import APP_VERSION
 
 
 class DummySpeaker:
     def __init__(self):
         self.enabled = True
+        self.use_sapi = False
+        self.sapi_voice_id = ""
+        self.sapi_rate = 0
+        self.sapi_pitch = 0
+        self._sapi_voices = [
+            ("voice-zira", "Microsoft Zira Desktop - English (United States)"),
+            ("voice-david", "Microsoft David Desktop - English (United States)"),
+            ("voice-yelda", "VE Turkish Yelda 22kHz"),
+        ]
         self.messages: list[tuple[str, bool]] = []
         self.speed_factors: list[float] = []
 
@@ -36,20 +75,59 @@ class DummySpeaker:
     def set_speed_factor(self, speed_factor: float) -> None:
         self.speed_factors.append(speed_factor)
 
+    def apply_settings(self, settings: dict) -> None:
+        self.enabled = bool(settings.get("speech_enabled", True))
+        self.use_sapi = bool(settings.get("sapi_speech_enabled", False))
+        self.sapi_rate = max(SAPI_RATE_MIN, min(SAPI_RATE_MAX, int(settings.get("sapi_rate", 0))))
+        self.sapi_pitch = max(SAPI_PITCH_MIN, min(SAPI_PITCH_MAX, int(settings.get("sapi_pitch", 0))))
+        requested_voice_id = str(settings.get("sapi_voice_id", "") or "").strip()
+        if any(voice_id == requested_voice_id for voice_id, _ in self._sapi_voices):
+            self.sapi_voice_id = requested_voice_id
+        elif self._sapi_voices:
+            self.sapi_voice_id = self._sapi_voices[0][0]
+        else:
+            self.sapi_voice_id = ""
+
+    def current_sapi_voice_display_name(self) -> str:
+        for voice_id, name in self._sapi_voices:
+            if voice_id == self.sapi_voice_id:
+                return name
+        if self._sapi_voices:
+            return self._sapi_voices[0][1]
+        return "Unavailable"
+
+    def cycle_sapi_voice(self, direction: int) -> str:
+        if not self._sapi_voices:
+            return "Unavailable"
+        current_ids = [voice_id for voice_id, _ in self._sapi_voices]
+        try:
+            current_index = current_ids.index(self.sapi_voice_id)
+        except ValueError:
+            current_index = 0
+        next_index = (current_index + (-1 if direction < 0 else 1)) % len(self._sapi_voices)
+        self.sapi_voice_id = self._sapi_voices[next_index][0]
+        return self._sapi_voices[next_index][1]
+
 
 class DummyAudio:
     def __init__(self, settings: dict):
         self.settings = settings
         self.sounds = {}
         self.played: list[tuple[str, str | None, bool]] = []
+        self.play_calls: list[dict[str, object]] = []
         self.spatial_played: list[tuple[str, str, float, float, float, float, float, float | None]] = []
         self.spatial_updated: list[tuple[str, float, float, float, float, float, float | None]] = []
         self.stopped: list[str] = []
         self.refreshed = 0
         self.music_started = 0
         self.music_stopped = 0
+        self.music_started_tracks: list[str] = []
+        self.music_update_calls: list[float] = []
+        self.music_idle = False
+        self._output_device_name = settings.get("audio_output_device") or None
 
     def play(self, key: str, pan=None, loop: bool = False, channel: str | None = None, gain: float = 1.0) -> None:
+        self.play_calls.append({"key": key, "channel": channel, "loop": loop, "pan": pan, "gain": gain})
         self.played.append((key, channel, loop))
 
     def stop(self, channel: str) -> None:
@@ -91,14 +169,108 @@ class DummyAudio:
     def refresh_volumes(self) -> None:
         self.refreshed += 1
 
-    def music_start(self) -> None:
+    def music_start(self, track_key: str = "gameplay") -> None:
         self.music_started += 1
+        self.music_started_tracks.append(track_key)
+        self.music_idle = False
 
-    def music_stop(self) -> None:
+    def music_stop(self, immediate: bool = False) -> None:
         self.music_stopped += 1
+        self.music_idle = True
+
+    def update(self, delta_time: float) -> None:
+        self.music_update_calls.append(delta_time)
+
+    def music_is_idle(self) -> bool:
+        return self.music_idle
 
     def _get_channel(self, name: str):
         return None
+
+    def output_device_display_name(self) -> str:
+        return self._output_device_name or SYSTEM_DEFAULT_OUTPUT_LABEL
+
+    def current_output_device_name(self) -> str | None:
+        return self._output_device_name
+
+    def output_device_choices(self) -> list[str | None]:
+        return [None, "External USB Headphones", "Studio Speakers"]
+
+    def apply_output_device(self, device_name: str | None) -> str | None:
+        self._output_device_name = device_name
+        self.settings["audio_output_device"] = device_name or ""
+        return self._output_device_name
+
+
+class DummyUpdater:
+    def __init__(self):
+        self.check_results: list[UpdateCheckResult] = [
+            UpdateCheckResult(
+                status="no_releases",
+                current_version=APP_VERSION,
+                message="No published releases were found.",
+            )
+        ]
+        self.check_calls = 0
+        self.download_calls: list[ReleaseInfo] = []
+        self.open_calls: list[ReleaseInfo | None] = []
+        self.install_result = UpdateInstallResult(
+            success=True,
+            message="Update installed. Restart the game to finish applying it.",
+            restart_required=True,
+            restart_script_path=r"C:\Users\oguzhan\AppData\Local\Temp\apply_update.cmd",
+        )
+        self.open_success = True
+        self.launch_restart_calls: list[str | None] = []
+
+    def enqueue_result(self, result: UpdateCheckResult) -> None:
+        self.check_results.append(result)
+
+    def check_for_updates(self, current_version: str) -> UpdateCheckResult:
+        self.check_calls += 1
+        if self.check_results:
+            return self.check_results.pop(0)
+        return UpdateCheckResult(
+            status="no_releases",
+            current_version=current_version,
+            message="No published releases were found.",
+        )
+
+    def has_installable_package(self, release: ReleaseInfo) -> bool:
+        return any(asset.name.endswith(".zip") for asset in release.assets)
+
+    def download_and_install(self, release: ReleaseInfo, progress_callback=None) -> UpdateInstallResult:
+        self.download_calls.append(release)
+        if progress_callback is not None:
+            progress_callback(UpdateInstallProgress("download", 100.0, "Downloading update package. 100 percent."))
+            progress_callback(UpdateInstallProgress("extract", 100.0, "Extracting update package. 100 percent."))
+        return self.install_result
+
+    def open_release_page(self, release: ReleaseInfo | None = None) -> bool:
+        self.open_calls.append(release)
+        return self.open_success
+
+    def launch_restart_script(self, restart_script_path: str | None) -> bool:
+        self.launch_restart_calls.append(restart_script_path)
+        return restart_script_path is not None
+
+
+def make_release_info(version: str = "0.2.0") -> ReleaseInfo:
+    return ReleaseInfo(
+        version=version,
+        page_url="https://github.com/oguzhanproductions/subway_surfers_blind/releases/tag/v0.2.0",
+        published_at="2026-03-08T10:00:00Z",
+        title=f"v{version}",
+        notes="Important fixes.",
+        assets=(
+            ReleaseAsset(
+                name="SubwaySurfersBlind.zip",
+                download_url="https://example.com/SubwaySurfersBlind.zip",
+                content_type="application/zip",
+                size=2048,
+            ),
+        ),
+    )
 
 
 class MenuTests(unittest.TestCase):
@@ -109,8 +281,8 @@ class MenuTests(unittest.TestCase):
 
         menu.open()
         self.assertEqual(menu.index, 0)
-        self.assertEqual(speaker.messages[0][0], "Main Menu")
-        self.assertEqual(speaker.messages[1][0], "Start")
+        self.assertIn(("menuopen", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[0][0], "Main Menu. Start")
 
         self.assertIsNone(menu.handle_key(pygame.K_DOWN))
         self.assertEqual(menu.index, 1)
@@ -118,6 +290,78 @@ class MenuTests(unittest.TestCase):
 
         action = menu.handle_key(pygame.K_RETURN)
         self.assertEqual(action, "quit")
+        self.assertIn(("confirm", "ui", False), audio.played)
+
+    def test_menu_open_starts_from_left_and_moves_right_by_index(self):
+        speaker = DummySpeaker()
+        audio = DummyAudio({})
+        menu = Menu(
+            speaker,
+            audio,
+            "Main Menu",
+            [MenuItem("Start", "start"), MenuItem("Shop", "shop"), MenuItem("Options", "options")],
+        )
+
+        menu.open(start_index=0)
+        self.assertAlmostEqual(audio.play_calls[-1]["pan"], -0.8)
+
+        menu.open(start_index=2)
+        self.assertAlmostEqual(audio.play_calls[-1]["pan"], 0.8)
+
+    def test_menu_home_and_end_jump_to_bounds(self):
+        speaker = DummySpeaker()
+        audio = DummyAudio({})
+        menu = Menu(
+            speaker,
+            audio,
+            "Main Menu",
+            [MenuItem("Start", "start"), MenuItem("Shop", "shop"), MenuItem("Quit", "quit")],
+        )
+
+        menu.open(start_index=1)
+        menu.handle_key(pygame.K_END)
+        self.assertEqual(menu.index, 2)
+        self.assertEqual(speaker.messages[-1][0], "Quit")
+
+        menu.handle_key(pygame.K_HOME)
+        self.assertEqual(menu.index, 0)
+        self.assertEqual(speaker.messages[-1][0], "Start")
+
+    def test_menu_navigation_and_confirm_use_current_item_pan(self):
+        speaker = DummySpeaker()
+        audio = DummyAudio({})
+        menu = Menu(
+            speaker,
+            audio,
+            "Main Menu",
+            [MenuItem("Start", "start"), MenuItem("Shop", "shop"), MenuItem("Quit", "quit")],
+        )
+
+        menu.open(start_index=0)
+        menu.handle_key(pygame.K_DOWN)
+        self.assertAlmostEqual(audio.play_calls[-1]["pan"], 0.0)
+
+        menu.handle_key(pygame.K_DOWN)
+        self.assertAlmostEqual(audio.play_calls[-1]["pan"], 0.8)
+
+        menu.handle_key(pygame.K_RETURN)
+        self.assertAlmostEqual(audio.play_calls[-1]["pan"], 0.8)
+
+    def test_menu_sound_hrtf_setting_disables_menu_pan(self):
+        speaker = DummySpeaker()
+        audio = DummyAudio({"menu_sound_hrtf": False})
+        menu = Menu(
+            speaker,
+            audio,
+            "Main Menu",
+            [MenuItem("Start", "start"), MenuItem("Shop", "shop"), MenuItem("Quit", "quit")],
+        )
+
+        menu.open(start_index=2)
+        self.assertIsNone(audio.play_calls[-1]["pan"])
+
+        menu.handle_key(pygame.K_DOWN)
+        self.assertIsNone(audio.play_calls[-1]["pan"])
 
 
 class ConfigTests(unittest.TestCase):
@@ -131,7 +375,71 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(loaded["sfx_volume"], 0.4)
         self.assertEqual(loaded["music_volume"], config_module.DEFAULT_SETTINGS["music_volume"])
+        self.assertEqual(loaded["menu_sound_hrtf"], config_module.DEFAULT_SETTINGS["menu_sound_hrtf"])
+        self.assertEqual(loaded["sapi_speech_enabled"], config_module.DEFAULT_SETTINGS["sapi_speech_enabled"])
+        self.assertEqual(loaded["sapi_voice_id"], config_module.DEFAULT_SETTINGS["sapi_voice_id"])
+        self.assertEqual(loaded["sapi_rate"], config_module.DEFAULT_SETTINGS["sapi_rate"])
+        self.assertEqual(loaded["sapi_pitch"], config_module.DEFAULT_SETTINGS["sapi_pitch"])
+        self.assertEqual(
+            loaded["check_updates_on_startup"],
+            config_module.DEFAULT_SETTINGS["check_updates_on_startup"],
+        )
         self.assertEqual(loaded["difficulty"], "normal")
+
+    def test_default_storage_base_dir_uses_roaming_appdata_vendor_and_game_name(self):
+        with patch.dict(os.environ, {"APPDATA": r"C:\Users\Test\AppData\Roaming"}, clear=False):
+            storage_path = config_module._default_storage_base_dir()
+
+        self.assertEqual(
+            storage_path,
+            Path(r"C:\Users\Test\AppData\Roaming") / "Vireon Interactive" / "Subway Surfers Blind Edition",
+        )
+
+    def test_resource_path_prefers_external_resource_directory(self):
+        original_resource_base_dir = config_module.RESOURCE_BASE_DIR
+        original_bundled_resource_base_dir = config_module.BUNDLED_RESOURCE_BASE_DIR
+        with tempfile.TemporaryDirectory() as temp_directory:
+            temp_root = Path(temp_directory)
+            external_assets = temp_root / "external" / "assets" / "sfx"
+            bundled_assets = temp_root / "bundled" / "assets" / "sfx"
+            external_assets.mkdir(parents=True, exist_ok=True)
+            bundled_assets.mkdir(parents=True, exist_ok=True)
+            (external_assets / "coin.wav").write_bytes(b"external")
+            (bundled_assets / "coin.wav").write_bytes(b"bundled")
+            config_module.RESOURCE_BASE_DIR = temp_root / "external"
+            config_module.BUNDLED_RESOURCE_BASE_DIR = temp_root / "bundled"
+
+            resolved_path = config_module.resource_path("assets", "sfx", "coin.wav")
+        config_module.RESOURCE_BASE_DIR = original_resource_base_dir
+        config_module.BUNDLED_RESOURCE_BASE_DIR = original_bundled_resource_base_dir
+
+        self.assertEqual(resolved_path, str(external_assets / "coin.wav"))
+
+    def test_load_settings_migrates_legacy_localappdata_data(self):
+        original_base_dir = config_module.BASE_DIR
+        original_resource_base_dir = config_module.RESOURCE_BASE_DIR
+        with tempfile.TemporaryDirectory() as temp_directory:
+            temp_root = Path(temp_directory)
+            roaming_base_dir = temp_root / "Roaming" / "Vireon Interactive" / "Subway Surfers Blind Edition"
+            legacy_local_root = temp_root / "Local" / "SubwaySurfersBlind"
+            legacy_data_directory = legacy_local_root / "data"
+            legacy_data_directory.mkdir(parents=True, exist_ok=True)
+            legacy_settings_path = legacy_data_directory / "settings.json"
+            legacy_settings_path.write_text(
+                json.dumps({"sfx_volume": 0.2, "bank_coins": 321}),
+                encoding="utf-8",
+            )
+            config_module.BASE_DIR = roaming_base_dir
+            config_module.RESOURCE_BASE_DIR = temp_root / "bundle"
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(temp_root / "Local")}, clear=False):
+                loaded = config_module.load_settings()
+            migrated_settings_path = roaming_base_dir / "data" / "settings.json"
+            self.assertTrue(migrated_settings_path.exists())
+        config_module.BASE_DIR = original_base_dir
+        config_module.RESOURCE_BASE_DIR = original_resource_base_dir
+
+        self.assertEqual(loaded["sfx_volume"], 0.2)
+        self.assertEqual(loaded["bank_coins"], 321)
 
 
 class BalanceTests(unittest.TestCase):
@@ -159,6 +467,100 @@ class AudioTests(unittest.TestCase):
         self.assertEqual(Audio._normalize_channel_for_key("coin", "coin"), "player_pickup")
         self.assertEqual(Audio._normalize_channel_for_key("powerup", "act"), "player_power")
 
+    def test_output_device_choices_keep_default_first_and_current_device_present(self):
+        audio = Audio.__new__(Audio)
+        audio.settings = {"audio_output_device": "Studio Monitor"}
+        with patch("subway_blind.audio.list_output_devices", return_value=["USB DAC", "Studio Monitor"]):
+            self.assertEqual(audio.output_device_choices(), [None, "USB DAC", "Studio Monitor"])
+
+    def test_cycle_output_device_wraps_back_to_system_default(self):
+        audio = Audio.__new__(Audio)
+        audio.settings = {"audio_output_device": "USB DAC"}
+        audio.apply_output_device = lambda device_name: device_name
+        with patch.object(audio, "output_device_choices", return_value=[None, "USB DAC"]):
+            requested, applied = audio.cycle_output_device()
+        self.assertIsNone(requested)
+        self.assertIsNone(applied)
+
+    def test_discover_music_catalog_uses_first_matching_slot_file(self):
+        audio = Audio.__new__(Audio)
+        with patch("subway_blind.audio.resource_path", side_effect=lambda *parts: "/".join(parts)), patch(
+            "subway_blind.audio.os.path.exists",
+            side_effect=lambda path: path in {"assets/music/menu_intro.ogg", "assets/music/theme.ogg"},
+        ):
+            catalog = audio._discover_music_catalog()
+
+        self.assertEqual(catalog["menu"], "assets/music/menu_intro.ogg")
+        self.assertEqual(catalog["gameplay"], "assets/music/theme.ogg")
+
+    def test_update_starts_pending_track_after_music_fades_out(self):
+        audio = Audio.__new__(Audio)
+        audio._mixer_ready = True
+        audio._music_transition = "fade_out"
+        audio._music_current_track = "menu"
+        audio._music_pending_track = "gameplay"
+        audio._music_fade_level = 0.05
+        audio._apply_music_volume = lambda: None
+        played_tracks: list[str] = []
+
+        def stop_music_immediately() -> None:
+            audio._music_current_track = None
+            audio._music_pending_track = None
+            audio._music_fade_level = 0.0
+            audio._music_transition = None
+
+        audio._stop_music_immediately = stop_music_immediately
+        audio._play_music_track = lambda track_key: played_tracks.append(track_key) or True
+
+        audio.update(1.0)
+
+        self.assertEqual(played_tracks, ["gameplay"])
+
+
+class UpdaterTests(unittest.TestCase):
+    def test_normalize_version_handles_semver_and_v_prefix(self):
+        self.assertEqual(normalize_version("v1.2.3"), "1.2.3")
+        self.assertEqual(normalize_version("2.0"), "2.0.0")
+
+    def test_version_key_orders_versions_correctly(self):
+        self.assertGreater(version_key("1.4.0"), version_key("1.3.9"))
+        self.assertEqual(version_key("v2.0"), (2, 0, 0))
+
+    def test_check_for_updates_returns_update_available_when_release_is_newer(self):
+        updater = GitHubReleaseUpdater(timeout_seconds=2.0)
+        release_payload = {
+            "tag_name": "v0.2.0",
+            "name": "v0.2.0",
+            "html_url": "https://github.com/oguzhanproductions/subway_surfers_blind/releases/tag/v0.2.0",
+            "published_at": "2026-03-08T10:00:00Z",
+            "body": "Notes",
+            "assets": [
+                {
+                    "name": "SubwaySurfersBlind.zip",
+                    "browser_download_url": "https://example.com/SubwaySurfersBlind.zip",
+                    "content_type": "application/zip",
+                    "size": 2048,
+                }
+            ],
+        }
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(release_payload).encode("utf-8")
+
+        with patch("subway_blind.updater.urllib.request.urlopen", return_value=FakeResponse()):
+            result = updater.check_for_updates(APP_VERSION)
+
+        self.assertTrue(result.update_available)
+        self.assertEqual(result.latest_version, "0.2.0")
+        self.assertEqual(result.release.assets[0].name, "SubwaySurfersBlind.zip")
+
 
 class SpeakerTests(unittest.TestCase):
     def test_set_speed_factor_applies_rate_to_supported_outputs(self):
@@ -185,6 +587,37 @@ class SpeakerTests(unittest.TestCase):
         rate_output = speaker._driver.outputs[0]
         self.assertIsNotNone(rate_output.rate)
         self.assertGreater(rate_output.rate, 0.0)
+
+    def test_sapi_rate_combines_manual_setting_with_speed_factor(self):
+        class FakeSapiVoice:
+            def __init__(self):
+                self.Rate = 0
+
+        speaker = Speaker(enabled=False, sapi_rate=3)
+        speaker.enabled = True
+        speaker._sapi_voice = FakeSapiVoice()
+
+        speaker.set_speed_factor(1.0)
+
+        self.assertEqual(speaker._sapi_voice.Rate, 7)
+
+    def test_sapi_speak_wraps_text_in_pitch_xml(self):
+        class FakeSapiVoice:
+            def __init__(self):
+                self.calls: list[tuple[str, int]] = []
+
+            def Speak(self, text: str, flags: int) -> None:
+                self.calls.append((text, flags))
+
+        speaker = Speaker(enabled=False, use_sapi=True, sapi_pitch=4)
+        speaker.enabled = True
+        speaker._sapi_voice = FakeSapiVoice()
+
+        speaker.speak("Ready & go", interrupt=True)
+
+        text, flags = speaker._sapi_voice.calls[-1]
+        self.assertEqual(text, '<pitch middle="+4">Ready &amp; go</pitch>')
+        self.assertTrue(flags & SAPI_SPEAK_IS_XML)
 
 
 
@@ -315,7 +748,7 @@ class SpatialAudioTests(unittest.TestCase):
 
         cue = engine.build_threat_cues(0, 20.0, [obstacle])[0]
 
-        self.assertEqual(cue.prompt, "roll soon")
+        self.assertEqual(cue.prompt, "roll now")
         self.assertLess(cue.interval, 0.5)
         self.assertGreater(cue.gain, 0.7)
 
@@ -325,7 +758,7 @@ class SpatialAudioTests(unittest.TestCase):
 
         cue = engine.build_threat_cues(0, 20.0, [obstacle])[0]
 
-        self.assertEqual(cue.prompt, "switch now")
+        self.assertEqual(cue.prompt, "turn left now")
 
     def test_prompt_shortens_at_high_speed(self):
         engine = SpatialThreatAudio()
@@ -334,6 +767,18 @@ class SpatialAudioTests(unittest.TestCase):
         cue = engine.build_threat_cues(0, 33.9, [obstacle])[0]
 
         self.assertEqual(cue.prompt, "roll")
+
+    def test_center_lane_train_prefers_clearer_escape_side(self):
+        engine = SpatialThreatAudio()
+        obstacles = [
+            Obstacle(kind="train", lane=0, z=12.0),
+            Obstacle(kind="high", lane=-1, z=6.0),
+            Obstacle(kind="low", lane=1, z=18.0),
+        ]
+
+        cue = next(cue for cue in engine.build_threat_cues(0, 20.0, obstacles) if cue.lane == 0)
+
+        self.assertEqual(cue.prompt, "turn right now")
 
     def test_off_lane_threat_does_not_speak(self):
         engine = SpatialThreatAudio()
@@ -361,6 +806,16 @@ class SpatialAudioTests(unittest.TestCase):
         self.assertGreater(pitch, 0.9)
         self.assertIsNotNone(fallback_pan)
         self.assertGreater(velocity_z, 0.0)
+
+    def test_critical_prompt_interrupts_current_screen_reader_speech(self):
+        engine = SpatialThreatAudio()
+        audio = DummyAudio({})
+        speaker = DummySpeaker()
+        obstacle = Obstacle(kind="high", lane=0, z=7.0)
+
+        engine.update(0.1, 0, 20.0, [obstacle], audio, speaker)
+
+        self.assertIn(("roll now", True), speaker.messages)
 
     def test_update_repositions_active_spatial_sources_and_stops_inactive_ones(self):
         engine = SpatialThreatAudio()
@@ -406,6 +861,21 @@ class SpawnDirectorTests(unittest.TestCase):
             director.choose_pattern(0.0)
 
         self.assertEqual(director.support_lane(), 1)
+
+    def test_candidate_patterns_expand_single_lane_templates_across_all_lanes(self):
+        director = SpawnDirector()
+
+        candidates = director.candidate_patterns(0.0)
+        single_train_variants = [pattern for pattern in candidates if pattern.name.startswith("single_train:")]
+
+        self.assertEqual({pattern.entries[0].lane for pattern in single_train_variants}, {-1, 0, 1})
+
+    def test_transformed_pattern_updates_safe_lanes_with_lane_shift(self):
+        shifted = SpawnDirector._transform_pattern(PATTERNS[0], 1, -1)
+
+        self.assertIsNotNone(shifted)
+        self.assertEqual(tuple(entry.lane for entry in shifted.entries), (-1,))
+        self.assertEqual(shifted.safe_lanes, (0, 1))
 
     def test_support_reward_pool_contains_only_expected_types(self):
         director = SpawnDirector()
@@ -460,23 +930,195 @@ class GameTests(unittest.TestCase):
     def tearDownClass(cls):
         pygame.quit()
 
-    def make_game(self):
+    def make_game(self, updater: DummyUpdater | None = None):
         settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
         settings["speech_enabled"] = False
-        game = SubwayBlindGame(self.screen, pygame.time.Clock(), settings)
+        game = SubwayBlindGame(self.screen, pygame.time.Clock(), settings, updater=updater or DummyUpdater())
         speaker = DummySpeaker()
+        speaker.apply_settings(settings)
         audio = DummyAudio(settings)
         game.speaker = speaker
         game.audio = audio
-        for menu in (game.main_menu, game.shop_menu, game.options_menu, game.pause_menu, game.loadout_menu, game.revive_menu):
+        for menu in (
+            game.main_menu,
+            game.shop_menu,
+            game.options_menu,
+            game.pause_menu,
+            game.pause_confirm_menu,
+            game.loadout_menu,
+            game.revive_menu,
+            game.learn_sounds_menu,
+            game.update_menu,
+        ):
             menu.speaker = speaker
             menu.audio = audio
+        game._sync_music_context()
         return game, speaker, audio
 
     def test_main_menu_is_english(self):
         game, _, _ = self.make_game()
-        self.assertEqual(game.main_menu.title, "Main Menu")
-        self.assertEqual([item.label for item in game.main_menu.items], ["Start Game", "Shop", "Options", "How to Play", "Exit"])
+        self.assertEqual(game.main_menu.title, f"Main Menu   Version: {APP_VERSION}")
+        self.assertEqual(
+            [item.label for item in game.main_menu.items],
+            ["Start Game", "Shop", "Options", "How to Play", "Learn Game Sounds", "Check for Updates", "Exit"],
+        )
+
+    def test_options_menu_includes_output_device_entry(self):
+        game, _, _ = self.make_game()
+        self.assertEqual(
+            [item.label for item in game.options_menu.items],
+            [
+                "SFX Volume: 90",
+                "Music Volume: 60",
+                "Check for Updates on Startup: On",
+                "Output Device: System Default",
+                "Menu Sound HRTF: On",
+                "Speech: Off",
+                "SAPI Speech: Off",
+                "SAPI Voice: Microsoft Zira Desktop - English (United States)",
+                "SAPI Rate: 0",
+                "SAPI Pitch: 0",
+                "Difficulty: Normal",
+                "Back",
+            ],
+        )
+
+    def test_shop_menu_labels_include_coin_currency(self):
+        game, _, _ = self.make_game()
+        self.assertEqual(
+            [item.label for item in game.shop_menu.items],
+            [
+                f"Buy Hoverboard   Cost: {SHOP_PRICES['hoverboard']} Coins   Owned: 3",
+                f"Open Mystery Box   Cost: {SHOP_PRICES['mystery_box']} Coins",
+                f"Buy Headstart   Cost: {SHOP_PRICES['headstart']} Coins   Owned: 2",
+                f"Buy Score Booster   Cost: {SHOP_PRICES['score_booster']} Coins   Owned: 3",
+                "Back",
+            ],
+        )
+
+    def test_game_starts_with_menu_music_request(self):
+        game, _, audio = self.make_game()
+
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertEqual(audio.music_started_tracks[-1], "menu")
+
+    def test_startup_update_check_runs_when_setting_is_enabled(self):
+        updater = DummyUpdater()
+
+        game, _, _ = self.make_game(updater=updater)
+
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertEqual(updater.check_calls, 1)
+
+    def test_startup_update_check_opens_mandatory_update_menu_for_newer_release(self):
+        updater = DummyUpdater()
+        updater.check_results = [
+            UpdateCheckResult(
+                status="update_available",
+                current_version=APP_VERSION,
+                latest_version="0.2.0",
+                release=make_release_info("0.2.0"),
+                message="Version 0.2.0 is available.",
+            )
+        ]
+
+        game, _, _ = self.make_game(updater=updater)
+
+        self.assertIs(game.active_menu, game.update_menu)
+        self.assertTrue(game.update_menu.title.startswith("Update Required"))
+
+    def test_manual_check_for_updates_opens_update_menu_when_update_exists(self):
+        updater = DummyUpdater()
+        updater.check_results = [
+            UpdateCheckResult(
+                status="no_releases",
+                current_version=APP_VERSION,
+                message="No published releases were found.",
+            ),
+            UpdateCheckResult(
+                status="update_available",
+                current_version=APP_VERSION,
+                latest_version="0.2.0",
+                release=make_release_info("0.2.0"),
+                message="Version 0.2.0 is available.",
+            ),
+        ]
+        game, _, _ = self.make_game(updater=updater)
+
+        game._handle_menu_action("check_updates")
+
+        self.assertIs(game.active_menu, game.update_menu)
+        self.assertEqual(game._update_release_notes, "Important fixes.")
+
+    def test_manual_check_for_updates_does_not_play_a_second_confirm_after_response(self):
+        updater = DummyUpdater()
+        updater.check_results = [
+            UpdateCheckResult(
+                status="no_releases",
+                current_version=APP_VERSION,
+                message="No published releases were found.",
+            ),
+            UpdateCheckResult(
+                status="up_to_date",
+                current_version=APP_VERSION,
+                latest_version=APP_VERSION,
+                release=make_release_info(APP_VERSION),
+                message="You already have the latest version.",
+            ),
+        ]
+        game, _, audio = self.make_game(updater=updater)
+        game.active_menu = game.main_menu
+        game.main_menu.index = 5
+
+        game._handle_active_menu_key(pygame.K_RETURN)
+
+        confirm_plays = [call for call in audio.played if call[0] == "confirm"]
+        self.assertEqual(len(confirm_plays), 1)
+
+    def test_mandatory_update_download_action_launches_update_and_requests_exit(self):
+        updater = DummyUpdater()
+        updater.check_results = [
+            UpdateCheckResult(
+                status="update_available",
+                current_version=APP_VERSION,
+                latest_version="0.2.0",
+                release=make_release_info("0.2.0"),
+                message="Version 0.2.0 is available.",
+            )
+        ]
+        game, _, _ = self.make_game(updater=updater)
+
+        keep_running = game._handle_menu_action("download_update")
+        if game._update_install_thread is not None:
+            game._update_install_thread.join(timeout=1.0)
+        game._update_update_install_state()
+
+        self.assertTrue(keep_running)
+        self.assertEqual(len(updater.download_calls), 1)
+        self.assertEqual(game.update_menu.items[0].action, "restart_after_update")
+
+    def test_restart_after_update_uses_restart_script_and_requests_exit(self):
+        updater = DummyUpdater()
+        updater.check_results = [
+            UpdateCheckResult(
+                status="update_available",
+                current_version=APP_VERSION,
+                latest_version="0.2.0",
+                release=make_release_info("0.2.0"),
+                message="Version 0.2.0 is available.",
+            )
+        ]
+        game, _, _ = self.make_game(updater=updater)
+        if game._update_install_thread is not None:
+            game._update_install_thread.join(timeout=1.0)
+        game._update_install_result = updater.install_result
+        game._update_restart_script_path = updater.install_result.restart_script_path
+        game.update_menu.items[0].action = "restart_after_update"
+
+        keep_running = game._handle_menu_action("restart_after_update")
+
+        self.assertFalse(keep_running)
+        self.assertEqual(updater.launch_restart_calls[-1], updater.install_result.restart_script_path)
 
     def test_start_run_uses_profile_base_speed(self):
         game, _, audio = self.make_game()
@@ -485,7 +1127,7 @@ class GameTests(unittest.TestCase):
         game.start_run()
 
         self.assertEqual(game.state.speed, SPEED_PROFILES["hard"].base_speed)
-        self.assertEqual(audio.music_started, 1)
+        self.assertEqual(audio.music_started_tracks[-1], "gameplay")
 
     def test_start_run_includes_permanent_mission_multiplier_bonus(self):
         game, _, _ = self.make_game()
@@ -495,9 +1137,28 @@ class GameTests(unittest.TestCase):
 
         self.assertEqual(game.state.multiplier, 5)
 
-    def test_cycle_volume_wraps_after_maximum(self):
-        self.assertEqual(cycle_volume(1.0), 0.0)
-        self.assertEqual(cycle_volume(0.9), 1.0)
+    def test_start_run_with_headstart_plays_intro_headstart_sounds(self):
+        game, _, audio = self.make_game()
+        game.settings["headstarts"] = 2
+        game.selected_headstarts = 1
+
+        game.start_run()
+
+        self.assertIn(("intro_shake", HEADSTART_SHAKE_CHANNEL, True), audio.played)
+        self.assertIn(("intro_spray", HEADSTART_SPRAY_CHANNEL, True), audio.played)
+        self.assertGreater(game.player.headstart, 0.0)
+
+    def test_headstart_audio_stops_when_effect_expires(self):
+        game, _, audio = self.make_game()
+        game.settings["headstarts"] = 1
+        game.selected_headstarts = 1
+
+        game.start_run()
+        game._update_game(headstart_duration_for_uses(1) + 0.1)
+
+        self.assertIn(HEADSTART_SHAKE_CHANNEL, audio.stopped)
+        self.assertIn(HEADSTART_SPRAY_CHANNEL, audio.stopped)
+        self.assertEqual(game.player.headstart, 0.0)
 
     def test_start_action_opens_run_setup_menu(self):
         game, _, _ = self.make_game()
@@ -507,9 +1168,66 @@ class GameTests(unittest.TestCase):
         self.assertIs(game.active_menu, game.loadout_menu)
         self.assertEqual(game.loadout_menu.title, "Run Setup")
 
+    def test_learn_sounds_action_opens_sound_menu(self):
+        game, _, _ = self.make_game()
+
+        game._handle_menu_action("learn_sounds")
+
+        self.assertIs(game.active_menu, game.learn_sounds_menu)
+        self.assertEqual(game.learn_sounds_menu.title, "Learn Game Sounds")
+
+    def test_enter_on_learn_sound_plays_preview_and_speaks_description(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.learn_sounds_menu
+        game.learn_sounds_menu.index = 0
+        game._refresh_learn_sound_description()
+
+        result = game._handle_active_menu_key(pygame.K_RETURN)
+
+        self.assertTrue(result)
+        self.assertIn(("coin", LEARN_SOUND_PREVIEW_CHANNEL, False), audio.played)
+        self.assertTrue(speaker.messages[-1][0].startswith("Coin Pickup."))
+        self.assertEqual(game._learn_sound_description, "Plays when you collect a coin on the track.")
+
+    def test_learn_sound_loop_preview_stops_after_timeout(self):
+        game, _, audio = self.make_game()
+        game.active_menu = game.learn_sounds_menu
+        game.learn_sounds_menu.index = next(
+            index for index, item in enumerate(game.learn_sounds_menu.items) if item.action == "learn_sound:guard_loop"
+        )
+
+        game._handle_active_menu_key(pygame.K_RETURN)
+        game._update_learn_sound_preview(LEARN_SOUND_LOOP_PREVIEW_DURATION + 0.1)
+
+        self.assertIn(( "guard_loop", LEARN_SOUND_PREVIEW_CHANNEL, True), audio.played)
+        self.assertIn(LEARN_SOUND_PREVIEW_CHANNEL, audio.stopped)
+
+    def test_learn_sounds_back_stops_preview_and_returns_to_main_menu(self):
+        game, _, audio = self.make_game()
+        game._set_active_menu(game.learn_sounds_menu)
+        game.learn_sounds_menu.index = next(
+            index for index, item in enumerate(game.learn_sounds_menu.items) if item.action == "learn_sound:magnet_loop"
+        )
+
+        game._handle_active_menu_key(pygame.K_RETURN)
+        result = game._handle_active_menu_key(pygame.K_ESCAPE)
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertIn(LEARN_SOUND_PREVIEW_CHANNEL, audio.stopped)
+
+    def test_learn_sounds_menu_contains_only_active_gameplay_sound_entries(self):
+        game, _, _ = self.make_game()
+
+        actions = [item.action for item in game.learn_sounds_menu.items]
+
+        self.assertEqual(actions[:-1], [f"learn_sound:{key}" for key in ACTIVE_GAMEPLAY_SOUND_KEYS])
+        self.assertEqual(actions[-1], "back")
+        self.assertNotIn("learn_sound:menuopen", actions)
+
     def test_headstart_adds_speed_bonus_and_consumes_inventory(self):
         game, _, _ = self.make_game()
-        game.selected_headstart = True
+        game.selected_headstarts = 1
         starting_inventory = game.settings["headstarts"]
 
         game.start_run()
@@ -517,6 +1235,28 @@ class GameTests(unittest.TestCase):
 
         self.assertEqual(game.settings["headstarts"], starting_inventory - 1)
         self.assertGreaterEqual(game.state.speed, SPEED_PROFILES["normal"].base_speed + HEADSTART_SPEED_BONUS)
+
+    def test_end_run_banks_coins_and_plays_bank_sounds(self):
+        game, _, audio = self.make_game()
+        game.start_run()
+        game.state.coins = 37
+        game.settings["bank_coins"] = 12
+
+        game.end_run(to_menu=True)
+
+        self.assertEqual(game.settings["bank_coins"], 49)
+        self.assertIn(("coin_gui", "ui", False), audio.played)
+        self.assertIn(("gui_cash", "ui2", False), audio.played)
+
+    def test_multiple_headstarts_extend_start_duration_and_consume_all_selected_charges(self):
+        game, _, _ = self.make_game()
+        game.settings["headstarts"] = 3
+        game.selected_headstarts = 3
+
+        game.start_run()
+
+        self.assertEqual(game.settings["headstarts"], 0)
+        self.assertEqual(game.player.headstart, headstart_duration_for_uses(3))
 
     def test_update_game_caps_speed_after_profile_limit(self):
         game, _, _ = self.make_game()
@@ -576,17 +1316,248 @@ class GameTests(unittest.TestCase):
 
         self.assertAlmostEqual(game.state.next_spawn, 0.3)
 
-    def test_option_action_updates_sfx_label(self):
+    def test_adjust_selected_option_changes_sfx_with_right_arrow(self):
         game, speaker, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.settings["sfx_volume"] = 1.0
+        game.options_menu.index = 0
+        game.settings["sfx_volume"] = 0.4
 
-        game._handle_menu_action("opt_sfx")
+        game._adjust_selected_option(1)
 
-        self.assertEqual(game.settings["sfx_volume"], 0.0)
-        self.assertEqual(game.options_menu.items[0].label, "SFX Volume: 0")
+        self.assertEqual(game.settings["sfx_volume"], 0.5)
+        self.assertEqual(game.options_menu.items[0].label, "SFX Volume: 50")
         self.assertEqual(audio.refreshed, 1)
-        self.assertEqual(speaker.messages[-1][0], "SFX Volume: 0")
+        self.assertEqual(speaker.messages[-1][0], "SFX Volume: 50")
+        self.assertIsNotNone(audio.play_calls[-1]["pan"])
+
+    def test_adjust_selected_option_changes_music_with_left_arrow(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 1
+        game.settings["music_volume"] = 0.6
+
+        game._adjust_selected_option(-1)
+
+        self.assertEqual(game.settings["music_volume"], 0.5)
+        self.assertEqual(game.options_menu.items[1].label, "Music Volume: 50")
+        self.assertEqual(audio.refreshed, 1)
+        self.assertEqual(speaker.messages[-1][0], "Music Volume: 50")
+
+    def test_adjust_selected_option_toggles_startup_update_checks(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 2
+        game.settings["check_updates_on_startup"] = True
+
+        game._adjust_selected_option(-1)
+
+        self.assertFalse(game.settings["check_updates_on_startup"])
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][0], "Check for Updates on Startup: Off")
+
+    def test_adjust_selected_option_cycles_output_device_in_place(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 3
+
+        game._adjust_selected_option(1)
+
+        self.assertEqual(game.settings["audio_output_device"], "External USB Headphones")
+        self.assertEqual(game.options_menu.items[3].label, "Output Device: External USB Headphones")
+        self.assertEqual(speaker.messages[-1][0], "Output device set to External USB Headphones.")
+
+    def test_enter_does_nothing_in_options_menu(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 3
+
+        result = game._handle_active_menu_key(pygame.K_RETURN)
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.options_menu)
+        self.assertEqual(game.settings["audio_output_device"], "")
+        self.assertEqual(audio.played, [])
+        self.assertEqual(speaker.messages, [])
+
+    def test_adjust_selected_option_on_back_only_plays_edge_feedback(self):
+        game, _, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 11
+
+        game._adjust_selected_option(1)
+
+        self.assertEqual(audio.played, [])
+        self.assertIs(game.active_menu, game.options_menu)
+
+    def test_enter_on_back_returns_to_main_menu_from_options(self):
+        game, _, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 11
+
+        result = game._handle_active_menu_key(pygame.K_RETURN)
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertEqual(game.main_menu.index, 0)
+        self.assertIn(("menuclose", "ui", False), audio.played)
+
+    def test_adjust_selected_option_toggles_menu_sound_hrtf(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 4
+        game.settings["menu_sound_hrtf"] = True
+
+        game._adjust_selected_option(-1)
+
+        self.assertFalse(game.settings["menu_sound_hrtf"])
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][0], "Menu Sound HRTF: Off")
+
+    def test_adjust_selected_option_sets_speech_state_from_direction(self):
+        game, speaker, _ = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 5
+        game.settings["speech_enabled"] = True
+        game.speaker.enabled = True
+
+        game._adjust_selected_option(-1)
+
+        self.assertFalse(game.settings["speech_enabled"])
+        self.assertFalse(game.speaker.enabled)
+        self.assertEqual(speaker.messages[-1][0], "Speech: Off")
+
+    def test_adjust_selected_option_toggles_sapi_speech(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 6
+        game.settings["speech_enabled"] = True
+        game.settings["sapi_speech_enabled"] = False
+
+        game._adjust_selected_option(1)
+
+        self.assertTrue(game.settings["sapi_speech_enabled"])
+        self.assertTrue(speaker.use_sapi)
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][0], "SAPI Speech: On")
+
+    def test_adjust_selected_option_cycles_sapi_voice(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 7
+
+        game._adjust_selected_option(1)
+
+        self.assertEqual(game.settings["sapi_voice_id"], "voice-david")
+        self.assertEqual(game.options_menu.items[7].label, "SAPI Voice: Microsoft David Desktop - English (United States)")
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][0], "SAPI Voice: Microsoft David Desktop - English (United States)")
+
+    def test_adjust_selected_option_changes_sapi_rate(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 8
+        game.settings["sapi_rate"] = 0
+
+        game._adjust_selected_option(1)
+
+        self.assertEqual(game.settings["sapi_rate"], 1)
+        self.assertEqual(speaker.sapi_rate, 1)
+        self.assertEqual(game.options_menu.items[8].label, "SAPI Rate: 1")
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][0], "SAPI Rate: 1")
+
+    def test_adjust_selected_option_changes_sapi_pitch(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 9
+        game.settings["sapi_pitch"] = 0
+
+        game._adjust_selected_option(-1)
+
+        self.assertEqual(game.settings["sapi_pitch"], -1)
+        self.assertEqual(speaker.sapi_pitch, -1)
+        self.assertEqual(game.options_menu.items[9].label, "SAPI Pitch: -1")
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][0], "SAPI Pitch: -1")
+
+    def test_adjust_selected_option_cycles_difficulty_backward(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 10
+        game.settings["difficulty"] = "normal"
+
+        game._adjust_selected_option(-1)
+
+        self.assertEqual(game.settings["difficulty"], "easy")
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][0], "Difficulty: Easy")
+
+    def test_menu_repeat_moves_quickly_after_hold_delay(self):
+        game, speaker, _ = self.make_game()
+        game.active_menu = game.main_menu
+        game.main_menu.index = 0
+
+        game._prime_menu_repeat(pygame.K_DOWN)
+        game._update_menu_repeat(MENU_REPEAT_INITIAL_DELAY + (MENU_REPEAT_INTERVAL * 2.1))
+
+        self.assertEqual(game.main_menu.index, 3)
+        self.assertEqual(speaker.messages[-1][0], "How to Play")
+
+    def test_menu_repeat_adjusts_option_values_while_holding_horizontal_arrow(self):
+        game, speaker, _ = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 0
+        game.settings["sfx_volume"] = 0.4
+
+        game._prime_menu_repeat(pygame.K_RIGHT)
+        game._update_menu_repeat(MENU_REPEAT_INITIAL_DELAY + MENU_REPEAT_INTERVAL)
+
+        self.assertEqual(game.settings["sfx_volume"], 0.6)
+        self.assertEqual(game.options_menu.items[0].label, "SFX Volume: 60")
+        self.assertEqual(speaker.messages[-1][0], "SFX Volume: 60")
+
+    def test_pause_menu_close_resumes_run(self):
+        game, speaker, audio = self.make_game()
+        game.state.paused = True
+        game.active_menu = game.pause_menu
+
+        game._handle_menu_action("close")
+
+        self.assertFalse(game.state.paused)
+        self.assertIsNone(game.active_menu)
+        self.assertIn(("menuclose", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][0], "Resume")
+
+    def test_pause_menu_return_to_main_requests_confirmation(self):
+        game, _, _ = self.make_game()
+        game.state.paused = True
+        game.active_menu = game.pause_menu
+
+        game._handle_menu_action("to_main")
+
+        self.assertIs(game.active_menu, game.pause_confirm_menu)
+        self.assertEqual(game.pause_confirm_menu.title, "Return to Main Menu?")
+
+    def test_pause_confirmation_no_returns_to_pause_menu(self):
+        game, _, _ = self.make_game()
+        game.state.paused = True
+        game.active_menu = game.pause_confirm_menu
+
+        game._handle_menu_action("cancel_to_main")
+
+        self.assertIs(game.active_menu, game.pause_menu)
+        self.assertEqual(game.pause_menu.index, 1)
+
+    def test_pause_confirmation_yes_returns_to_main_menu(self):
+        game, _, audio = self.make_game()
+        game.state.running = True
+        game.state.paused = True
+        game.active_menu = game.pause_confirm_menu
+
+        game._handle_menu_action("confirm_to_main")
+
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertEqual(audio.music_started_tracks[-1], "menu")
 
     def test_shop_purchase_spends_bank_coins_and_grants_hoverboard(self):
         game, speaker, _ = self.make_game()
@@ -600,6 +1571,16 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.settings["hoverboards"], 1)
         self.assertIn(("Hoverboard purchased.", True), speaker.messages)
 
+    def test_shop_mystery_box_can_grant_multiple_hoverboards(self):
+        game, speaker, _ = self.make_game()
+        game.settings["hoverboards"] = 0
+
+        with patch("subway_blind.game.shop_box_reward_amount", return_value=3):
+            game._grant_shop_box_reward("hover")
+
+        self.assertEqual(game.settings["hoverboards"], 3)
+        self.assertIn(("Mystery box: 3 hoverboards.", True), speaker.messages)
+
     def test_hoverboard_absorbs_hit(self):
         game, speaker, _ = self.make_game()
         game.player.hover_active = 5.0
@@ -610,6 +1591,18 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.player.stumbles, 0)
         self.assertEqual(speaker.messages[-1][0], "Hoverboard destroyed.")
 
+    def test_hoverboard_uses_original_duration_and_pauses_during_jetpack(self):
+        game, _, _ = self.make_game()
+        game.player.hoverboards = 1
+
+        game._try_hoverboard()
+        self.assertEqual(game.player.hover_active, HOVERBOARD_DURATION)
+
+        game.player.jetpack = 4.0
+        game._tick_powerups(1.0)
+
+        self.assertEqual(game.player.hover_active, HOVERBOARD_DURATION)
+
     def test_bush_hit_uses_bush_stumble_sound(self):
         game, speaker, audio = self.make_game()
 
@@ -617,6 +1610,24 @@ class GameTests(unittest.TestCase):
 
         self.assertIn(("stumble_bush", "act", False), audio.played)
         self.assertEqual(speaker.messages[-1][0], "You crashed. One chance left.")
+
+    def test_first_stumble_starts_guard_loop_for_recovery_window(self):
+        game, _, audio = self.make_game()
+        game.state.running = True
+        game._on_hit()
+
+        game._tick_powerups(0.1)
+
+        self.assertIn(("guard_loop", "loop_guard", True), audio.played)
+
+    def test_guard_loop_stops_after_recovery_window_ends(self):
+        game, _, audio = self.make_game()
+        game.state.running = True
+        game._on_hit()
+
+        game._tick_powerups(1.5)
+
+        self.assertIn("loop_guard", audio.stopped)
 
     def test_near_miss_triggers_swish_sound(self):
         game, _, audio = self.make_game()
@@ -640,7 +1651,7 @@ class GameTests(unittest.TestCase):
         game._on_hit()
 
         self.assertIs(game.active_menu, game.main_menu)
-        self.assertEqual(audio.music_stopped, 1)
+        self.assertEqual(audio.music_started_tracks[-1], "menu")
         self.assertEqual(game.settings["bank_coins"], 8)
         self.assertIn(("Run over. Score 120. Coins 8.", True), speaker.messages)
 
@@ -680,6 +1691,70 @@ class GameTests(unittest.TestCase):
             game._collect_box()
 
         self.assertEqual(game.settings["keys"], original_keys + 1)
+
+    def test_collect_multiplier_pickup_uses_existing_powerup_audio(self):
+        game, speaker, audio = self.make_game()
+
+        game._collect_multiplier_pickup()
+
+        self.assertGreater(game.player.mult2x, 0.0)
+        self.assertIn(("powerup", "act", False), audio.played)
+        self.assertIn(("2x multiplier.", False), speaker.messages)
+
+    def test_collect_power_starts_magnet_loop_when_reward_is_magnet(self):
+        game, speaker, audio = self.make_game()
+
+        game._apply_power_reward("magnet", from_headstart=False)
+
+        self.assertGreater(game.player.magnet, 0.0)
+        self.assertIn(("magnet_loop", "loop_magnet", True), audio.played)
+        self.assertIn(("Magnet.", False), speaker.messages)
+
+    def test_collect_power_starts_jetpack_loop_when_reward_is_jetpack(self):
+        game, speaker, audio = self.make_game()
+
+        game._apply_power_reward("jetpack", from_headstart=False)
+
+        self.assertGreater(game.player.jetpack, 0.0)
+        self.assertEqual(game.player.y, 2.0)
+        self.assertIn(("jetpack_loop", "loop_jetpack", True), audio.played)
+        self.assertIn(("Jetpack.", False), speaker.messages)
+
+    def test_collect_super_mysterizer_uses_existing_mystery_audio(self):
+        game, speaker, audio = self.make_game()
+        original_keys = game.settings["keys"]
+
+        with patch("subway_blind.game.pick_super_mystery_box_reward", return_value="keys"), patch(
+            "subway_blind.game.random.randint",
+            return_value=2,
+        ):
+            game._collect_super_mysterizer()
+
+        self.assertEqual(game.settings["keys"], original_keys + 2)
+        self.assertIn(("mystery_box", "ui", False), audio.played)
+        self.assertIn(("mystery_combo", "ui2", False), audio.played)
+        self.assertTrue(any("Super Mysterizer" in message for message, _ in speaker.messages))
+
+    def test_collect_pogo_stick_launches_player_with_existing_sounds(self):
+        game, speaker, audio = self.make_game()
+
+        game._collect_pogo_stick()
+
+        self.assertGreater(game.player.pogo_active, 0.0)
+        self.assertGreater(game.player.vy, 0.0)
+        self.assertIn(("powerup", "act", False), audio.played)
+        self.assertIn(("sneakers_jump", "act", False), audio.played)
+        self.assertIn(("Pogo stick.", False), speaker.messages)
+
+    def test_pogo_bounce_avoids_high_obstacle_collision(self):
+        game, _, _ = self.make_game()
+        game.player.pogo_active = 2.0
+        game.player.y = 1.2
+        game.obstacles = [Obstacle(kind="high", lane=0, z=1.0)]
+
+        game._handle_obstacles()
+
+        self.assertEqual(game.player.stumbles, 0)
 
     def test_collect_word_letter_completes_word_hunt_and_awards_bank_coins(self):
         game, speaker, _ = self.make_game()

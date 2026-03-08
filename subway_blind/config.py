@@ -2,15 +2,41 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from pathlib import Path
+import shutil
+import sys
 from typing import Any
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+from subway_blind.version import APP_NAME
+
+BUNDLED_RESOURCE_BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+RESOURCE_BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
+STORAGE_VENDOR_NAME = "Vireon Interactive"
+LEGACY_STORAGE_DIR_NAME = "SubwaySurfersBlind"
+
+
+def _roaming_appdata_dir() -> Path:
+    return Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+
+
+def _default_storage_base_dir() -> Path:
+    return _roaming_appdata_dir() / STORAGE_VENDOR_NAME / APP_NAME
+
+
+BASE_DIR = _default_storage_base_dir()
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "sfx_volume": 0.9,
     "music_volume": 0.6,
+    "audio_output_device": "",
+    "menu_sound_hrtf": True,
     "speech_enabled": True,
+    "sapi_speech_enabled": False,
+    "sapi_voice_id": "",
+    "sapi_rate": 0,
+    "sapi_pitch": 0,
+    "check_updates_on_startup": True,
     "difficulty": "normal",
     "announce_lane": True,
     "announce_coins_every": 10,
@@ -40,11 +66,64 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
 
 def resource_path(*parts: str) -> str:
-    return str(BASE_DIR.joinpath(*parts))
+    external_candidate = RESOURCE_BASE_DIR.joinpath(*parts)
+    if external_candidate.exists():
+        return str(external_candidate)
+    return str(BUNDLED_RESOURCE_BASE_DIR.joinpath(*parts))
+
+
+def _data_directory() -> Path:
+    return BASE_DIR / "data"
+
+
+def _settings_path() -> Path:
+    return _data_directory() / "settings.json"
+
+
+def _legacy_storage_base_dirs() -> list[Path]:
+    candidates = [
+        Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / LEGACY_STORAGE_DIR_NAME,
+        RESOURCE_BASE_DIR,
+        BUNDLED_RESOURCE_BASE_DIR,
+    ]
+    legacy_dirs: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            resolved = candidate
+        if resolved == BASE_DIR or resolved in seen:
+            continue
+        seen.add(resolved)
+        legacy_dirs.append(candidate)
+    return legacy_dirs
+
+
+def ensure_storage_layout() -> None:
+    data_directory = _data_directory()
+    settings_path = _settings_path()
+    if settings_path.exists():
+        data_directory.mkdir(parents=True, exist_ok=True)
+        return
+    for legacy_root in _legacy_storage_base_dirs():
+        legacy_data_directory = legacy_root / "data"
+        legacy_settings_path = legacy_data_directory / "settings.json"
+        if not legacy_settings_path.exists():
+            continue
+        data_directory.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copytree(legacy_data_directory, data_directory, dirs_exist_ok=True)
+        except Exception:
+            break
+        else:
+            return
+    data_directory.mkdir(parents=True, exist_ok=True)
 
 
 def load_settings() -> dict[str, Any]:
-    settings_path = BASE_DIR / "data" / "settings.json"
+    ensure_storage_layout()
+    settings_path = _settings_path()
     if not settings_path.exists():
         return copy.deepcopy(DEFAULT_SETTINGS)
     try:
@@ -59,7 +138,8 @@ def load_settings() -> dict[str, Any]:
 
 
 def save_settings(settings: dict[str, Any]) -> None:
-    data_directory = BASE_DIR / "data"
+    ensure_storage_layout()
+    data_directory = _data_directory()
     data_directory.mkdir(parents=True, exist_ok=True)
     settings_path = data_directory / "settings.json"
     try:

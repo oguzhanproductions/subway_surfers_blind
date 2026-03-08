@@ -6,11 +6,11 @@ import os
 import wave
 from pathlib import Path
 
-from subway_blind.config import resource_path
+from subway_blind.config import BASE_DIR, resource_path
 
 
 class OpenALHrtfEngine:
-    def __init__(self, sfx_volume: float):
+    def __init__(self, sfx_volume: float, output_device_name: str | None = None):
         self.available = False
         self._al = None
         self._device = None
@@ -20,6 +20,7 @@ class OpenALHrtfEngine:
         self._sources: dict[str, object] = {}
         self._channel_keys: dict[str, str] = {}
         self._listener_gain = max(0.0, min(1.0, float(sfx_volume)))
+        self._output_device_name = str(output_device_name or "").strip()
         try:
             import pyopenalsoft as openal
         except Exception:
@@ -28,7 +29,7 @@ class OpenALHrtfEngine:
         try:
             self._configure_openal_soft()
             self._al.init()
-            self._device = self._al.Device()
+            self._device = self._al.Device(self._output_device_name)
             self._context = self._al.Context(self._device)
             self._al.Listener.reset()
             self._al.Listener.set_position(0.0, 0.0, 0.0)
@@ -39,7 +40,7 @@ class OpenALHrtfEngine:
             self.available = False
 
     def _configure_openal_soft(self) -> None:
-        config_root = Path(resource_path("data", "openal"))
+        config_root = BASE_DIR / "data" / "openal"
         config_root.mkdir(parents=True, exist_ok=True)
         config_path = config_root / "alsoft.ini"
         config_path.write_text(
@@ -50,7 +51,7 @@ class OpenALHrtfEngine:
             "slots = 16\n",
             encoding="utf-8",
         )
-        os.environ["APPDATA"] = str(config_root)
+        os.environ["ALSOFT_CONF"] = str(config_path)
 
     def register_sound(self, key: str, path: str) -> None:
         if not self.available or self._al is None:
@@ -80,7 +81,7 @@ class OpenALHrtfEngine:
         if channels == 1:
             return path
 
-        cache_directory = Path(resource_path("data", "openal_cache"))
+        cache_directory = BASE_DIR / "data" / "openal_cache"
         cache_directory.mkdir(parents=True, exist_ok=True)
         fingerprint = hashlib.sha1(
             f"{source.resolve()}::{source.stat().st_mtime_ns}::{source.stat().st_size}".encode("utf-8")
@@ -203,3 +204,21 @@ class OpenALHrtfEngine:
             return
         self._stop_source(source)
         self._channel_keys.pop(channel, None)
+
+    def shutdown(self) -> None:
+        for source in self._sources.values():
+            self._stop_source(source)
+        self._sources.clear()
+        self._channel_keys.clear()
+        self._buffers.clear()
+        self._buffer_paths.clear()
+        self._context = None
+        self._device = None
+        if self._al is None:
+            return
+        quit_openal = getattr(self._al, "quit", None)
+        if callable(quit_openal):
+            try:
+                quit_openal()
+            except Exception:
+                return

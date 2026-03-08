@@ -1,21 +1,36 @@
 from __future__ import annotations
 
+import textwrap
+from dataclasses import dataclass
 import random
+import threading
 from typing import Optional
 
 import pygame
 
-from subway_blind.audio import Audio, Speaker
+from subway_blind.audio import (
+    Audio,
+    Speaker,
+    SAPI_RATE_MAX,
+    SAPI_RATE_MIN,
+    SAPI_PITCH_MAX,
+    SAPI_PITCH_MIN,
+    SAPI_VOICE_UNAVAILABLE_LABEL,
+    SYSTEM_DEFAULT_OUTPUT_LABEL,
+)
 from subway_blind.balance import SpeedProfile, speed_profile_for_difficulty
 from subway_blind.config import save_settings
 from subway_blind.features import (
-    HEADSTART_DURATION,
+    clamp_headstart_uses,
     HEADSTART_SPEED_BONUS,
+    headstart_duration_for_uses,
+    HOVERBOARD_DURATION,
     pick_headstart_end_reward,
     pick_mystery_box_reward,
     pick_shop_mystery_box_reward,
     revive_cost,
     SHOP_PRICES,
+    shop_box_reward_amount,
     score_booster_bonus,
 )
 from subway_blind.menu import Menu, MenuItem
@@ -37,6 +52,8 @@ from subway_blind.progression import (
 )
 from subway_blind.spawn import RoutePattern, SpawnDirector
 from subway_blind.spatial_audio import SpatialThreatAudio
+from subway_blind.updater import GitHubReleaseUpdater, UpdateCheckResult, UpdateInstallProgress, UpdateInstallResult
+from subway_blind.version import APP_VERSION
 
 DIFFICULTY_LABELS = {
     "easy": "Easy",
@@ -44,21 +61,142 @@ DIFFICULTY_LABELS = {
     "hard": "Hard",
 }
 
+GUARD_LOOP_DURATION = 1.35
+MULTIPLIER_PICKUP_DURATION = 12.0
+POGO_STICK_DURATION = 5.5
+MENU_REPEAT_INITIAL_DELAY = 0.34
+MENU_REPEAT_INTERVAL = 0.075
+LEARN_SOUND_PREVIEW_CHANNEL = "learn_sound_preview"
+LEARN_SOUND_LOOP_PREVIEW_DURATION = 2.6
+HEADSTART_SHAKE_CHANNEL = "intro_headstart_shake"
+HEADSTART_SPRAY_CHANNEL = "intro_headstart_spray"
 
-def cycle_volume(value: float) -> float:
-    rounded = round(float(value), 1)
-    if rounded >= 1.0:
-        return 0.0
-    return round(rounded + 0.1, 1)
+
+@dataclass(frozen=True)
+class LearnSoundEntry:
+    key: str
+    label: str
+    description: str
+    loop: bool = False
+    gain: float = 1.0
+
+
+LEARN_SOUND_DETAILS: dict[str, LearnSoundEntry] = {
+    "coin": LearnSoundEntry("coin", "Coin Pickup", "Plays when you collect a coin on the track."),
+    "coin_gui": LearnSoundEntry("coin_gui", "Coin Bank", "Plays when coins are added to your saved total."),
+    "jump": LearnSoundEntry("jump", "Jump", "Plays when you perform a normal jump."),
+    "roll": LearnSoundEntry("roll", "Roll", "Plays when you duck under a high obstacle."),
+    "dodge": LearnSoundEntry("dodge", "Lane Change", "Plays when you move left or right between lanes."),
+    "landing": LearnSoundEntry("landing", "Landing", "Plays when you land after a normal jump."),
+    "stumble": LearnSoundEntry("stumble", "Stumble", "Plays after a standard hit that still leaves one chance."),
+    "stumble_side": LearnSoundEntry("stumble_side", "Side Stumble", "Plays after a side impact warning stumble."),
+    "stumble_bush": LearnSoundEntry("stumble_bush", "Bush Stumble", "Plays when you hit a bush and survive the impact."),
+    "crash": LearnSoundEntry("crash", "Crash", "Plays when a hoverboard absorbs a crash."),
+    "death": LearnSoundEntry("death", "Death", "Main run over sound after the final hit."),
+    "death_bodyfall": LearnSoundEntry("death_bodyfall", "Body Fall", "Body impact layer used during a full run loss."),
+    "death_hitcam": LearnSoundEntry("death_hitcam", "Hit Camera", "Heavy hit layer used during the run over sequence."),
+    "guard_catch": LearnSoundEntry("guard_catch", "Guard Catch", "Plays when the guard reaches you after a serious collision."),
+    "guard_loop": LearnSoundEntry("guard_loop", "Guard Loop", "Short guard pressure loop after the first stumble.", loop=True, gain=0.72),
+    "powerup": LearnSoundEntry("powerup", "Power Up", "Plays when you collect or activate a positive power item."),
+    "powerdown": LearnSoundEntry("powerdown", "Power Down", "Plays when a temporary power effect expires."),
+    "magnet_loop": LearnSoundEntry("magnet_loop", "Magnet Loop", "Looping sound while the coin magnet is active.", loop=True, gain=0.88),
+    "jetpack_loop": LearnSoundEntry("jetpack_loop", "Jetpack Loop", "Looping sound while the jetpack is active.", loop=True, gain=0.88),
+    "mystery_box": LearnSoundEntry("mystery_box", "Mystery Box", "Plays when a mystery box is collected or opened."),
+    "mission_reward": LearnSoundEntry("mission_reward", "Mission Reward", "Reward chime for milestones, missions, and progress."),
+    "train_pass": LearnSoundEntry("train_pass", "Train Pass", "Warning fly-by for a train moving through the scene."),
+    "intro_start": LearnSoundEntry("intro_start", "Run Start", "Opening sound when a new run begins."),
+    "intro_shake": LearnSoundEntry("intro_shake", "Headstart Shake", "Headstart launch shake effect."),
+    "intro_spray": LearnSoundEntry("intro_spray", "Headstart Spray", "Headstart spray layer during the run intro."),
+    "gui_cash": LearnSoundEntry("gui_cash", "Cash Reward", "Reward sound for large coin payouts."),
+    "gui_close": LearnSoundEntry("gui_close", "Close Burst", "Sharp UI burst used before the revive choice."),
+    "gui_tap": LearnSoundEntry("gui_tap", "Shop Tap", "Plays when a shop purchase is accepted."),
+    "unlock": LearnSoundEntry("unlock", "Unlock", "Reward unlock sound for items and keys."),
+    "left_foot": LearnSoundEntry("left_foot", "Left Footstep", "Regular left foot running step."),
+    "right_foot": LearnSoundEntry("right_foot", "Right Footstep", "Regular right foot running step."),
+    "sneakers_jump": LearnSoundEntry("sneakers_jump", "Super Sneakers Jump", "High jump launch used by super sneakers and pogo."),
+    "sneakers_left": LearnSoundEntry("sneakers_left", "Super Sneakers Left Step", "Enhanced left footstep while super sneakers are active."),
+    "sneakers_right": LearnSoundEntry("sneakers_right", "Super Sneakers Right Step", "Enhanced right footstep while super sneakers are active."),
+    "slide_letters": LearnSoundEntry("slide_letters", "Letter Slide", "Plays when word hunt letters or intro tiles slide in."),
+    "mystery_combo": LearnSoundEntry("mystery_combo", "Mystery Combo", "Bonus layer used for special mystery rewards."),
+    "kick": LearnSoundEntry("kick", "Kick", "Impact layer used in the run over sequence."),
+    "land_h": LearnSoundEntry("land_h", "Heavy Landing", "Heavy landing used after strong jumps or headstart endings."),
+    "swish_short": LearnSoundEntry("swish_short", "Short Near Miss", "Short near-miss pass sound for a very quick close call."),
+    "swish_mid": LearnSoundEntry("swish_mid", "Medium Near Miss", "Medium near-miss pass sound for a close call."),
+    "swish_long": LearnSoundEntry("swish_long", "Long Near Miss", "Long near-miss pass sound for a sweeping close call."),
+    "warning": LearnSoundEntry("warning", "Warning Pulse", "Warning pulse for hazards and support items ahead."),
+}
+ACTIVE_GAMEPLAY_SOUND_KEYS: tuple[str, ...] = (
+    "coin",
+    "coin_gui",
+    "jump",
+    "roll",
+    "dodge",
+    "landing",
+    "stumble",
+    "stumble_side",
+    "stumble_bush",
+    "crash",
+    "death",
+    "death_bodyfall",
+    "death_hitcam",
+    "guard_catch",
+    "guard_loop",
+    "powerup",
+    "powerdown",
+    "magnet_loop",
+    "jetpack_loop",
+    "mystery_box",
+    "mission_reward",
+    "train_pass",
+    "intro_start",
+    "intro_shake",
+    "intro_spray",
+    "gui_cash",
+    "gui_close",
+    "gui_tap",
+    "unlock",
+    "left_foot",
+    "right_foot",
+    "sneakers_jump",
+    "sneakers_left",
+    "sneakers_right",
+    "slide_letters",
+    "mystery_combo",
+    "kick",
+    "land_h",
+    "swish_short",
+    "swish_mid",
+    "swish_long",
+    "warning",
+)
+LEARN_SOUND_LIBRARY: tuple[LearnSoundEntry, ...] = tuple(
+    LEARN_SOUND_DETAILS[key] for key in ACTIVE_GAMEPLAY_SOUND_KEYS
+)
+
+
+def step_volume(value: float, direction: int) -> float:
+    stepped = round(float(value) + (0.1 * direction), 1)
+    return max(0.0, min(1.0, stepped))
+
+
+def step_int(value: int, direction: int, minimum: int, maximum: int) -> int:
+    return max(minimum, min(maximum, int(value) + direction))
 
 
 class SubwayBlindGame:
-    def __init__(self, screen: pygame.Surface, clock: pygame.time.Clock, settings: dict):
+    def __init__(
+        self,
+        screen: pygame.Surface,
+        clock: pygame.time.Clock,
+        settings: dict,
+        updater: GitHubReleaseUpdater | None = None,
+    ):
         self.screen = screen
         self.clock = clock
         self.settings = settings
-        self.speaker = Speaker(enabled=bool(settings["speech_enabled"]))
+        self.speaker = Speaker.from_settings(settings)
         self.audio = Audio(settings)
+        self.updater = updater or GitHubReleaseUpdater()
         self.font = pygame.font.SysFont("segoeui", 22)
         self.big = pygame.font.SysFont("segoeui", 38, bold=True)
         ensure_progression_state(self.settings)
@@ -69,12 +207,33 @@ class SubwayBlindGame:
         self.speed_profile: SpeedProfile = speed_profile_for_difficulty(str(self.settings["difficulty"]))
         self.spatial_audio = SpatialThreatAudio()
         self.spawn_director = SpawnDirector()
-        self.selected_headstart = False
+        self.selected_headstarts = 0
         self.selected_score_boosters = 0
         self._footstep_timer = 0.0
         self._left_foot_next = True
         self._run_rewards_committed = False
         self._near_miss_signatures: set[tuple[str, int]] = set()
+        self._guard_loop_timer = 0.0
+        self._menu_repeat_key: int | None = None
+        self._menu_repeat_delay_remaining = 0.0
+        self._learn_sound_entries_by_action = {
+            f"learn_sound:{entry.key}": entry for entry in LEARN_SOUND_LIBRARY
+        }
+        self._learn_sound_description = "Press Enter to play the selected game sound."
+        self._learn_sound_preview_timer = 0.0
+        self._exit_requested = False
+        self._latest_update_result: UpdateCheckResult | None = None
+        self._update_status_message = "Check GitHub Releases for a newer version."
+        self._update_release_notes = "No release notes were provided."
+        self._update_progress_percent = 0.0
+        self._update_progress_message = ""
+        self._update_progress_stage = "idle"
+        self._update_progress_announced_bucket = -1
+        self._update_install_thread: threading.Thread | None = None
+        self._update_install_result: UpdateInstallResult | None = None
+        self._update_restart_script_path: str | None = None
+        self._update_install_error = ""
+        self._update_ready_announced = False
 
         self.pause_menu = Menu(
             self.speaker,
@@ -83,6 +242,15 @@ class SubwayBlindGame:
             [
                 MenuItem("Resume", "resume"),
                 MenuItem("Return to Main Menu", "to_main"),
+            ],
+        )
+        self.pause_confirm_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Return to Main Menu?",
+            [
+                MenuItem("Yes", "confirm_to_main"),
+                MenuItem("No", "cancel_to_main"),
             ],
         )
         self.revive_menu = Menu(
@@ -97,12 +265,14 @@ class SubwayBlindGame:
         self.main_menu = Menu(
             self.speaker,
             self.audio,
-            "Main Menu",
+            self._main_menu_title(),
             [
                 MenuItem("Start Game", "start"),
                 MenuItem("Shop", "shop"),
                 MenuItem("Options", "options"),
                 MenuItem("How to Play", "howto"),
+                MenuItem("Learn Game Sounds", "learn_sounds"),
+                MenuItem("Check for Updates", "check_updates"),
                 MenuItem("Exit", "quit"),
             ],
         )
@@ -124,7 +294,14 @@ class SubwayBlindGame:
             [
                 MenuItem(self._sfx_option_label(), "opt_sfx"),
                 MenuItem(self._music_option_label(), "opt_music"),
+                MenuItem(self._updates_option_label(), "opt_updates"),
+                MenuItem(self._audio_output_option_label(), "opt_output"),
+                MenuItem(self._menu_sound_hrtf_option_label(), "opt_menu_hrtf"),
                 MenuItem(self._speech_option_label(), "opt_speech"),
+                MenuItem(self._sapi_speech_option_label(), "opt_sapi"),
+                MenuItem(self._sapi_voice_option_label(), "opt_sapi_voice"),
+                MenuItem(self._sapi_rate_option_label(), "opt_sapi_rate"),
+                MenuItem(self._sapi_pitch_option_label(), "opt_sapi_pitch"),
                 MenuItem(self._difficulty_option_label(), "opt_diff"),
                 MenuItem("Back", "back"),
             ],
@@ -141,12 +318,35 @@ class SubwayBlindGame:
                 MenuItem("Back", "back"),
             ],
         )
+        self.learn_sounds_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Learn Game Sounds",
+            [MenuItem(entry.label, f"learn_sound:{entry.key}") for entry in LEARN_SOUND_LIBRARY] + [MenuItem("Back", "back")],
+        )
+        self.update_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Update Required",
+            [
+                MenuItem("Download and Install Update", "download_update"),
+                MenuItem("Open Release Page", "open_release_page"),
+                MenuItem("Quit Game", "quit"),
+            ],
+        )
 
         self.active_menu: Optional[Menu] = self.main_menu
-        self.active_menu.open()
+        if bool(self.settings.get("check_updates_on_startup", True)):
+            self._check_for_updates(announce_result=False, automatic=True)
+        if self.active_menu == self.main_menu and not self.main_menu.opened:
+            self.active_menu.open()
+            self._sync_music_context()
 
     def _sfx_option_label(self) -> str:
         return f"SFX Volume: {int(float(self.settings['sfx_volume']) * 100)}"
+
+    def _main_menu_title(self) -> str:
+        return f"Main Menu   Version: {APP_VERSION}"
 
     def _shop_title(self) -> str:
         return f"Shop   Coins: {int(self.settings.get('bank_coins', 0))}"
@@ -154,17 +354,41 @@ class SubwayBlindGame:
     def _music_option_label(self) -> str:
         return f"Music Volume: {int(float(self.settings['music_volume']) * 100)}"
 
+    def _updates_option_label(self) -> str:
+        return (
+            f"Check for Updates on Startup: "
+            f"{'On' if self.settings['check_updates_on_startup'] else 'Off'}"
+        )
+
     def _speech_option_label(self) -> str:
         return f"Speech: {'On' if self.settings['speech_enabled'] else 'Off'}"
+
+    def _sapi_speech_option_label(self) -> str:
+        return f"SAPI Speech: {'On' if self.settings['sapi_speech_enabled'] else 'Off'}"
+
+    def _audio_output_option_label(self) -> str:
+        return f"Output Device: {self.audio.output_device_display_name()}"
+
+    def _menu_sound_hrtf_option_label(self) -> str:
+        return f"Menu Sound HRTF: {'On' if self.settings['menu_sound_hrtf'] else 'Off'}"
+
+    def _sapi_voice_option_label(self) -> str:
+        voice_name = self.speaker.current_sapi_voice_display_name()
+        return f"SAPI Voice: {voice_name}"
+
+    def _sapi_rate_option_label(self) -> str:
+        return f"SAPI Rate: {int(self.settings.get('sapi_rate', 0))}"
+
+    def _sapi_pitch_option_label(self) -> str:
+        return f"SAPI Pitch: {int(self.settings.get('sapi_pitch', 0))}"
 
     def _difficulty_option_label(self) -> str:
         difficulty = DIFFICULTY_LABELS.get(str(self.settings["difficulty"]), "Normal")
         return f"Difficulty: {difficulty}"
 
     def _headstart_option_label(self) -> str:
-        status = "On" if self.selected_headstart else "Off"
         owned = int(self.settings.get("headstarts", 0))
-        return f"Headstart: {status}   Owned: {owned}"
+        return f"Headstart: {self.selected_headstarts}   Owned: {owned}"
 
     def _score_booster_option_label(self) -> str:
         owned = int(self.settings.get("score_boosters", 0))
@@ -177,30 +401,37 @@ class SubwayBlindGame:
 
     def _shop_hoverboard_label(self) -> str:
         return (
-            f"Buy Hoverboard   Cost: {SHOP_PRICES['hoverboard']}   "
+            f"Buy Hoverboard   Cost: {SHOP_PRICES['hoverboard']} Coins   "
             f"Owned: {int(self.settings.get('hoverboards', 0))}"
         )
 
     def _shop_box_label(self) -> str:
-        return f"Open Mystery Box   Cost: {SHOP_PRICES['mystery_box']}"
+        return f"Open Mystery Box   Cost: {SHOP_PRICES['mystery_box']} Coins"
 
     def _shop_headstart_label(self) -> str:
         return (
-            f"Buy Headstart   Cost: {SHOP_PRICES['headstart']}   "
+            f"Buy Headstart   Cost: {SHOP_PRICES['headstart']} Coins   "
             f"Owned: {int(self.settings.get('headstarts', 0))}"
         )
 
     def _shop_score_booster_label(self) -> str:
         return (
-            f"Buy Score Booster   Cost: {SHOP_PRICES['score_booster']}   "
+            f"Buy Score Booster   Cost: {SHOP_PRICES['score_booster']} Coins   "
             f"Owned: {int(self.settings.get('score_boosters', 0))}"
         )
 
     def _refresh_options_menu_labels(self) -> None:
         self.options_menu.items[0].label = self._sfx_option_label()
         self.options_menu.items[1].label = self._music_option_label()
-        self.options_menu.items[2].label = self._speech_option_label()
-        self.options_menu.items[3].label = self._difficulty_option_label()
+        self.options_menu.items[2].label = self._updates_option_label()
+        self.options_menu.items[3].label = self._audio_output_option_label()
+        self.options_menu.items[4].label = self._menu_sound_hrtf_option_label()
+        self.options_menu.items[5].label = self._speech_option_label()
+        self.options_menu.items[6].label = self._sapi_speech_option_label()
+        self.options_menu.items[7].label = self._sapi_voice_option_label()
+        self.options_menu.items[8].label = self._sapi_rate_option_label()
+        self.options_menu.items[9].label = self._sapi_pitch_option_label()
+        self.options_menu.items[10].label = self._difficulty_option_label()
 
     def _refresh_loadout_menu_labels(self) -> None:
         self.loadout_menu.items[0].label = self._headstart_option_label()
@@ -215,6 +446,209 @@ class SubwayBlindGame:
         self.shop_menu.items[1].label = self._shop_box_label()
         self.shop_menu.items[2].label = self._shop_headstart_label()
         self.shop_menu.items[3].label = self._shop_score_booster_label()
+
+    def _current_learn_sound_entry(self) -> LearnSoundEntry | None:
+        if self.active_menu != self.learn_sounds_menu:
+            return None
+        if self.learn_sounds_menu.index >= len(LEARN_SOUND_LIBRARY):
+            return None
+        return LEARN_SOUND_LIBRARY[self.learn_sounds_menu.index]
+
+    def _refresh_learn_sound_description(self) -> None:
+        entry = self._current_learn_sound_entry()
+        if entry is None:
+            self._learn_sound_description = "Return to the main menu."
+            return
+        self._learn_sound_description = entry.description
+
+    def _stop_learn_sound_preview(self) -> None:
+        self._learn_sound_preview_timer = 0.0
+        self.audio.stop(LEARN_SOUND_PREVIEW_CHANNEL)
+
+    def _start_headstart_audio(self) -> None:
+        if self.player.headstart <= 0:
+            return
+        self.audio.play("intro_shake", loop=True, channel=HEADSTART_SHAKE_CHANNEL, gain=0.84)
+        self.audio.play("intro_spray", loop=True, channel=HEADSTART_SPRAY_CHANNEL, gain=0.92)
+
+    def _stop_headstart_audio(self) -> None:
+        self.audio.stop(HEADSTART_SHAKE_CHANNEL)
+        self.audio.stop(HEADSTART_SPRAY_CHANNEL)
+
+    def _play_learn_sound_preview(self, entry: LearnSoundEntry) -> None:
+        self._stop_learn_sound_preview()
+        self._learn_sound_description = entry.description
+        self.audio.play(
+            entry.key,
+            loop=entry.loop,
+            channel=LEARN_SOUND_PREVIEW_CHANNEL,
+            gain=entry.gain,
+        )
+        if entry.loop:
+            self._learn_sound_preview_timer = LEARN_SOUND_LOOP_PREVIEW_DURATION
+        self.speaker.speak(f"{entry.label}. {entry.description}", interrupt=True)
+
+    def _update_learn_sound_preview(self, delta_time: float) -> None:
+        if self._learn_sound_preview_timer <= 0:
+            return
+        self._learn_sound_preview_timer = max(0.0, self._learn_sound_preview_timer - delta_time)
+        if self._learn_sound_preview_timer <= 0:
+            self.audio.stop(LEARN_SOUND_PREVIEW_CHANNEL)
+
+    def _play_menu_feedback(self, key: str) -> None:
+        if self.active_menu is not None:
+            self.active_menu.play_feedback(key)
+            return
+        self.audio.play(key, channel="ui")
+
+    def _update_option_index(self, action: str) -> int:
+        for index, item in enumerate(self.options_menu.items):
+            if item.action == action:
+                return index
+        return 0
+
+    def _refresh_update_menu(self, result: UpdateCheckResult) -> None:
+        latest_version = result.latest_version or "Unknown"
+        self.update_menu.title = f"Update Required   {APP_VERSION} -> {latest_version}"
+        self._update_status_message = (
+            f"A newer version is available. Current version {APP_VERSION}. Latest version {latest_version}."
+        )
+        self._update_release_notes = (
+            result.release.notes.strip() if result.release is not None and result.release.notes.strip() else "No release notes were provided."
+        )
+        self._update_progress_percent = 0.0
+        self._update_progress_message = ""
+        self._update_progress_stage = "idle"
+        self._update_progress_announced_bucket = -1
+        self._update_install_thread = None
+        self._update_install_result = None
+        self._update_restart_script_path = None
+        self._update_install_error = ""
+        self._update_ready_announced = False
+        has_zip_package = bool(result.release and self.updater.has_installable_package(result.release))
+        self.update_menu.items[0].label = "Download and Install Update" if has_zip_package else "Open Release Page"
+        self.update_menu.items[0].action = "download_update" if has_zip_package else "open_release_page"
+        self.update_menu.items[1].label = "Open Release Page"
+        self.update_menu.items[1].action = "open_release_page"
+        self.update_menu.items[2].label = "Quit Game"
+        self.update_menu.items[2].action = "quit"
+
+    def _open_mandatory_update_menu(self, result: UpdateCheckResult) -> None:
+        self._latest_update_result = result
+        self._refresh_update_menu(result)
+        self._set_active_menu(self.update_menu)
+        self.speaker.speak(self._update_status_message, interrupt=True)
+
+    def _begin_update_install(self) -> None:
+        release = self._latest_update_result.release if self._latest_update_result is not None else None
+        if release is None:
+            self._play_menu_feedback("menuedge")
+            self.speaker.speak("No release information is available.", interrupt=True)
+            return
+        if self._update_install_thread is not None and self._update_install_thread.is_alive():
+            return
+
+        self._update_progress_stage = "download"
+        self._update_progress_percent = 0.0
+        self._update_progress_message = "Starting update download."
+        self._update_progress_announced_bucket = -1
+        self._update_install_result = None
+        self._update_restart_script_path = None
+        self._update_install_error = ""
+        self._update_ready_announced = False
+        self.update_menu.items[0].label = "Installing Update..."
+        self.update_menu.items[0].action = "install_busy"
+
+        def progress_callback(progress: UpdateInstallProgress) -> None:
+            self._update_progress_stage = progress.stage
+            self._update_progress_percent = max(0.0, min(100.0, float(progress.percent)))
+            self._update_progress_message = progress.message
+
+        def worker() -> None:
+            result = self.updater.download_and_install(release, progress_callback=progress_callback)
+            self._update_install_result = result
+            self._update_restart_script_path = result.restart_script_path
+            if not result.success:
+                self._update_install_error = result.message
+
+        self._update_install_thread = threading.Thread(target=worker, name="update-install", daemon=True)
+        self._update_install_thread.start()
+
+    def _update_update_install_state(self) -> None:
+        if self.active_menu != self.update_menu:
+            return
+        if self._update_progress_stage == "download":
+            bucket = int(self._update_progress_percent // 10)
+            if bucket > self._update_progress_announced_bucket and bucket < 10:
+                self._update_progress_announced_bucket = bucket
+                if bucket > 0:
+                    self.speaker.speak(f"Download {bucket * 10} percent.", interrupt=False)
+        if self._update_install_thread is None or self._update_install_thread.is_alive():
+            return
+        self._update_install_thread = None
+        result = self._update_install_result
+        if result is None:
+            return
+        self._update_status_message = result.message
+        if not result.success:
+            self.update_menu.items[0].label = "Download and Install Update"
+            self.update_menu.items[0].action = "download_update"
+            self._update_progress_stage = "error"
+            self._play_menu_feedback("menuedge")
+            self.speaker.speak(result.message, interrupt=True)
+            self._update_install_result = None
+            return
+        self.update_menu.items[0].label = "Restart Game"
+        self.update_menu.items[0].action = "restart_after_update"
+        self.update_menu.items[1].label = "Open Release Page"
+        self.update_menu.items[1].action = "open_release_page"
+        self.update_menu.items[2].label = "Quit Game"
+        self.update_menu.items[2].action = "quit"
+        self._update_progress_stage = "ready"
+        if not self._update_ready_announced:
+            self._update_ready_announced = True
+            self.speaker.speak(result.message, interrupt=True)
+
+    def _check_for_updates(self, announce_result: bool, automatic: bool = False) -> None:
+        result = self.updater.check_for_updates(APP_VERSION)
+        self._latest_update_result = result
+        if result.update_available:
+            self._open_mandatory_update_menu(result)
+            return
+        if result.release is not None:
+            self._update_status_message = (
+                f"Current version {APP_VERSION}. Latest release {result.release.version}. {result.message}"
+            )
+        else:
+            self._update_status_message = result.message
+        if announce_result:
+            self.speaker.speak(self._update_status_message, interrupt=True)
+            return
+        if automatic and result.status == "error":
+            return
+
+    def _menu_uses_gameplay_music(self, menu: Menu | None) -> bool:
+        return menu in {self.pause_menu, self.pause_confirm_menu, self.revive_menu}
+
+    def _sync_music_context(self) -> None:
+        if self._exit_requested:
+            return
+        if self.active_menu is None:
+            if self.state.running:
+                self.audio.music_start("gameplay")
+            else:
+                self.audio.music_stop()
+            return
+        if self.state.running and self._menu_uses_gameplay_music(self.active_menu):
+            self.audio.music_start("gameplay")
+            return
+        self.audio.music_start("menu")
+
+    def _request_exit(self) -> None:
+        if self._exit_requested:
+            return
+        self._exit_requested = True
+        self.audio.music_stop()
 
     def _mission_goals(self):
         return mission_goals_for_set(int(self.settings.get("mission_set", 1)))
@@ -238,12 +672,26 @@ class SubwayBlindGame:
         weights = [0.58, 0.18, 0.08]
         active_word = any(obstacle.kind == "word" and obstacle.z > 0 for obstacle in self.obstacles)
         active_token = any(obstacle.kind == "season_token" and obstacle.z > 0 for obstacle in self.obstacles)
+        active_multiplier = self.player.mult2x > 0 or any(
+            obstacle.kind == "multiplier" and obstacle.z > 0 for obstacle in self.obstacles
+        )
+        active_super_box = any(obstacle.kind == "super_box" and obstacle.z > 0 for obstacle in self.obstacles)
+        active_pogo = self.player.pogo_active > 0 or any(obstacle.kind == "pogo" and obstacle.z > 0 for obstacle in self.obstacles)
+        if not active_multiplier:
+            kinds.append("multiplier")
+            weights.append(0.09)
+        if not active_super_box:
+            kinds.append("super_box")
+            weights.append(0.06)
+        if not active_pogo:
+            kinds.append("pogo")
+            weights.append(0.09)
         if self._remaining_word_letters() and not active_word:
             kinds.append("word")
-            weights.append(0.10)
+            weights.append(0.08)
         if next_season_reward_threshold(self.settings) is not None and not active_token:
             kinds.append("season_token")
-            weights.append(0.06)
+            weights.append(0.05)
         return random.choices(kinds, weights=weights, k=1)[0]
 
     def _complete_mission_set(self) -> None:
@@ -420,30 +868,41 @@ class SubwayBlindGame:
 
     def _grant_shop_box_reward(self, reward: str) -> None:
         if reward == "coins":
-            gain = random.randint(120, 420)
+            gain = shop_box_reward_amount("coins")
             self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + gain
             self.audio.play("gui_cash", channel="ui3")
             self.speaker.speak(f"Mystery box: {gain} coins.", interrupt=True)
             return
         if reward == "hover":
-            self.settings["hoverboards"] = int(self.settings.get("hoverboards", 0)) + 1
+            gain = shop_box_reward_amount("hover")
+            self.settings["hoverboards"] = int(self.settings.get("hoverboards", 0)) + gain
             self.audio.play("unlock", channel="ui3")
-            self.speaker.speak("Mystery box: hoverboard.", interrupt=True)
+            self.speaker.speak(f"Mystery box: {gain} hoverboard{'s' if gain != 1 else ''}.", interrupt=True)
             return
         if reward == "key":
-            self.settings["keys"] = int(self.settings.get("keys", 0)) + 1
+            gain = shop_box_reward_amount("key")
+            self.settings["keys"] = int(self.settings.get("keys", 0)) + gain
             self.audio.play("unlock", channel="ui3")
-            self.speaker.speak("Mystery box: key.", interrupt=True)
+            self.speaker.speak(f"Mystery box: {gain} key{'s' if gain != 1 else ''}.", interrupt=True)
             return
         if reward == "headstart":
-            self.settings["headstarts"] = int(self.settings.get("headstarts", 0)) + 1
+            gain = shop_box_reward_amount("headstart")
+            self.settings["headstarts"] = int(self.settings.get("headstarts", 0)) + gain
             self.audio.play("mystery_combo", channel="ui3")
-            self.speaker.speak("Mystery box: headstart.", interrupt=True)
+            self.speaker.speak(f"Mystery box: {gain} headstart{'s' if gain != 1 else ''}.", interrupt=True)
             return
         if reward == "score_booster":
-            self.settings["score_boosters"] = int(self.settings.get("score_boosters", 0)) + 1
+            gain = shop_box_reward_amount("score_booster")
+            self.settings["score_boosters"] = int(self.settings.get("score_boosters", 0)) + gain
             self.audio.play("mystery_combo", channel="ui3")
-            self.speaker.speak("Mystery box: score booster.", interrupt=True)
+            self.speaker.speak(f"Mystery box: {gain} score booster{'s' if gain != 1 else ''}.", interrupt=True)
+            return
+        if reward == "jackpot":
+            gain = shop_box_reward_amount("jackpot")
+            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + gain
+            self.audio.play("gui_cash", channel="ui3")
+            self.audio.play("unlock", channel="ui4")
+            self.speaker.speak(f"Mystery box jackpot: {gain} coins.", interrupt=True)
             return
         self.speaker.speak("Mystery box: empty.", interrupt=True)
 
@@ -451,7 +910,59 @@ class SubwayBlindGame:
         if self._run_rewards_committed or not self.state.running:
             return
         self._run_rewards_committed = True
-        self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + self.state.coins
+        saved_coins = int(self.state.coins)
+        self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + saved_coins
+        if saved_coins > 0:
+            self.audio.play("coin_gui", channel="ui")
+            self.audio.play("gui_cash", channel="ui2")
+
+    def _clear_menu_repeat(self) -> None:
+        self._menu_repeat_key = None
+        self._menu_repeat_delay_remaining = 0.0
+
+    def _set_active_menu(self, menu: Optional[Menu], start_index: int = 0) -> None:
+        self._clear_menu_repeat()
+        self._stop_learn_sound_preview()
+        self.active_menu = menu
+        if menu is not None:
+            menu.open(start_index=start_index)
+            if menu == self.learn_sounds_menu:
+                self._refresh_learn_sound_description()
+        self._sync_music_context()
+
+    def _menu_key_supports_repeat(self, key: int) -> bool:
+        if self.active_menu is None:
+            return False
+        if key in (pygame.K_UP, pygame.K_DOWN, pygame.K_w, pygame.K_s):
+            return True
+        if self.active_menu == self.options_menu and key in (pygame.K_LEFT, pygame.K_RIGHT):
+            return True
+        return False
+
+    def _prime_menu_repeat(self, key: int) -> None:
+        if self._menu_key_supports_repeat(key):
+            self._menu_repeat_key = key
+            self._menu_repeat_delay_remaining = MENU_REPEAT_INITIAL_DELAY
+            return
+        if self._menu_repeat_key == key:
+            self._clear_menu_repeat()
+
+    def _release_menu_repeat(self, key: int) -> None:
+        if self._menu_repeat_key == key:
+            self._clear_menu_repeat()
+
+    def _update_menu_repeat(self, delta_time: float) -> None:
+        if self._menu_repeat_key is None or self.active_menu is None:
+            return
+        if not self._menu_key_supports_repeat(self._menu_repeat_key):
+            self._clear_menu_repeat()
+            return
+        self._menu_repeat_delay_remaining -= delta_time
+        while self._menu_repeat_delay_remaining <= 0:
+            self._handle_active_menu_key(self._menu_repeat_key)
+            if self._menu_repeat_key is None or self.active_menu is None:
+                return
+            self._menu_repeat_delay_remaining += MENU_REPEAT_INTERVAL
 
     def run(self) -> None:
         running = True
@@ -459,72 +970,133 @@ class SubwayBlindGame:
             delta_time = self.clock.tick(60) / 1000.0
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    running = False
+                    self._request_exit()
                 elif event.type == pygame.KEYDOWN:
+                    if self._exit_requested:
+                        continue
                     if self.active_menu is not None:
-                        action = self.active_menu.handle_key(event.key)
-                        if action:
-                            running = self._handle_menu_action(action)
+                        keep_running = self._handle_active_menu_key(event.key)
+                        if keep_running:
+                            self._prime_menu_repeat(event.key)
+                        else:
+                            self._request_exit()
                     else:
                         self._handle_game_key(event.key)
+                elif event.type == pygame.KEYUP:
+                    self._release_menu_repeat(event.key)
 
-            if self.active_menu is None:
+            if not self._exit_requested and self.active_menu is not None:
+                self._update_menu_repeat(delta_time)
+                self._update_learn_sound_preview(delta_time)
+                self._update_update_install_state()
+
+            if not self._exit_requested and self.active_menu is None:
                 if not self.state.paused:
                     self._update_game(delta_time)
+            self.audio.update(delta_time)
+
+            if self.active_menu is None:
                 self._draw_game()
             else:
                 self._draw_menu(self.active_menu)
 
             pygame.display.flip()
+            if self._exit_requested and self.audio.music_is_idle():
+                running = False
 
         save_settings(self.settings)
+
+    def _handle_active_menu_key(self, key: int) -> bool:
+        if self.active_menu is None:
+            return True
+        if self.active_menu == self.options_menu:
+            if key in (pygame.K_LEFT, pygame.K_RIGHT):
+                self._adjust_selected_option(-1 if key == pygame.K_LEFT else 1)
+                return True
+            if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                if self.options_menu.items[self.options_menu.index].action == "back":
+                    return self._handle_menu_action("back")
+                return True
+        if self.active_menu == self.learn_sounds_menu:
+            if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                selected_action = self.learn_sounds_menu.items[self.learn_sounds_menu.index].action
+                if selected_action == "back":
+                    return self._handle_menu_action("back")
+                entry = self._learn_sound_entries_by_action.get(selected_action)
+                if entry is not None:
+                    self._play_learn_sound_preview(entry)
+                return True
+            previous_index = self.learn_sounds_menu.index
+            action = self.learn_sounds_menu.handle_key(key)
+            if self.learn_sounds_menu.index != previous_index:
+                self._refresh_learn_sound_description()
+            if action:
+                return self._handle_menu_action(action)
+            return True
+        action = self.active_menu.handle_key(key)
+        if action:
+            return self._handle_menu_action(action)
+        return True
 
     def _handle_menu_action(self, action: str) -> bool:
         if action == "close":
             if self.active_menu == self.revive_menu:
                 self._finish_run_loss()
                 return True
+            if self.active_menu == self.update_menu:
+                return False
             if self.active_menu == self.main_menu:
                 return False
-            self.active_menu = self.main_menu
-            self.active_menu.open()
+            if self.active_menu == self.pause_menu:
+                self.state.paused = False
+                self._set_active_menu(None)
+                self.audio.play("menuclose", channel="ui")
+                self.speaker.speak("Resume", interrupt=True)
+                return True
+            if self.active_menu == self.pause_confirm_menu:
+                self._set_active_menu(self.pause_menu, start_index=1)
+                return True
+            self._set_active_menu(self.main_menu)
             return True
 
         if self.active_menu == self.main_menu:
             if action == "start":
-                self.selected_headstart = False
+                self.selected_headstarts = 0
                 self.selected_score_boosters = 0
                 self._refresh_loadout_menu_labels()
-                self.active_menu = self.loadout_menu
-                self.active_menu.open()
+                self._set_active_menu(self.loadout_menu)
                 return True
             if action == "shop":
                 self._refresh_shop_menu_labels()
-                self.active_menu = self.shop_menu
-                self.active_menu.open()
+                self._set_active_menu(self.shop_menu)
                 return True
             if action == "options":
                 self._refresh_options_menu_labels()
-                self.active_menu = self.options_menu
-                self.active_menu.open()
+                self._set_active_menu(self.options_menu)
                 return True
             if action == "howto":
                 self._say_how_to_play()
+                return True
+            if action == "learn_sounds":
+                self._set_active_menu(self.learn_sounds_menu)
+                return True
+            if action == "check_updates":
+                self._check_for_updates(announce_result=True)
                 return True
             if action == "quit":
                 return False
 
         if self.active_menu == self.loadout_menu:
             if action == "back":
-                self.active_menu = self.main_menu
-                self.active_menu.open()
+                self._set_active_menu(self.main_menu)
                 return True
             if action == "toggle_headstart":
-                if int(self.settings.get("headstarts", 0)) <= 0:
+                owned = int(self.settings.get("headstarts", 0))
+                if owned <= 0:
                     self.audio.play("menuedge", channel="ui")
                     self.speaker.speak("No headstarts available.", interrupt=True)
                     return True
-                self.selected_headstart = not self.selected_headstart
+                self.selected_headstarts = (self.selected_headstarts + 1) % (clamp_headstart_uses(owned) + 1)
                 self.audio.play("confirm", channel="ui")
                 self._refresh_loadout_menu_labels()
                 self.speaker.speak(self.loadout_menu.items[0].label, interrupt=True)
@@ -546,44 +1118,38 @@ class SubwayBlindGame:
 
         if self.active_menu == self.options_menu:
             if action == "back":
-                self.active_menu = self.main_menu
-                self.active_menu.open()
+                self.audio.play("menuclose", channel="ui")
+                self._set_active_menu(self.main_menu)
                 return True
-            if action == "opt_sfx":
-                self.settings["sfx_volume"] = cycle_volume(float(self.settings["sfx_volume"]))
-                self.audio.refresh_volumes()
-                self.audio.play("confirm", channel="ui")
-                self._refresh_options_menu_labels()
-                self.speaker.speak(self.options_menu.items[0].label, interrupt=True)
+            return True
+
+        if self.active_menu == self.update_menu:
+            if action == "download_update":
+                self._begin_update_install()
                 return True
-            if action == "opt_music":
-                self.settings["music_volume"] = cycle_volume(float(self.settings["music_volume"]))
-                self.audio.refresh_volumes()
-                self.audio.play("confirm", channel="ui")
-                self._refresh_options_menu_labels()
-                self.speaker.speak(self.options_menu.items[1].label, interrupt=True)
+            if action == "install_busy":
                 return True
-            if action == "opt_speech":
-                self.settings["speech_enabled"] = not self.settings["speech_enabled"]
-                self.speaker.enabled = bool(self.settings["speech_enabled"])
-                self.audio.play("confirm", channel="ui")
-                self._refresh_options_menu_labels()
-                self.speaker.speak(self.options_menu.items[2].label, interrupt=True)
+            if action == "restart_after_update":
+                if self._update_restart_script_path and self.updater.launch_restart_script(self._update_restart_script_path):
+                    self.speaker.speak("Restarting to apply the update.", interrupt=True)
+                    return False
+                self.speaker.speak("Update files are ready. Restart the game to finish applying them.", interrupt=True)
+                return False
+            if action == "open_release_page":
+                release = self._latest_update_result.release if self._latest_update_result is not None else None
+                opened = self.updater.open_release_page(release)
+                if opened:
+                    self.speaker.speak("Opening the release page.", interrupt=True)
+                    return True
+                self._play_menu_feedback("menuedge")
+                self.speaker.speak("Unable to open the release page.", interrupt=True)
                 return True
-            if action == "opt_diff":
-                order = ["easy", "normal", "hard"]
-                current = str(self.settings["difficulty"])
-                next_difficulty = order[(order.index(current) + 1) % len(order)] if current in order else "normal"
-                self.settings["difficulty"] = next_difficulty
-                self.audio.play("confirm", channel="ui")
-                self._refresh_options_menu_labels()
-                self.speaker.speak(self.options_menu.items[3].label, interrupt=True)
-                return True
+            if action == "quit":
+                return False
 
         if self.active_menu == self.shop_menu:
             if action == "back":
-                self.active_menu = self.main_menu
-                self.active_menu.open()
+                self._set_active_menu(self.main_menu)
                 return True
             if action == "buy_hoverboard":
                 self._purchase_shop_item("hoverboard")
@@ -598,14 +1164,27 @@ class SubwayBlindGame:
                 self._purchase_shop_item("score_booster")
                 return True
 
+        if self.active_menu == self.learn_sounds_menu:
+            if action == "back":
+                self._set_active_menu(self.main_menu)
+                return True
+
         if self.active_menu == self.pause_menu:
             if action == "resume":
                 self.state.paused = False
-                self.active_menu = None
+                self._set_active_menu(None)
                 self.speaker.speak("Resume", interrupt=True)
                 return True
             if action == "to_main":
+                self._set_active_menu(self.pause_confirm_menu)
+                return True
+
+        if self.active_menu == self.pause_confirm_menu:
+            if action == "confirm_to_main":
                 self.end_run(to_menu=True)
+                return True
+            if action == "cancel_to_main":
+                self._set_active_menu(self.pause_menu, start_index=1)
                 return True
 
         if self.active_menu == self.revive_menu:
@@ -618,12 +1197,150 @@ class SubwayBlindGame:
 
         return True
 
+    def _cycle_output_device_in_options(self, direction: int) -> None:
+        devices = self.audio.output_device_choices()
+        current_device = self.audio.current_output_device_name()
+        try:
+            current_index = devices.index(current_device)
+        except ValueError:
+            current_index = 0
+        requested_device = devices[(current_index + direction) % len(devices)]
+        applied_device = self.audio.apply_output_device(requested_device)
+        self._refresh_options_menu_labels()
+        selected_label = applied_device or SYSTEM_DEFAULT_OUTPUT_LABEL
+        if requested_device == applied_device:
+            self.speaker.speak(
+                f"Output device set to {selected_label}.",
+                interrupt=True,
+            )
+            return
+        self.speaker.speak(
+            f"Requested output device unavailable. Using {selected_label}.",
+            interrupt=True,
+        )
+
+    def _apply_speaker_settings(self) -> None:
+        self.speaker.apply_settings(self.settings)
+
+    def _adjust_selected_option(self, direction: int) -> None:
+        if self.active_menu != self.options_menu or direction not in (-1, 1):
+            return
+        selected_action = self.options_menu.items[self.options_menu.index].action
+        if selected_action == "back":
+            return
+        if selected_action == "opt_sfx":
+            current = float(self.settings["sfx_volume"])
+            updated = step_volume(current, direction)
+            if updated == current:
+                self._play_menu_feedback("menuedge")
+                return
+            self.settings["sfx_volume"] = updated
+            self.audio.refresh_volumes()
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_sfx")].label, interrupt=True)
+            return
+        if selected_action == "opt_music":
+            current = float(self.settings["music_volume"])
+            updated = step_volume(current, direction)
+            if updated == current:
+                self._play_menu_feedback("menuedge")
+                return
+            self.settings["music_volume"] = updated
+            self.audio.refresh_volumes()
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_music")].label, interrupt=True)
+            return
+        if selected_action == "opt_updates":
+            self.settings["check_updates_on_startup"] = direction > 0
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_updates")].label, interrupt=True)
+            return
+        if selected_action == "opt_output":
+            self._play_menu_feedback("confirm")
+            self._cycle_output_device_in_options(direction)
+            return
+        if selected_action == "opt_menu_hrtf":
+            self.settings["menu_sound_hrtf"] = direction > 0
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_menu_hrtf")].label, interrupt=True)
+            return
+        if selected_action == "opt_speech":
+            self._play_menu_feedback("confirm")
+            self.settings["speech_enabled"] = direction > 0
+            self._refresh_options_menu_labels()
+            label = self.options_menu.items[self._update_option_index("opt_speech")].label
+            if self.settings["speech_enabled"]:
+                self._apply_speaker_settings()
+                self.speaker.speak(label, interrupt=True)
+            else:
+                self.speaker.speak(label, interrupt=True)
+                self._apply_speaker_settings()
+            return
+        if selected_action == "opt_sapi":
+            self.settings["sapi_speech_enabled"] = direction > 0
+            self._apply_speaker_settings()
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_sapi")].label, interrupt=True)
+            return
+        if selected_action == "opt_sapi_voice":
+            selected_voice = self.speaker.cycle_sapi_voice(direction)
+            if selected_voice == SAPI_VOICE_UNAVAILABLE_LABEL:
+                self._play_menu_feedback("menuedge")
+                self.speaker.speak("No SAPI voices available.", interrupt=True)
+                return
+            self.settings["sapi_voice_id"] = self.speaker.sapi_voice_id or ""
+            self._apply_speaker_settings()
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_sapi_voice")].label, interrupt=True)
+            return
+        if selected_action == "opt_sapi_rate":
+            current = int(self.settings.get("sapi_rate", 0))
+            updated = step_int(current, direction, SAPI_RATE_MIN, SAPI_RATE_MAX)
+            if updated == current:
+                self._play_menu_feedback("menuedge")
+                return
+            self.settings["sapi_rate"] = updated
+            self._apply_speaker_settings()
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_sapi_rate")].label, interrupt=True)
+            return
+        if selected_action == "opt_sapi_pitch":
+            current = int(self.settings.get("sapi_pitch", 0))
+            updated = step_int(current, direction, SAPI_PITCH_MIN, SAPI_PITCH_MAX)
+            if updated == current:
+                self._play_menu_feedback("menuedge")
+                return
+            self.settings["sapi_pitch"] = updated
+            self._apply_speaker_settings()
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_sapi_pitch")].label, interrupt=True)
+            return
+        if selected_action == "opt_diff":
+            order = ["easy", "normal", "hard"]
+            current = str(self.settings["difficulty"])
+            try:
+                current_index = order.index(current)
+            except ValueError:
+                current_index = order.index("normal")
+            self.settings["difficulty"] = order[(current_index + direction) % len(order)]
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_diff")].label, interrupt=True)
+
     def _say_how_to_play(self) -> None:
         self.speaker.speak(
             "Controls: use the left and right arrow keys to change lanes. "
             "Press the up arrow to jump, the down arrow to roll, and space to activate a hoverboard. "
             "Press escape to pause. Danger speech now only calls the action for your current lane. "
-            "Bushes must be jumped. Before each run you can enable Headstart and Score Booster. "
+            "Bushes must be jumped. Before each run you can stack up to three Headstarts and three Score Boosters. "
             "Keys can revive you after a crash. Missions raise your permanent multiplier. "
             "Word Hunt letters and Season Hunt tokens appear during runs. "
             "The shop lets you spend saved coins on items and mystery boxes.",
@@ -632,8 +1349,8 @@ class SubwayBlindGame:
 
     def start_run(self) -> None:
         ensure_progression_state(self.settings)
-        self.active_menu = None
         self.state = RunState(running=True)
+        self._set_active_menu(None)
         self.player = Player()
         self.player.hoverboards = int(self.settings.get("hoverboards", 0))
         self.obstacles = []
@@ -648,14 +1365,14 @@ class SubwayBlindGame:
         self._left_foot_next = True
         self._run_rewards_committed = False
         self._near_miss_signatures.clear()
+        self._guard_loop_timer = 0.0
 
-        if self.selected_headstart:
-            self.settings["headstarts"] = max(0, int(self.settings.get("headstarts", 0)) - 1)
-            self.player.headstart = HEADSTART_DURATION
+        if self.selected_headstarts > 0:
+            self.settings["headstarts"] = max(0, int(self.settings.get("headstarts", 0)) - self.selected_headstarts)
+            self.player.headstart = headstart_duration_for_uses(self.selected_headstarts)
             self.player.y = 2.8
             self.player.vy = 0.0
-            self.audio.play("intro_shake", channel="intro")
-            self.audio.play("intro_spray", channel="intro_fx")
+            self._start_headstart_audio()
         if self.selected_score_boosters > 0:
             self.settings["score_boosters"] = max(
                 0,
@@ -669,33 +1386,34 @@ class SubwayBlindGame:
 
         self.audio.play("slide_letters", channel="intro_ui")
         self.audio.play("intro_start", channel="ui")
-        self.audio.music_start()
-        if self.selected_headstart:
-            self.speaker.speak("Run started. Headstart active.", interrupt=True)
+        self.audio.music_start("gameplay")
+        if self.selected_headstarts > 0:
+            self.speaker.speak(
+                f"Run started. Headstart active for {self.selected_headstarts} charge{'s' if self.selected_headstarts != 1 else ''}.",
+                interrupt=True,
+            )
         else:
             self.speaker.speak("Run started. Center lane.", interrupt=True)
 
-        self.selected_headstart = False
+        self.selected_headstarts = 0
         self.selected_score_boosters = 0
         self._refresh_loadout_menu_labels()
 
     def end_run(self, to_menu: bool = True) -> None:
         self._commit_run_rewards()
-        self.audio.music_stop()
+        self.state.running = False
+        self._stop_headstart_audio()
         self.audio.stop("loop_guard")
         self.audio.stop("loop_magnet")
         self.audio.stop("loop_jetpack")
         self._stop_spatial_audio()
         self.spatial_audio.reset()
-        self.active_menu = self.main_menu if to_menu else None
-        if self.active_menu is not None:
-            self.active_menu.open()
+        self._set_active_menu(self.main_menu if to_menu else None)
 
     def _handle_game_key(self, key: int) -> None:
         if key == pygame.K_ESCAPE:
             self.state.paused = True
-            self.active_menu = self.pause_menu
-            self.pause_menu.open()
+            self._set_active_menu(self.pause_menu)
             self.audio.play("menuclose", channel="ui")
             return
 
@@ -728,9 +1446,12 @@ class SubwayBlindGame:
             self._try_hoverboard()
         elif key == pygame.K_m:
             self.settings["speech_enabled"] = not self.settings["speech_enabled"]
-            self.speaker.enabled = bool(self.settings["speech_enabled"])
-            message = "Speech enabled" if self.speaker.enabled else "Speech disabled"
-            self.speaker.speak(message, interrupt=True)
+            if self.settings["speech_enabled"]:
+                self._apply_speaker_settings()
+                self.speaker.speak("Speech enabled", interrupt=True)
+            else:
+                self.speaker.speak("Speech disabled", interrupt=True)
+                self._apply_speaker_settings()
 
     def _try_jump(self) -> None:
         if self.player.y > 0.01 or self.player.rolling > 0:
@@ -756,7 +1477,7 @@ class SubwayBlindGame:
             return
         self.player.hoverboards -= 1
         self.settings["hoverboards"] = max(0, int(self.settings.get("hoverboards", 0)) - 1)
-        self.player.hover_active = 10.0
+        self.player.hover_active = HOVERBOARD_DURATION
         self.audio.play("powerup", channel="act")
         self.speaker.speak("Hoverboard active.", interrupt=False)
 
@@ -789,7 +1510,7 @@ class SubwayBlindGame:
             if self.player.y <= 0.0 and self.player.vy < 0:
                 self.player.y = 0.0
                 self.player.vy = 0.0
-                sound_key = "land_h" if self.player.super_sneakers > 0 else "landing"
+                sound_key = "land_h" if self.player.super_sneakers > 0 or self.player.pogo_active > 0 else "landing"
                 self.audio.play(sound_key, pan=lane_to_pan(self.player.lane), channel="act")
 
         if self.player.rolling > 0:
@@ -833,13 +1554,16 @@ class SubwayBlindGame:
         previous_headstart = self.player.headstart
         decay("headstart")
         if previous_headstart > 0 and self.player.headstart <= 0:
+            self._stop_headstart_audio()
             self.player.y = 0.0
             self.player.vy = 0.0
             self.audio.play("land_h", channel="headstart_end")
             self.audio.play("powerup", channel="headstart_reward")
             self._apply_power_reward(pick_headstart_end_reward(), from_headstart=True)
+        elif previous_headstart <= 0 and self.player.headstart > 0:
+            self._start_headstart_audio()
 
-        if self.player.headstart <= 0:
+        if self.player.headstart <= 0 and self.player.jetpack <= 0:
             decay("hover_active")
         if self.player.jetpack <= 0 and self.player.headstart <= 0:
             decay("super_sneakers")
@@ -870,10 +1594,17 @@ class SubwayBlindGame:
             self.audio.play("powerdown", channel="act")
             self.speaker.speak("Score boost expired.", interrupt=False)
 
-        if self.player.stumbles >= 1 and self.player.hover_active <= 0:
-            guard_channel = self.audio._get_channel("loop_guard")
-            if guard_channel is not None and not guard_channel.get_busy():
-                self.audio.play("guard_loop", loop=True, channel="loop_guard")
+        previous_pogo = self.player.pogo_active
+        decay("pogo_active")
+        if previous_pogo > 0 and self.player.pogo_active <= 0:
+            self.audio.play("powerdown", channel="act")
+            self.speaker.speak("Pogo stick expired.", interrupt=False)
+        elif self.player.pogo_active > 0:
+            self._launch_pogo_bounce()
+
+        self._guard_loop_timer = max(0.0, self._guard_loop_timer - delta_time)
+        if self.state.running and not self.state.paused and self._guard_loop_timer > 0:
+            self.audio.play("guard_loop", loop=True, channel="loop_guard", gain=0.72)
         else:
             self.audio.stop("loop_guard")
 
@@ -940,6 +1671,15 @@ class SubwayBlindGame:
         if kind == "season_token":
             self.obstacles.append(Obstacle(kind="season_token", lane=lane, z=distance, label="S"))
             return
+        if kind == "multiplier":
+            self.obstacles.append(Obstacle(kind="multiplier", lane=lane, z=distance, label="2X"))
+            return
+        if kind == "super_box":
+            self.obstacles.append(Obstacle(kind="super_box", lane=lane, z=distance, label="?"))
+            return
+        if kind == "pogo":
+            self.obstacles.append(Obstacle(kind="pogo", lane=lane, z=distance, label="P"))
+            return
         if kind == "power":
             obstacle_kind = "box" if random.random() < 0.22 else "power"
         else:
@@ -952,7 +1692,13 @@ class SubwayBlindGame:
         pickup_distance = 2.2
 
         for obstacle in self.obstacles:
-            if not obstacle.warned and 0 < obstacle.z < warning_distance and obstacle.kind in ("power", "box"):
+            if not obstacle.warned and 0 < obstacle.z < warning_distance and obstacle.kind in (
+                "power",
+                "box",
+                "multiplier",
+                "super_box",
+                "pogo",
+            ):
                 obstacle.warned = True
                 self.audio.play("warning", pan=lane_to_pan(obstacle.lane), channel=f"warn_{id(obstacle)}", gain=0.5)
 
@@ -969,7 +1715,7 @@ class SubwayBlindGame:
                     self._collect_coin(obstacle)
                     obstacle.z = -999
 
-            if obstacle.kind in ("power", "box", "key", "word", "season_token") and -0.8 < obstacle.z < 2.4:
+            if obstacle.kind in ("power", "box", "key", "word", "season_token", "multiplier", "super_box", "pogo") and -0.8 < obstacle.z < 2.4:
                 if self.player.jetpack > 0:
                     continue
                 if self.player.headstart > 0:
@@ -984,12 +1730,20 @@ class SubwayBlindGame:
                         self._collect_word_letter(obstacle)
                     elif obstacle.kind == "season_token":
                         self._collect_season_token()
+                    elif obstacle.kind == "multiplier":
+                        self._collect_multiplier_pickup()
+                    elif obstacle.kind == "super_box":
+                        self._collect_super_mysterizer()
+                    elif obstacle.kind == "pogo":
+                        self._collect_pogo_stick()
                     else:
                         self._collect_box()
                     obstacle.z = -999
 
             if obstacle.kind in ("train", "low", "high", "bush") and -0.8 < obstacle.z < hit_distance:
                 if self.player.jetpack > 0 or self.player.headstart > 0 or obstacle.lane != self.player.lane:
+                    continue
+                if self.player.pogo_active > 0 and self.player.y > 1.0:
                     continue
                 if obstacle.kind in ("low", "bush") and self.player.y > 0.6:
                     continue
@@ -1015,6 +1769,32 @@ class SubwayBlindGame:
             k=1,
         )[0]
         self._apply_power_reward(reward, from_headstart=False)
+
+    def _collect_multiplier_pickup(self) -> None:
+        self._record_mission_event("powerups")
+        self.audio.play("powerup", channel="act")
+        self.player.mult2x = max(self.player.mult2x, MULTIPLIER_PICKUP_DURATION)
+        self.speaker.speak("2x multiplier.", interrupt=False)
+
+    def _collect_super_mysterizer(self) -> None:
+        self._record_mission_event("boxes")
+        self._open_super_mystery_box("Super Mysterizer")
+
+    def _launch_pogo_bounce(self) -> None:
+        if self.player.pogo_active <= 0 or self.player.jetpack > 0 or self.player.headstart > 0:
+            return
+        if self.player.y > 0.01 or self.player.vy > 0.01:
+            return
+        self.player.rolling = 0.0
+        self.player.vy = 14.6
+        self.audio.play("sneakers_jump", channel="act")
+
+    def _collect_pogo_stick(self) -> None:
+        self._record_mission_event("powerups")
+        self.audio.play("powerup", channel="act")
+        self.player.pogo_active = max(self.player.pogo_active, POGO_STICK_DURATION)
+        self._launch_pogo_bounce()
+        self.speaker.speak("Pogo stick.", interrupt=False)
 
     def _collect_box(self) -> None:
         self._record_mission_event("boxes")
@@ -1078,20 +1858,32 @@ class SubwayBlindGame:
             return
         self.speaker.speak(f"Season token. {tokens} of {next_threshold}.", interrupt=False)
 
+    def _activate_magnet(self, duration: float) -> None:
+        was_inactive = self.player.magnet <= 0
+        self.player.magnet = max(self.player.magnet, float(duration))
+        if was_inactive and self.player.jetpack <= 0 and self.player.headstart <= 0:
+            self.audio.play("magnet_loop", loop=True, channel="loop_magnet")
+
+    def _activate_jetpack(self, duration: float) -> None:
+        was_inactive = self.player.jetpack <= 0
+        self.player.jetpack = max(self.player.jetpack, float(duration))
+        self.player.y = 2.0
+        self.player.vy = 0.0
+        if was_inactive:
+            self.audio.play("jetpack_loop", loop=True, channel="loop_jetpack")
+
     def _apply_power_reward(self, reward: str, from_headstart: bool) -> None:
         if reward == "magnet":
-            self.player.magnet = 9.0
+            self._activate_magnet(9.0)
             message = "Headstart reward: magnet." if from_headstart else "Magnet."
             self.speaker.speak(message, interrupt=False)
             return
         if reward == "jetpack":
-            self.player.jetpack = 6.5
-            self.player.y = 2.0
-            self.player.vy = 0.0
+            self._activate_jetpack(6.5)
             self.speaker.speak("Jetpack.", interrupt=False)
             return
         if reward == "mult2x":
-            self.player.mult2x = 10.0
+            self.player.mult2x = max(self.player.mult2x, 10.0)
             message = "Headstart reward: double score." if from_headstart else "Double score."
             self.speaker.speak(message, interrupt=False)
             return
@@ -1109,8 +1901,7 @@ class SubwayBlindGame:
         self.audio.play("guard_catch", channel="act2")
         self.audio.play("gui_close", channel="ui")
         self._refresh_revive_menu_label()
-        self.active_menu = self.revive_menu
-        self.active_menu.open()
+        self._set_active_menu(self.revive_menu)
         self.speaker.speak(
             f"You can revive for {cost} key{'s' if cost != 1 else ''}.",
             interrupt=True,
@@ -1131,7 +1922,8 @@ class SubwayBlindGame:
         self.player.y = 0.0
         self.player.vy = 0.0
         self.player.hover_active = max(self.player.hover_active, 3.5)
-        self.active_menu = None
+        self._guard_loop_timer = 0.0
+        self._set_active_menu(None)
         self.audio.play("unlock", channel="ui")
         self.audio.play("powerup", channel="act")
         self.speaker.speak("Revived. Temporary shield active.", interrupt=True)
@@ -1164,6 +1956,7 @@ class SubwayBlindGame:
 
         self.player.stumbles += 1
         if self.player.stumbles >= 2:
+            self._guard_loop_timer = 0.0
             self._queue_revive_or_finish()
             return
 
@@ -1171,6 +1964,7 @@ class SubwayBlindGame:
             stumble_sound = "stumble_bush"
         else:
             stumble_sound = "stumble_side" if self.player.lane != 0 else "stumble"
+        self._guard_loop_timer = GUARD_LOOP_DURATION
         self.audio.play(stumble_sound, channel="act")
         self.audio.play("crash", channel="act2")
         self.speaker.speak("You crashed. One chance left.", interrupt=True)
@@ -1206,18 +2000,76 @@ class SubwayBlindGame:
         self._near_miss_signatures = active_signatures
 
     def _draw_menu(self, menu: Menu) -> None:
+        width, height = self.screen.get_size()
         self.screen.fill((10, 10, 15))
         title_surface = self.big.render(menu.title, True, (240, 240, 240))
-        self.screen.blit(title_surface, (40, 40))
-        y_position = 120
-        for index, item in enumerate(menu.items):
-            color = (255, 255, 0) if index == menu.index else (220, 220, 220)
+        self.screen.blit(title_surface, (40, 32))
+
+        list_top = 110
+        row_height = 38
+        visible_rows = 9 if menu == self.learn_sounds_menu else 10
+        max_start_index = max(0, len(menu.items) - visible_rows)
+        start_index = max(0, min(menu.index - (visible_rows // 2), max_start_index))
+        visible_items = menu.items[start_index : start_index + visible_rows]
+        y_position = list_top
+        for relative_index, item in enumerate(visible_items):
+            actual_index = start_index + relative_index
+            color = (255, 255, 0) if actual_index == menu.index else (220, 220, 220)
             label_surface = self.font.render(item.label, True, color)
             self.screen.blit(label_surface, (70, y_position))
-            y_position += 40
+            y_position += row_height
 
-        hint_surface = self.font.render("Use up/down, Enter to select, Esc to go back.", True, (180, 180, 180))
-        self.screen.blit(hint_surface, (40, 520))
+        if start_index > 0:
+            top_more = self.font.render("...", True, (160, 160, 160))
+            self.screen.blit(top_more, (40, list_top - 28))
+        if start_index + len(visible_items) < len(menu.items):
+            bottom_more = self.font.render("...", True, (160, 160, 160))
+            self.screen.blit(bottom_more, (40, y_position - 8))
+
+        hint_text = "Use up/down, Enter to select, Esc to go back."
+        if menu == self.learn_sounds_menu:
+            description_lines = textwrap.wrap(self._learn_sound_description, width=62)[:3]
+            description_top = min(height - 132, y_position + 18)
+            prompt_surface = self.font.render("Enter plays the selected sound.", True, (205, 205, 205))
+            self.screen.blit(prompt_surface, (40, description_top))
+            for line_index, line in enumerate(description_lines):
+                line_surface = self.font.render(line, True, (180, 180, 180))
+                self.screen.blit(line_surface, (40, description_top + 32 + (line_index * 26)))
+            hint_text = "Use up/down, Enter to play, Esc to go back."
+        elif menu == self.update_menu:
+            description_lines = textwrap.wrap(self._update_status_message, width=62)[:2]
+            release_note_lines = textwrap.wrap(self._update_release_notes, width=62)[:5]
+            description_top = min(height - 176, y_position + 14)
+            prompt_surface = self.font.render("Update required before you can continue.", True, (205, 205, 205))
+            self.screen.blit(prompt_surface, (40, description_top))
+            for line_index, line in enumerate(description_lines):
+                line_surface = self.font.render(line, True, (180, 180, 180))
+                self.screen.blit(line_surface, (40, description_top + 32 + (line_index * 26)))
+            if self._update_progress_stage in {"download", "extract", "ready", "error"}:
+                progress_surface = self.font.render(
+                    f"Status: {self._update_progress_message or self._update_status_message}",
+                    True,
+                    (190, 210, 190) if self._update_progress_stage == "ready" else (180, 180, 180),
+                )
+                self.screen.blit(progress_surface, (40, description_top + 88))
+                percent_surface = self.font.render(
+                    f"Progress: {int(self._update_progress_percent)}%",
+                    True,
+                    (220, 220, 120),
+                )
+                self.screen.blit(percent_surface, (40, description_top + 116))
+                notes_top = description_top + 150
+            else:
+                notes_top = description_top + 88
+            notes_label_surface = self.font.render("Release Notes:", True, (205, 205, 205))
+            self.screen.blit(notes_label_surface, (40, notes_top))
+            for line_index, line in enumerate(release_note_lines):
+                line_surface = self.font.render(line, True, (180, 180, 180))
+                self.screen.blit(line_surface, (40, notes_top + 28 + (line_index * 24)))
+            hint_text = "Use up/down, Enter to continue, Esc to quit."
+
+        hint_surface = self.font.render(hint_text, True, (180, 180, 180))
+        self.screen.blit(hint_surface, (40, height - 44))
 
     def _draw_game(self) -> None:
         width, height = self.screen.get_size()
@@ -1253,6 +2105,15 @@ class SubwayBlindGame:
             elif obstacle.kind == "season_token":
                 color = (255, 145, 60)
                 size = max(12, size // 2)
+            elif obstacle.kind == "multiplier":
+                color = (255, 210, 70)
+                size = max(14, size // 2)
+            elif obstacle.kind == "super_box":
+                color = (245, 120, 255)
+                size = max(14, size // 2)
+            elif obstacle.kind == "pogo":
+                color = (110, 235, 210)
+                size = max(14, size // 2)
             elif obstacle.kind == "high":
                 color = (220, 120, 60)
             elif obstacle.kind == "low":

@@ -1,0 +1,35 @@
+{
+  "tracks": [
+    {
+      "slot": "menu",
+      "preferred_files": [
+        "menu_intro.ogg",
+        "game_intro.ogg",
+        "menu_theme.ogg",
+        "menu.ogg"
+      ],
+      "official_track_hint": "Game Intro",
+      "usage": "Main menu and other non-run menus.",
+      "confidence": "medium",
+      "note": "Context is inferred from the official Subway Surfers artist catalog track name."
+    },
+    {
+      "slot": "gameplay",
+      "preferred_files": [
+        "gameplay_main.ogg",
+        "subway_surfers_theme.ogg",
+        "main_theme.ogg",
+        "theme.ogg",
+        "run_theme.ogg"
+      ],
+      "official_track_hint": "Subway Surfers Theme",
+      "usage": "Active gameplay and in-run menus.",
+      "confidence": "high",
+      "note": "This slot matches the core Subway Surfers theme used for gameplay-style music selection."
+    }
+  ],
+  "sources": [
+    "https://music.apple.com/us/artist/subway-surfers/1743936124",
+    "https://sybo.helpshift.com/hc/en/5-subway-surfers/faq/153-how-can-i-play-my-own-music-while-playing-subway-surfers/"
+  ]
+}

@@ -83,7 +83,17 @@ class SpawnDirector:
         return random.uniform(near, far)
 
     def candidate_patterns(self, progress: float) -> list[RoutePattern]:
-        pool = [pattern for pattern in PATTERNS if pattern.min_progress <= progress]
+        pool: list[RoutePattern] = []
+        seen: set[tuple[tuple[tuple[str, int, float], ...], tuple[int, ...]]] = set()
+        for pattern in PATTERNS:
+            if pattern.min_progress > progress:
+                continue
+            for candidate in self._pattern_variants(pattern):
+                signature = self._pattern_signature(candidate)
+                if signature in seen:
+                    continue
+                seen.add(signature)
+                pool.append(candidate)
         return sorted(pool, key=lambda pattern: random.random() / max(0.001, pattern.weight))
 
     def choose_pattern(self, progress: float) -> RoutePattern:
@@ -189,3 +199,52 @@ class SpawnDirector:
     @staticmethod
     def _slice_index(z: float) -> int:
         return max(0, int(z / SLICE_LENGTH))
+
+    @staticmethod
+    def _pattern_variants(pattern: RoutePattern) -> tuple[RoutePattern, ...]:
+        variants: list[RoutePattern] = []
+        for direction in (1, -1):
+            for offset in LANES:
+                transformed = SpawnDirector._transform_pattern(pattern, direction, offset)
+                if transformed is not None:
+                    variants.append(transformed)
+        return tuple(variants)
+
+    @staticmethod
+    def _transform_pattern(pattern: RoutePattern, direction: int, offset: int) -> RoutePattern | None:
+        entries: list[PatternEntry] = []
+        for entry in pattern.entries:
+            lane = SpawnDirector._transform_lane(entry.lane, direction, offset)
+            if lane not in LANES:
+                return None
+            entries.append(PatternEntry(entry.kind, lane, entry.z_offset))
+
+        normalized_safe_lanes = SpawnDirector._derive_safe_lanes(tuple(entries))
+        if not normalized_safe_lanes:
+            return None
+
+        return RoutePattern(
+            name=f"{pattern.name}:{direction}:{offset}",
+            entries=tuple(entries),
+            safe_lanes=normalized_safe_lanes,
+            min_progress=pattern.min_progress,
+            weight=pattern.weight,
+        )
+
+    @staticmethod
+    def _transform_lane(lane: int, direction: int, offset: int) -> int:
+        return lane * direction + offset
+
+    @staticmethod
+    def _pattern_signature(pattern: RoutePattern) -> tuple[tuple[tuple[str, int, float], ...], tuple[int, ...]]:
+        entries = tuple(sorted((entry.kind, entry.lane, entry.z_offset) for entry in pattern.entries))
+        return entries, tuple(sorted(pattern.safe_lanes))
+
+    @staticmethod
+    def _derive_safe_lanes(entries: tuple[PatternEntry, ...]) -> tuple[int, ...]:
+        severity = {"train": 3, "low": 1, "high": 1, "bush": 1}
+        lane_scores = {lane: 0 for lane in LANES}
+        for entry in entries:
+            lane_scores[entry.lane] += severity.get(entry.kind, 0)
+        best_score = min(lane_scores.values())
+        return tuple(lane for lane in LANES if lane_scores[lane] == best_score)

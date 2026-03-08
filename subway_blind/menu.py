@@ -21,38 +21,71 @@ class Menu:
         self.index = 0
         self.opened = False
 
-    def open(self) -> None:
+    def _menu_pan_for_index(self, index: int | None = None) -> float:
+        if len(self.items) <= 1:
+            return 0.0
+        target_index = self.index if index is None else max(0, min(int(index), len(self.items) - 1))
+        progress = target_index / (len(self.items) - 1)
+        return (progress * 1.6) - 0.8
+
+    def _play_menu_sound(self, key: str, index: int | None = None) -> None:
+        if bool(self.audio.settings.get("menu_sound_hrtf", True)):
+            self.audio.play(key, channel="ui", pan=self._menu_pan_for_index(index))
+            return
+        self.audio.play(key, channel="ui")
+
+    def play_feedback(self, key: str, index: int | None = None) -> None:
+        self._play_menu_sound(key, index=index)
+
+    def open(self, start_index: int = 0, play_sound: bool = True) -> None:
         self.opened = True
-        self.index = 0
-        self.speaker.speak(self.title, interrupt=True)
-        self._announce_current()
+        if self.items:
+            self.index = max(0, min(int(start_index), len(self.items) - 1))
+        else:
+            self.index = 0
+        if play_sound:
+            self._play_menu_sound("menuopen")
+        self.speaker.speak(self._opening_announcement(), interrupt=True)
+
+    def _opening_announcement(self) -> str:
+        if not self.items:
+            return self.title
+        return f"{self.title}. {self.items[self.index].label}"
 
     def _announce_current(self) -> None:
         if not self.items:
             return
         self.speaker.speak(self.items[self.index].label, interrupt=True)
 
+    def _move_to_index(self, target_index: int) -> None:
+        if not self.items:
+            self._play_menu_sound("menuedge", index=0)
+            return
+        clamped_index = max(0, min(int(target_index), len(self.items) - 1))
+        if clamped_index == self.index:
+            self._play_menu_sound("menuedge")
+            return
+        self.index = clamped_index
+        self._play_menu_sound("menumove")
+        self._announce_current()
+
     def handle_key(self, key: int) -> Optional[str]:
         if key == pygame.K_ESCAPE:
-            self.audio.play("menuclose", channel="ui")
+            self._play_menu_sound("menuclose")
             return "close"
         if key in (pygame.K_UP, pygame.K_w):
-            if self.index > 0:
-                self.index -= 1
-                self.audio.play("menumove", channel="ui")
-                self._announce_current()
-            else:
-                self.audio.play("menuedge", channel="ui")
+            self._move_to_index(self.index - 1)
             return None
         if key in (pygame.K_DOWN, pygame.K_s):
-            if self.index < len(self.items) - 1:
-                self.index += 1
-                self.audio.play("menumove", channel="ui")
-                self._announce_current()
-            else:
-                self.audio.play("menuedge", channel="ui")
+            self._move_to_index(self.index + 1)
+            return None
+        if key == pygame.K_HOME:
+            self._move_to_index(0)
+            return None
+        if key == pygame.K_END:
+            self._move_to_index(len(self.items) - 1)
             return None
         if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-            self.audio.play("menuedge", channel="ui")
+            self._play_menu_sound("confirm")
             return self.items[self.index].action
         return None

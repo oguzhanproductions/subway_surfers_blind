@@ -37,6 +37,7 @@ class Player:
     jetpack: float = 0.0
     headstart: float = 0.0
     mult2x: float = 0.0
+    pogo_active: float = 0.0
 
 
 @dataclass
