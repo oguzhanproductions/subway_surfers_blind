@@ -255,6 +255,11 @@ class SubwayBlindGame:
         self.controls = ControllerSupport(settings)
         self._binding_capture: BindingCaptureRequest | None = None
         self._selected_binding_device = "controller" if self.controls.active_controller() is not None else "keyboard"
+        self._game_over_summary = {"score": 0, "coins": 0, "death_reason": "Run ended."}
+        self._last_death_reason = "Run ended."
+        self._pending_menu_announcement: Optional[tuple[Menu, float]] = None
+        self._magnet_loop_active = False
+        self._jetpack_loop_active = False
 
         self.pause_menu = Menu(
             self.speaker,
@@ -281,6 +286,18 @@ class SubwayBlindGame:
             [
                 MenuItem(self._revive_option_label(), "revive"),
                 MenuItem("End Run", "end_run"),
+            ],
+        )
+        self.game_over_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Game Over",
+            [
+                MenuItem("Score: 0", "game_over_info_score"),
+                MenuItem("Coins: 0", "game_over_info_coins"),
+                MenuItem("Death reason: Run ended.", "game_over_info_reason"),
+                MenuItem("Run again", "game_over_retry"),
+                MenuItem("Main menu", "game_over_main_menu"),
             ],
         )
         self.main_menu = Menu(
@@ -390,7 +407,10 @@ class SubwayBlindGame:
         return f"Main Menu   Version: {APP_VERSION}"
 
     def _shop_title(self) -> str:
-        return f"Shop   Coins: {int(self.settings.get('bank_coins', 0))}"
+        return "Shop"
+
+    def _shop_coins_label(self) -> str:
+        return f"Coins: {int(self.settings.get('bank_coins', 0))}"
 
     def _music_option_label(self) -> str:
         return f"Music Volume: {int(float(self.settings['music_volume']) * 100)}"
@@ -481,6 +501,14 @@ class SubwayBlindGame:
 
     def _refresh_revive_menu_label(self) -> None:
         self.revive_menu.items[0].label = self._revive_option_label()
+
+    def _refresh_game_over_menu(self) -> None:
+        summary = self._game_over_summary
+        self.game_over_menu.items[0].label = f"Score: {int(summary['score'])}"
+        self.game_over_menu.items[1].label = f"Coins: {int(summary['coins'])}"
+        self.game_over_menu.items[2].label = f"Death reason: {summary['death_reason']}"
+        self.game_over_menu.items[3].label = "Run again"
+        self.game_over_menu.items[4].label = "Main menu"
 
     def _refresh_shop_menu_labels(self) -> None:
         self.shop_menu.title = self._shop_title()
@@ -810,6 +838,29 @@ class SubwayBlindGame:
         self._exit_requested = True
         self.audio.music_stop()
 
+    @staticmethod
+    def _death_reason_for_variant(variant: str) -> str:
+        return {
+            "train": "Hit train",
+            "low": "Hit low obstacle",
+            "high": "Hit high obstacle",
+            "bush": "Hit bush",
+        }.get(variant, "Run ended after crash")
+
+    def _open_game_over_dialog(self, death_reason: Optional[str] = None) -> None:
+        summary_reason = death_reason or self._last_death_reason or "Run ended after crash"
+        self._game_over_summary = {
+            "score": int(self.state.score),
+            "coins": int(self.state.coins),
+            "death_reason": summary_reason,
+        }
+        self._refresh_game_over_menu()
+        self.active_menu = self.game_over_menu
+        self.game_over_menu.opened = True
+        self.game_over_menu.index = 0
+        self._pending_menu_announcement = (self.game_over_menu, 0.45)
+        self.speaker.speak("Game Over.", interrupt=True)
+
     def _mission_goals(self):
         return mission_goals_for_set(int(self.settings.get("mission_set", 1)))
 
@@ -898,7 +949,7 @@ class SubwayBlindGame:
 
     def _open_super_mystery_box(self, source: str) -> None:
         reward = pick_super_mystery_box_reward()
-        self.audio.play("mystery_box", channel="ui")
+        self.audio.play("mystery_box_open", channel="ui")
         self.audio.play("mystery_combo", channel="ui2")
         if reward == "coins":
             gain = random.randint(450, 1100)
@@ -911,6 +962,11 @@ class SubwayBlindGame:
             self.settings["hoverboards"] = int(self.settings.get("hoverboards", 0)) + gain
             self.audio.play("unlock", channel="ui3")
             self.speaker.speak(f"{source}: Super Mystery Box. {gain} hoverboard{'s' if gain != 1 else ''}.", interrupt=True)
+            return
+        if reward == "jetpack":
+            self.audio.play("unlock", channel="ui3")
+            self._apply_power_reward("jetpack", from_headstart=False)
+            self.speaker.speak(f"{source}: Super Mystery Box. Jetpack.", interrupt=True)
             return
         if reward == "keys":
             gain = random.randint(1, 2)
@@ -995,8 +1051,7 @@ class SubwayBlindGame:
             self.speaker.speak("Not enough coins.", interrupt=True)
             return False
         self.settings["bank_coins"] = current - cost
-        self.audio.play("gui_tap", channel="ui")
-        self.audio.play("coin_gui", channel="ui2")
+        self.audio.play("gui_cash", channel="ui")
         return True
 
     def _purchase_shop_item(self, item: str) -> None:
@@ -1009,7 +1064,6 @@ class SubwayBlindGame:
         elif item == "mystery_box":
             if not self._spend_bank_coins(SHOP_PRICES["mystery_box"]):
                 return
-            self.audio.play("mystery_box", channel="player_box")
             self._grant_shop_box_reward(pick_shop_mystery_box_reward())
         elif item == "headstart":
             if not self._spend_bank_coins(SHOP_PRICES["headstart"]):
@@ -1024,47 +1078,49 @@ class SubwayBlindGame:
             self.audio.play("unlock", channel="ui3")
             self.speaker.speak("Score booster purchased.", interrupt=True)
         self._refresh_shop_menu_labels()
-        self.speaker.speak(self.shop_menu.title, interrupt=False)
+        self.speaker.speak(self._shop_coins_label(), interrupt=False)
 
     def _grant_shop_box_reward(self, reward: str) -> None:
+        self.speaker.speak("Opening Mystery Box.", interrupt=True)
+        self.audio.play("mystery_box_open", channel="player_box")
         if reward == "coins":
             gain = shop_box_reward_amount("coins")
             self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + gain
             self.audio.play("gui_cash", channel="ui3")
-            self.speaker.speak(f"Mystery box: {gain} coins.", interrupt=True)
+            self.speaker.speak(f"Mystery box: {gain} coins.", interrupt=False)
             return
         if reward == "hover":
             gain = shop_box_reward_amount("hover")
             self.settings["hoverboards"] = int(self.settings.get("hoverboards", 0)) + gain
             self.audio.play("unlock", channel="ui3")
-            self.speaker.speak(f"Mystery box: {gain} hoverboard{'s' if gain != 1 else ''}.", interrupt=True)
+            self.speaker.speak(f"Mystery box: {gain} hoverboard{'s' if gain != 1 else ''}.", interrupt=False)
             return
         if reward == "key":
             gain = shop_box_reward_amount("key")
             self.settings["keys"] = int(self.settings.get("keys", 0)) + gain
             self.audio.play("unlock", channel="ui3")
-            self.speaker.speak(f"Mystery box: {gain} key{'s' if gain != 1 else ''}.", interrupt=True)
+            self.speaker.speak(f"Mystery box: {gain} key{'s' if gain != 1 else ''}.", interrupt=False)
             return
         if reward == "headstart":
             gain = shop_box_reward_amount("headstart")
             self.settings["headstarts"] = int(self.settings.get("headstarts", 0)) + gain
             self.audio.play("mystery_combo", channel="ui3")
-            self.speaker.speak(f"Mystery box: {gain} headstart{'s' if gain != 1 else ''}.", interrupt=True)
+            self.speaker.speak(f"Mystery box: {gain} headstart{'s' if gain != 1 else ''}.", interrupt=False)
             return
         if reward == "score_booster":
             gain = shop_box_reward_amount("score_booster")
             self.settings["score_boosters"] = int(self.settings.get("score_boosters", 0)) + gain
             self.audio.play("mystery_combo", channel="ui3")
-            self.speaker.speak(f"Mystery box: {gain} score booster{'s' if gain != 1 else ''}.", interrupt=True)
+            self.speaker.speak(f"Mystery box: {gain} score booster{'s' if gain != 1 else ''}.", interrupt=False)
             return
         if reward == "jackpot":
             gain = shop_box_reward_amount("jackpot")
             self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + gain
             self.audio.play("gui_cash", channel="ui3")
             self.audio.play("unlock", channel="ui4")
-            self.speaker.speak(f"Mystery box jackpot: {gain} coins.", interrupt=True)
+            self.speaker.speak(f"Mystery box jackpot: {gain} coins.", interrupt=False)
             return
-        self.speaker.speak("Mystery box: empty.", interrupt=True)
+        self.speaker.speak("Mystery box: empty.", interrupt=False)
 
     def _commit_run_rewards(self) -> None:
         if self._run_rewards_committed or not self.state.running:
@@ -1134,6 +1190,8 @@ class SubwayBlindGame:
         if self._exit_requested:
             return True
         if self.active_menu is not None:
+            if self._pending_menu_announcement is not None and self.active_menu == self.game_over_menu:
+                return True
             keep_running = self._handle_active_menu_key(key)
             if keep_running:
                 self._prime_menu_repeat(key)
@@ -1244,10 +1302,27 @@ class SubwayBlindGame:
             else:
                 self._process_translated_keyup(translated_key)
 
+    def _add_run_coins(self, amount: int) -> None:
+        if amount <= 0:
+            return
+        self.state.coins += amount
+        # Fatal collisions can commit rewards mid-frame; bank late coin pickups immediately.
+        if self._run_rewards_committed:
+            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + amount
+
     def run(self) -> None:
         running = True
         while running:
             delta_time = self.clock.tick(60) / 1000.0
+            if self._pending_menu_announcement is not None:
+                menu, remaining = self._pending_menu_announcement
+                remaining = max(0.0, remaining - delta_time)
+                if remaining <= 0:
+                    self._pending_menu_announcement = None
+                    if self.active_menu is menu:
+                        menu._announce_current()
+                else:
+                    self._pending_menu_announcement = (menu, remaining)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self._request_exit()
@@ -1334,7 +1409,11 @@ class SubwayBlindGame:
     def _handle_menu_action(self, action: str) -> bool:
         if action == "close":
             if self.active_menu == self.revive_menu:
-                self._finish_run_loss()
+                self._finish_run_loss("Run ended after crash")
+                return True
+            if self.active_menu == self.game_over_menu:
+                self.active_menu.index = 0
+                self.speaker.speak(self.active_menu.items[0].label, interrupt=True)
                 return True
             if self.active_menu == self.update_menu:
                 return False
@@ -1370,6 +1449,7 @@ class SubwayBlindGame:
             if action == "shop":
                 self._refresh_shop_menu_labels()
                 self._set_active_menu(self.shop_menu)
+                self.speaker.speak(self._shop_coins_label(), interrupt=False)
                 return True
             if action == "options":
                 self._refresh_options_menu_labels()
@@ -1577,7 +1657,20 @@ class SubwayBlindGame:
                 self._revive_run()
                 return True
             if action in ("end_run", "close"):
-                self._finish_run_loss()
+                self._finish_run_loss("Run ended after crash")
+                return True
+
+        if self.active_menu == self.game_over_menu:
+            if action == "game_over_retry":
+                self.start_run()
+                return True
+            if action == "game_over_main_menu":
+                self.active_menu = self.main_menu
+                self.active_menu.open()
+                return True
+            if action.startswith("game_over_info_"):
+                current_item = self.active_menu.items[self.active_menu.index]
+                self.speaker.speak(current_item.label, interrupt=True)
                 return True
 
         return True
@@ -1725,6 +1818,8 @@ class SubwayBlindGame:
             f"Controls: {self._gameplay_controls_summary()} "
             "Danger speech now only calls the action for your current lane. "
             "Bushes must be jumped. Before each run you can stack up to three Headstarts and three Score Boosters. "
+            "Press R anytime during a run to hear your current collected coins. "
+            "This is useful when many announcements are playing and you want a quick coin check. "
             "Keys can revive you after a crash. Missions raise your permanent multiplier. "
             "Word Hunt letters and Season Hunt tokens appear during runs. "
             "The shop lets you spend saved coins on items and mystery boxes.",
@@ -1750,6 +1845,10 @@ class SubwayBlindGame:
         self._run_rewards_committed = False
         self._near_miss_signatures.clear()
         self._guard_loop_timer = 0.0
+        self._last_death_reason = "Run ended."
+        self._game_over_summary = {"score": 0, "coins": 0, "death_reason": "Run ended."}
+        self._magnet_loop_active = False
+        self._jetpack_loop_active = False
 
         if self.selected_headstarts > 0:
             self.settings["headstarts"] = max(0, int(self.settings.get("headstarts", 0)) - self.selected_headstarts)
@@ -1799,6 +1898,9 @@ class SubwayBlindGame:
             self.state.paused = True
             self._set_active_menu(self.pause_menu)
             self.audio.play("menuclose", channel="ui")
+            return
+        if key == pygame.K_r:
+            self.speaker.speak(f"Coins collected: {self.state.coins}.", interrupt=False)
             return
 
         if self.state.paused or self.player.jetpack > 0 or self.player.headstart > 0:
@@ -1957,19 +2059,23 @@ class SubwayBlindGame:
             decay("magnet")
         if previous_magnet > 0 and self.player.magnet <= 0:
             self.audio.stop("loop_magnet")
+            self._magnet_loop_active = False
             self.audio.play("powerdown", channel="act")
             self.speaker.speak("Magnet expired.", interrupt=False)
-        elif previous_magnet <= 0 and self.player.magnet > 0:
+        elif self.player.magnet > 0 and not self._magnet_loop_active:
             self.audio.play("magnet_loop", loop=True, channel="loop_magnet")
+            self._magnet_loop_active = True
 
         previous_jetpack = self.player.jetpack
         decay("jetpack")
         if previous_jetpack > 0 and self.player.jetpack <= 0:
             self.audio.stop("loop_jetpack")
+            self._jetpack_loop_active = False
             self.audio.play("powerdown", channel="act")
             self.speaker.speak("Jetpack expired.", interrupt=False)
-        elif previous_jetpack <= 0 and self.player.jetpack > 0:
+        elif self.player.jetpack > 0 and not self._jetpack_loop_active:
             self.audio.play("jetpack_loop", loop=True, channel="loop_jetpack")
+            self._jetpack_loop_active = True
 
         previous_multiplier = self.player.mult2x
         if self.player.jetpack <= 0 and self.player.headstart <= 0:
@@ -2133,11 +2239,11 @@ class SubwayBlindGame:
                     continue
                 if obstacle.kind == "high" and self.player.rolling > 0:
                     continue
-                self._on_hit("bush" if obstacle.kind == "bush" else "default")
+                self._on_hit(obstacle.kind)
                 obstacle.z = -999
 
     def _collect_coin(self, obstacle: Obstacle) -> None:
-        self.state.coins += 1
+        self._add_run_coins(1)
         self._record_mission_event("coins")
         self.audio.play("coin", pan=lane_to_pan(obstacle.lane), channel="coin")
         announce_every = int(self.settings.get("announce_coins_every", 10) or 0)
@@ -2182,11 +2288,12 @@ class SubwayBlindGame:
 
     def _collect_box(self) -> None:
         self._record_mission_event("boxes")
-        self.audio.play("mystery_box", channel="act")
         reward = pick_mystery_box_reward()
+        self.speaker.speak("Opening Mystery Box.", interrupt=True)
+        self.audio.play("mystery_box_open", channel="act")
         if reward == "coins":
             gain = random.randint(10, 40)
-            self.state.coins += gain
+            self._add_run_coins(gain)
             self.speaker.speak(f"Mystery box: {gain} coins.", interrupt=False)
             self.audio.play("gui_cash", channel="ui")
         elif reward == "hover":
@@ -2219,6 +2326,9 @@ class SubwayBlindGame:
         self.speaker.speak(f"Key collected. Total keys: {self.settings['keys']}.", interrupt=False)
 
     def _collect_word_letter(self, obstacle: Obstacle) -> None:
+        expected_letter = self._next_word_letter()
+        if not expected_letter or obstacle.label != expected_letter:
+            return
         letter, completed = register_word_letter(self.settings)
         if not letter:
             return
@@ -2312,7 +2422,7 @@ class SubwayBlindGame:
         self.audio.play("powerup", channel="act")
         self.speaker.speak("Revived. Temporary shield active.", interrupt=True)
 
-    def _finish_run_loss(self) -> None:
+    def _finish_run_loss(self, death_reason: Optional[str] = None) -> None:
         self.state.paused = False
         self._stop_spatial_audio()
         self.audio.play("kick", channel="player_kick")
@@ -2320,17 +2430,22 @@ class SubwayBlindGame:
         self.audio.play("death_bodyfall", channel="player_death_fall")
         self.audio.play("death", channel="act")
         self.audio.play("guard_catch", channel="act2")
-        self.speaker.speak(
-            f"Run over. Score {int(self.state.score)}. Coins {self.state.coins}.",
-            interrupt=True,
-        )
-        self.end_run(to_menu=True)
+        summary_reason = death_reason or self._last_death_reason or "Run ended after crash"
+        self.speaker.speak(f"Run over. Score {int(self.state.score)}. {summary_reason}.", interrupt=True)
+        self._commit_run_rewards()
+        self.audio.music_stop()
+        self.audio.stop("loop_guard")
+        self.audio.stop("loop_magnet")
+        self.audio.stop("loop_jetpack")
+        self._stop_spatial_audio()
+        self.spatial_audio.reset()
+        self._open_game_over_dialog(summary_reason)
 
     def _stop_spatial_audio(self) -> None:
         for lane in LANES:
             self.audio.stop(f"spatial_{lane}")
 
-    def _on_hit(self, variant: str = "default") -> None:
+    def _on_hit(self, variant: str = "train") -> None:
         if self.player.hover_active > 0:
             self.player.hover_active = 0.0
             self.audio.play("crash", channel="act")
@@ -2338,6 +2453,7 @@ class SubwayBlindGame:
             self.speaker.speak("Hoverboard destroyed.", interrupt=True)
             return
 
+        self._last_death_reason = self._death_reason_for_variant(variant)
         self.player.stumbles += 1
         if self.player.stumbles >= 2:
             self._guard_loop_timer = 0.0
@@ -2396,6 +2512,10 @@ class SubwayBlindGame:
         start_index = max(0, min(menu.index - (visible_rows // 2), max_start_index))
         visible_items = menu.items[start_index : start_index + visible_rows]
         y_position = list_top
+        if menu == self.shop_menu:
+            coins_surface = self.font.render(self._shop_coins_label(), True, (220, 220, 220))
+            self.screen.blit(coins_surface, (70, y_position))
+            y_position += 40
         for relative_index, item in enumerate(visible_items):
             actual_index = start_index + relative_index
             color = (255, 255, 0) if actual_index == menu.index else (220, 220, 220)
@@ -2463,7 +2583,8 @@ class SubwayBlindGame:
             self.screen.blit(prompt_surface, (40, max(height - 80, y_position + 18)))
 
         hint_surface = self.font.render(hint_text, True, (180, 180, 180))
-        self.screen.blit(hint_surface, (40, height - 44))
+        hint_rect = hint_surface.get_rect(left=40, bottom=max(40, height - 20))
+        self.screen.blit(hint_surface, hint_rect)
 
     def _draw_game(self) -> None:
         width, height = self.screen.get_size()
