@@ -68,6 +68,7 @@ SUPER_MYSTERY_BOX_REWARD_WEIGHTS = {
     "coins": 38,
     "hoverboards": 16,
     "keys": 18,
+    "jetpack": 10,
     "headstarts": 10,
     "score_boosters": 8,
     "jackpot": 6,

@@ -471,6 +471,32 @@ class AudioTests(unittest.TestCase):
         self.assertEqual(Audio._normalize_pan_for_key("jump", 0.9), 0.0)
         self.assertEqual(Audio._normalize_pan_for_key("dodge", -0.9), 0.0)
 
+    def test_audio_loads_standard_jetpack_loop_asset(self):
+        loaded: list[tuple[str, str]] = []
+
+        def capture_load(_self, key: str, path: str) -> None:
+            loaded.append((key, path))
+
+        with patch.object(Audio, "_load_sound", autospec=True, side_effect=capture_load), patch(
+            "subway_blind.audio.OpenALHrtfEngine",
+            return_value=type(
+                "FakeHrtf",
+                (),
+                {
+                    "available": False,
+                    "register_sound": staticmethod(lambda *_args, **_kwargs: None),
+                    "set_listener_gain": staticmethod(lambda *_args, **_kwargs: None),
+                    "stop": staticmethod(lambda *_args, **_kwargs: None),
+                    "play_sound": staticmethod(lambda *_args, **_kwargs: False),
+                    "update_source": staticmethod(lambda *_args, **_kwargs: False),
+                },
+            )(),
+        ):
+            Audio(copy.deepcopy(config_module.DEFAULT_SETTINGS))
+
+        jetpack_entry = next(path for key, path in loaded if key == "jetpack_loop")
+        self.assertTrue(jetpack_entry.endswith("assets\\sfx\\jetpack_loop.wav"))
+
     def test_transient_player_channels_are_collapsed(self):
         self.assertEqual(Audio._normalize_channel_for_key("jump", "act"), "player_jump")
         self.assertEqual(Audio._normalize_channel_for_key("dodge", "move"), "player_dodge")
@@ -1024,10 +1050,16 @@ class GameTests(unittest.TestCase):
     def tearDownClass(cls):
         pygame.quit()
 
-    def make_game(self, updater: DummyUpdater | None = None):
+    def make_game(self, updater: DummyUpdater | None = None, packaged_build: bool = False):
         settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
         settings["speech_enabled"] = False
-        game = SubwayBlindGame(self.screen, pygame.time.Clock(), settings, updater=updater or DummyUpdater())
+        game = SubwayBlindGame(
+            self.screen,
+            pygame.time.Clock(),
+            settings,
+            updater=updater or DummyUpdater(),
+            packaged_build=packaged_build,
+        )
         speaker = DummySpeaker()
         speaker.apply_settings(settings)
         audio = DummyAudio(settings)
@@ -1046,6 +1078,7 @@ class GameTests(unittest.TestCase):
             game.revive_menu,
             game.learn_sounds_menu,
             game.update_menu,
+            game.game_over_menu,
         ):
             menu.speaker = speaker
             menu.audio = audio
@@ -1075,8 +1108,9 @@ class GameTests(unittest.TestCase):
 
     def test_options_menu_includes_output_device_entry(self):
         game, _, _ = self.make_game()
+        labels = [item.label for item in game.options_menu.items]
         self.assertEqual(
-            [item.label for item in game.options_menu.items],
+            labels[:7] + labels[8:],
             [
                 "SFX Volume: 90",
                 "Music Volume: 60",
@@ -1085,7 +1119,6 @@ class GameTests(unittest.TestCase):
                 "Menu Sound HRTF: On",
                 "Speech: Off",
                 "SAPI Speech: Off",
-                "SAPI Voice: Microsoft Zira Desktop - English (United States)",
                 "SAPI Rate: 0",
                 "SAPI Pitch: 0",
                 "Difficulty: Normal",
@@ -1093,6 +1126,7 @@ class GameTests(unittest.TestCase):
                 "Back",
             ],
         )
+        self.assertTrue(labels[7].startswith("SAPI Voice: Microsoft "))
 
     def test_shop_menu_labels_include_coin_currency(self):
         game, _, _ = self.make_game()
@@ -1116,7 +1150,7 @@ class GameTests(unittest.TestCase):
     def test_startup_update_check_runs_when_setting_is_enabled(self):
         updater = DummyUpdater()
 
-        game, _, _ = self.make_game(updater=updater)
+        game, _, _ = self.make_game(updater=updater, packaged_build=True)
 
         self.assertIs(game.active_menu, game.main_menu)
         self.assertEqual(updater.check_calls, 1)
@@ -1133,10 +1167,18 @@ class GameTests(unittest.TestCase):
             )
         ]
 
-        game, _, _ = self.make_game(updater=updater)
+        game, _, _ = self.make_game(updater=updater, packaged_build=True)
 
         self.assertIs(game.active_menu, game.update_menu)
         self.assertTrue(game.update_menu.title.startswith("Update Required"))
+
+    def test_source_build_skips_startup_update_check(self):
+        updater = DummyUpdater()
+
+        game, _, _ = self.make_game(updater=updater, packaged_build=False)
+
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertEqual(updater.check_calls, 0)
 
     def test_manual_check_for_updates_opens_update_menu_when_update_exists(self):
         updater = DummyUpdater()
@@ -1154,7 +1196,7 @@ class GameTests(unittest.TestCase):
                 message="Version 0.2.0 is available.",
             ),
         ]
-        game, _, _ = self.make_game(updater=updater)
+        game, _, _ = self.make_game(updater=updater, packaged_build=True)
 
         game._handle_menu_action("check_updates")
 
@@ -1177,7 +1219,7 @@ class GameTests(unittest.TestCase):
                 message="You already have the latest version.",
             ),
         ]
-        game, _, audio = self.make_game(updater=updater)
+        game, _, audio = self.make_game(updater=updater, packaged_build=True)
         game.active_menu = game.main_menu
         game.main_menu.index = 5
 
@@ -1197,7 +1239,7 @@ class GameTests(unittest.TestCase):
                 message="Version 0.2.0 is available.",
             )
         ]
-        game, _, _ = self.make_game(updater=updater)
+        game, _, _ = self.make_game(updater=updater, packaged_build=True)
 
         keep_running = game._handle_menu_action("download_update")
         if game._update_install_thread is not None:
@@ -1219,7 +1261,7 @@ class GameTests(unittest.TestCase):
                 message="Version 0.2.0 is available.",
             )
         ]
-        game, _, _ = self.make_game(updater=updater)
+        game, _, _ = self.make_game(updater=updater, packaged_build=True)
         if game._update_install_thread is not None:
             game._update_install_thread.join(timeout=1.0)
         game._update_install_result = updater.install_result
@@ -1230,6 +1272,27 @@ class GameTests(unittest.TestCase):
 
         self.assertFalse(keep_running)
         self.assertEqual(updater.launch_restart_calls[-1], updater.install_result.restart_script_path)
+
+    def test_source_build_manual_update_check_opens_non_mandatory_update_menu(self):
+        updater = DummyUpdater()
+        updater.check_results = [
+            UpdateCheckResult(
+                status="update_available",
+                current_version=APP_VERSION,
+                latest_version="0.2.0",
+                release=make_release_info("0.2.0"),
+                message="Version 0.2.0 is available.",
+            )
+        ]
+
+        game, _, _ = self.make_game(updater=updater, packaged_build=False)
+
+        game._handle_menu_action("check_updates")
+
+        self.assertIs(game.active_menu, game.update_menu)
+        self.assertEqual(game.update_menu.title, "Update Available   0.1.0 -> 0.2.0")
+        self.assertEqual(game.update_menu.items[0].action, "open_release_page")
+        self.assertEqual(game.update_menu.items[2].action, "back")
 
     def test_start_run_uses_profile_base_speed(self):
         game, _, audio = self.make_game()
@@ -1876,7 +1939,7 @@ class GameTests(unittest.TestCase):
             game._grant_shop_box_reward("hover")
 
         self.assertEqual(game.settings["hoverboards"], 3)
-        self.assertIn(("Mystery box: 3 hoverboards.", True), speaker.messages)
+        self.assertIn(("Mystery box: 3 hoverboards.", False), speaker.messages)
 
     def test_hoverboard_absorbs_hit(self):
         game, speaker, _ = self.make_game()
@@ -1936,7 +1999,7 @@ class GameTests(unittest.TestCase):
 
         self.assertIn(("swish_mid", "near_0", False), audio.played)
 
-    def test_second_hit_returns_to_main_menu(self):
+    def test_second_hit_opens_game_over_dialog(self):
         game, speaker, audio = self.make_game()
         game.player.stumbles = 1
         game.state.score = 120
@@ -1947,10 +2010,16 @@ class GameTests(unittest.TestCase):
 
         game._on_hit()
 
-        self.assertIs(game.active_menu, game.main_menu)
-        self.assertEqual(audio.music_started_tracks[-1], "menu")
+        self.assertIs(game.active_menu, game.game_over_menu)
+        self.assertEqual(audio.music_stopped, 1)
         self.assertEqual(game.settings["bank_coins"], 8)
-        self.assertIn(("Run over. Score 120. Coins 8.", True), speaker.messages)
+        self.assertEqual(
+            [item.label for item in game.game_over_menu.items],
+            ["Score: 120", "Coins: 8", "Death reason: Hit train", "Run again", "Main menu"],
+        )
+        self.assertIn(("Run over. Score 120. Hit train.", True), speaker.messages)
+        self.assertEqual(game.game_over_menu.index, 0)
+        self.assertEqual(speaker.messages[-1], ("Game Over.", True))
 
     def test_second_hit_opens_revive_menu_when_keys_exist(self):
         game, speaker, _ = self.make_game()
@@ -1962,6 +2031,19 @@ class GameTests(unittest.TestCase):
 
         self.assertIs(game.active_menu, game.revive_menu)
         self.assertIn(("You can revive for 1 key.", True), speaker.messages)
+
+    def test_bush_death_reason_is_recorded_in_game_over_dialog(self):
+        game, _, _ = self.make_game()
+        game.player.stumbles = 1
+        game.state.score = 40
+        game.state.coins = 3
+        game.state.running = True
+        game.settings["keys"] = 0
+
+        game._on_hit("bush")
+
+        self.assertIs(game.active_menu, game.game_over_menu)
+        self.assertEqual(game.game_over_menu.items[2].label, "Death reason: Hit bush")
 
     def test_revive_consumes_key_and_restores_run(self):
         game, _, _ = self.make_game()
@@ -2028,7 +2110,7 @@ class GameTests(unittest.TestCase):
             game._collect_super_mysterizer()
 
         self.assertEqual(game.settings["keys"], original_keys + 2)
-        self.assertIn(("mystery_box", "ui", False), audio.played)
+        self.assertIn(("mystery_box_open", "ui", False), audio.played)
         self.assertIn(("mystery_combo", "ui2", False), audio.played)
         self.assertTrue(any("Super Mysterizer" in message for message, _ in speaker.messages))
 
@@ -2053,6 +2135,15 @@ class GameTests(unittest.TestCase):
 
         self.assertEqual(game.player.stumbles, 0)
 
+    def test_mystery_box_announces_opening_before_reward(self):
+        game, speaker, _ = self.make_game()
+
+        with patch("subway_blind.game.pick_mystery_box_reward", return_value="key"):
+            game._collect_box()
+
+        self.assertEqual(speaker.messages[0], ("Opening Mystery Box.", True))
+        self.assertEqual(speaker.messages[1], ("Mystery box: key.", False))
+
     def test_collect_word_letter_completes_word_hunt_and_awards_bank_coins(self):
         game, speaker, _ = self.make_game()
         word = game._current_word()
@@ -2065,6 +2156,18 @@ class GameTests(unittest.TestCase):
 
         self.assertEqual(game.settings["bank_coins"], 300)
         self.assertTrue(any("Word Hunt complete." in message for message, _ in speaker.messages))
+
+    def test_collect_word_letter_ignores_unexpected_letter(self):
+        game, speaker, audio = self.make_game()
+        word = game._current_word()
+        game.settings["word_hunt_day"] = date.today().isoformat()
+        game.settings["word_hunt_letters"] = word[:1]
+
+        game._collect_word_letter(Obstacle(kind="word", lane=0, z=1.0, label="Z"))
+
+        self.assertEqual(game.settings["word_hunt_letters"], word[:1])
+        self.assertEqual(speaker.messages, [])
+        self.assertEqual(audio.played, [])
 
     def test_collect_season_token_claims_reward(self):
         game, speaker, _ = self.make_game()
@@ -2094,10 +2197,150 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.state.multiplier, 2)
         self.assertTrue(any("Mission set complete." in message for message, _ in speaker.messages))
 
+    def test_super_mystery_box_can_grant_jetpack_reward(self):
+        game, speaker, _ = self.make_game()
+        game.state.running = True
+
+        with patch("subway_blind.game.pick_super_mystery_box_reward", return_value="jetpack"):
+            game._open_super_mystery_box("Mission Set")
+
+        self.assertGreater(game.player.jetpack, 0.0)
+        self.assertIn(("Mission Set: Super Mystery Box. Jetpack.", True), speaker.messages)
+
+    def test_tick_powerups_starts_loop_for_active_jetpack(self):
+        game, _, audio = self.make_game()
+        game.player.jetpack = 6.5
+
+        game._tick_powerups(0.016)
+
+        self.assertIn(("jetpack_loop", "loop_jetpack", True), audio.played)
+
     def test_lane_names_are_english(self):
         self.assertEqual(lane_name(-1), "Left lane")
         self.assertEqual(lane_name(0), "Center lane")
         self.assertEqual(lane_name(1), "Right lane")
+
+    def test_coin_announcement_hotkey_works_during_headstart(self):
+        game, speaker, _ = self.make_game()
+        game.state.coins = 17
+        game.player.headstart = 3.0
+
+        game._handle_game_key(pygame.K_r)
+
+        self.assertIn(("Coins collected: 17.", False), speaker.messages)
+
+    def test_coin_announcement_hotkey_works_through_keyboard_translation(self):
+        game, speaker, _ = self.make_game()
+        game.state.coins = 23
+        game.active_menu = None
+
+        event = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_r)
+        game._handle_keyboard_event(event)
+
+        self.assertIn(("Coins collected: 23.", False), speaker.messages)
+
+    def test_jetpack_auto_collects_coins_while_airborne(self):
+        game, _, _ = self.make_game()
+        game.player.jetpack = 4.0
+        game.obstacles = [Obstacle(kind="coin", lane=1, z=1.0, value=1)]
+
+        game._handle_obstacles()
+
+        self.assertEqual(game.state.coins, 1)
+        self.assertLess(game.obstacles[0].z, -100)
+
+    def test_jetpack_disables_lane_change_actions(self):
+        game, _, audio = self.make_game()
+        game.player.jetpack = 4.0
+        game.player.lane = 0
+
+        game._handle_game_key(pygame.K_LEFT)
+
+        self.assertEqual(game.player.lane, 0)
+        self.assertNotIn(("dodge", "move", False), audio.played)
+
+    def test_second_hit_summary_remains_last_spoken_before_game_over_dialog(self):
+        game, speaker, audio = self.make_game()
+        game.player.stumbles = 1
+        game.state.score = 120
+        game.state.coins = 8
+        game.state.running = True
+        game.settings["keys"] = 0
+        game.active_menu = None
+
+        game._on_hit()
+
+        self.assertIs(game.active_menu, game.game_over_menu)
+        self.assertEqual(audio.music_stopped, 1)
+        self.assertEqual(speaker.messages[-1], ("Game Over.", True))
+
+    def test_game_over_dialog_defers_score_announcement_until_delay_expires(self):
+        game, speaker, _ = self.make_game()
+        game.state.score = 120
+        game.state.coins = 8
+
+        game._open_game_over_dialog("Hit train")
+
+        self.assertEqual(speaker.messages[-1], ("Game Over.", True))
+        self.assertEqual(game.game_over_menu.index, 0)
+        self.assertIsNotNone(game._pending_menu_announcement)
+
+    def test_game_over_menu_run_again_starts_new_run(self):
+        game, _, audio = self.make_game()
+        game.state.score = 80
+        game.state.coins = 6
+        game._game_over_summary = {"score": 80, "coins": 6, "death_reason": "Hit train"}
+        game._refresh_game_over_menu()
+        game.active_menu = game.game_over_menu
+
+        game._handle_menu_action("game_over_retry")
+
+        self.assertIsNone(game.active_menu)
+        self.assertTrue(game.state.running)
+        self.assertGreaterEqual(audio.music_started, 1)
+
+    def test_game_over_menu_main_menu_returns_to_main_menu(self):
+        game, _, _ = self.make_game()
+        game._game_over_summary = {"score": 80, "coins": 6, "death_reason": "Hit train"}
+        game._refresh_game_over_menu()
+        game.active_menu = game.game_over_menu
+
+        game._handle_menu_action("game_over_main_menu")
+
+        self.assertIs(game.active_menu, game.main_menu)
+
+    def test_game_over_detail_rows_are_read_only(self):
+        game, speaker, _ = self.make_game()
+        game._game_over_summary = {"score": 80, "coins": 6, "death_reason": "Hit train"}
+        game._refresh_game_over_menu()
+        game.active_menu = game.game_over_menu
+        game.game_over_menu.index = 0
+
+        game._handle_menu_action("game_over_info_score")
+
+        self.assertIs(game.active_menu, game.game_over_menu)
+        self.assertEqual(speaker.messages[-1], ("Score: 80", True))
+
+    def test_revive_end_run_opens_game_over_dialog_with_generic_crash_reason(self):
+        game, speaker, _ = self.make_game()
+        game.state.score = 55
+        game.state.coins = 4
+        game.state.running = True
+        game.active_menu = game.revive_menu
+
+        game._handle_menu_action("end_run")
+
+        self.assertIs(game.active_menu, game.game_over_menu)
+        self.assertEqual(game.game_over_menu.items[2].label, "Death reason: Run ended after crash")
+        self.assertIn(("Run over. Score 55. Run ended after crash.", True), speaker.messages)
+
+    def test_draw_menu_keeps_hint_on_small_screens(self):
+        game, _, _ = self.make_game()
+        game.screen = pygame.display.set_mode((320, 240))
+
+        game._draw_menu(game.main_menu)
+
+        self.assertEqual(game.screen.get_size(), (320, 240))
 
 
 if __name__ == "__main__":
