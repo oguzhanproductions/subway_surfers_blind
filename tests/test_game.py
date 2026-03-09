@@ -1050,10 +1050,16 @@ class GameTests(unittest.TestCase):
     def tearDownClass(cls):
         pygame.quit()
 
-    def make_game(self, updater: DummyUpdater | None = None):
+    def make_game(self, updater: DummyUpdater | None = None, packaged_build: bool = False):
         settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
         settings["speech_enabled"] = False
-        game = SubwayBlindGame(self.screen, pygame.time.Clock(), settings, updater=updater or DummyUpdater())
+        game = SubwayBlindGame(
+            self.screen,
+            pygame.time.Clock(),
+            settings,
+            updater=updater or DummyUpdater(),
+            packaged_build=packaged_build,
+        )
         speaker = DummySpeaker()
         speaker.apply_settings(settings)
         audio = DummyAudio(settings)
@@ -1144,7 +1150,7 @@ class GameTests(unittest.TestCase):
     def test_startup_update_check_runs_when_setting_is_enabled(self):
         updater = DummyUpdater()
 
-        game, _, _ = self.make_game(updater=updater)
+        game, _, _ = self.make_game(updater=updater, packaged_build=True)
 
         self.assertIs(game.active_menu, game.main_menu)
         self.assertEqual(updater.check_calls, 1)
@@ -1161,10 +1167,18 @@ class GameTests(unittest.TestCase):
             )
         ]
 
-        game, _, _ = self.make_game(updater=updater)
+        game, _, _ = self.make_game(updater=updater, packaged_build=True)
 
         self.assertIs(game.active_menu, game.update_menu)
         self.assertTrue(game.update_menu.title.startswith("Update Required"))
+
+    def test_source_build_skips_startup_update_check(self):
+        updater = DummyUpdater()
+
+        game, _, _ = self.make_game(updater=updater, packaged_build=False)
+
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertEqual(updater.check_calls, 0)
 
     def test_manual_check_for_updates_opens_update_menu_when_update_exists(self):
         updater = DummyUpdater()
@@ -1182,7 +1196,7 @@ class GameTests(unittest.TestCase):
                 message="Version 0.2.0 is available.",
             ),
         ]
-        game, _, _ = self.make_game(updater=updater)
+        game, _, _ = self.make_game(updater=updater, packaged_build=True)
 
         game._handle_menu_action("check_updates")
 
@@ -1205,7 +1219,7 @@ class GameTests(unittest.TestCase):
                 message="You already have the latest version.",
             ),
         ]
-        game, _, audio = self.make_game(updater=updater)
+        game, _, audio = self.make_game(updater=updater, packaged_build=True)
         game.active_menu = game.main_menu
         game.main_menu.index = 5
 
@@ -1225,7 +1239,7 @@ class GameTests(unittest.TestCase):
                 message="Version 0.2.0 is available.",
             )
         ]
-        game, _, _ = self.make_game(updater=updater)
+        game, _, _ = self.make_game(updater=updater, packaged_build=True)
 
         keep_running = game._handle_menu_action("download_update")
         if game._update_install_thread is not None:
@@ -1247,7 +1261,7 @@ class GameTests(unittest.TestCase):
                 message="Version 0.2.0 is available.",
             )
         ]
-        game, _, _ = self.make_game(updater=updater)
+        game, _, _ = self.make_game(updater=updater, packaged_build=True)
         if game._update_install_thread is not None:
             game._update_install_thread.join(timeout=1.0)
         game._update_install_result = updater.install_result
@@ -1258,6 +1272,27 @@ class GameTests(unittest.TestCase):
 
         self.assertFalse(keep_running)
         self.assertEqual(updater.launch_restart_calls[-1], updater.install_result.restart_script_path)
+
+    def test_source_build_manual_update_check_opens_non_mandatory_update_menu(self):
+        updater = DummyUpdater()
+        updater.check_results = [
+            UpdateCheckResult(
+                status="update_available",
+                current_version=APP_VERSION,
+                latest_version="0.2.0",
+                release=make_release_info("0.2.0"),
+                message="Version 0.2.0 is available.",
+            )
+        ]
+
+        game, _, _ = self.make_game(updater=updater, packaged_build=False)
+
+        game._handle_menu_action("check_updates")
+
+        self.assertIs(game.active_menu, game.update_menu)
+        self.assertEqual(game.update_menu.title, "Update Available   0.1.0 -> 0.2.0")
+        self.assertEqual(game.update_menu.items[0].action, "open_release_page")
+        self.assertEqual(game.update_menu.items[2].action, "back")
 
     def test_start_run_uses_profile_base_speed(self):
         game, _, audio = self.make_game()
@@ -2193,6 +2228,16 @@ class GameTests(unittest.TestCase):
         game._handle_game_key(pygame.K_r)
 
         self.assertIn(("Coins collected: 17.", False), speaker.messages)
+
+    def test_coin_announcement_hotkey_works_through_keyboard_translation(self):
+        game, speaker, _ = self.make_game()
+        game.state.coins = 23
+        game.active_menu = None
+
+        event = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_r)
+        game._handle_keyboard_event(event)
+
+        self.assertIn(("Coins collected: 23.", False), speaker.messages)
 
     def test_jetpack_auto_collects_coins_while_airborne(self):
         game, _, _ = self.make_game()

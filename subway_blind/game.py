@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import textwrap
 from dataclasses import dataclass
 import random
@@ -208,6 +209,7 @@ class SubwayBlindGame:
         clock: pygame.time.Clock,
         settings: dict,
         updater: GitHubReleaseUpdater | None = None,
+        packaged_build: bool | None = None,
     ):
         self.screen = screen
         self.clock = clock
@@ -215,6 +217,7 @@ class SubwayBlindGame:
         self.speaker = Speaker.from_settings(settings)
         self.audio = Audio(settings)
         self.updater = updater or GitHubReleaseUpdater()
+        self.packaged_build = bool(getattr(sys, "frozen", False)) if packaged_build is None else bool(packaged_build)
         self.font = pygame.font.SysFont("segoeui", 22)
         self.big = pygame.font.SysFont("segoeui", 38, bold=True)
         ensure_progression_state(self.settings)
@@ -394,7 +397,7 @@ class SubwayBlindGame:
         self._refresh_control_menus()
 
         self.active_menu: Optional[Menu] = self.main_menu
-        if bool(self.settings.get("check_updates_on_startup", True)):
+        if self.packaged_build and bool(self.settings.get("check_updates_on_startup", True)):
             self._check_for_updates(announce_result=False, automatic=True)
         if self.active_menu == self.main_menu and not self.main_menu.opened:
             self.active_menu.open()
@@ -652,10 +655,17 @@ class SubwayBlindGame:
 
     def _refresh_update_menu(self, result: UpdateCheckResult) -> None:
         latest_version = result.latest_version or "Unknown"
-        self.update_menu.title = f"Update Required   {APP_VERSION} -> {latest_version}"
-        self._update_status_message = (
-            f"A newer version is available. Current version {APP_VERSION}. Latest version {latest_version}."
-        )
+        if self.packaged_build:
+            self.update_menu.title = f"Update Required   {APP_VERSION} -> {latest_version}"
+            self._update_status_message = (
+                f"A newer version is available. Current version {APP_VERSION}. Latest version {latest_version}."
+            )
+        else:
+            self.update_menu.title = f"Update Available   {APP_VERSION} -> {latest_version}"
+            self._update_status_message = (
+                f"A newer release is available. This source checkout reports version {APP_VERSION}. "
+                f"Latest release {latest_version}."
+            )
         self._update_release_notes = (
             result.release.notes.strip() if result.release is not None and result.release.notes.strip() else "No release notes were provided."
         )
@@ -668,13 +678,13 @@ class SubwayBlindGame:
         self._update_restart_script_path = None
         self._update_install_error = ""
         self._update_ready_announced = False
-        has_zip_package = bool(result.release and self.updater.has_installable_package(result.release))
+        has_zip_package = self.packaged_build and bool(result.release and self.updater.has_installable_package(result.release))
         self.update_menu.items[0].label = "Download and Install Update" if has_zip_package else "Open Release Page"
         self.update_menu.items[0].action = "download_update" if has_zip_package else "open_release_page"
         self.update_menu.items[1].label = "Open Release Page"
         self.update_menu.items[1].action = "open_release_page"
-        self.update_menu.items[2].label = "Quit Game"
-        self.update_menu.items[2].action = "quit"
+        self.update_menu.items[2].label = "Back" if not self.packaged_build else "Quit Game"
+        self.update_menu.items[2].action = "back" if not self.packaged_build else "quit"
 
     def _menu_navigation_hint(self) -> str:
         up = keyboard_key_label(self.controls.keyboard_binding_for_action("menu_up"))
@@ -728,6 +738,15 @@ class SubwayBlindGame:
         self.speaker.speak(self._update_status_message, interrupt=True)
 
     def _begin_update_install(self) -> None:
+        if not self.packaged_build:
+            release = self._latest_update_result.release if self._latest_update_result is not None else None
+            opened = self.updater.open_release_page(release)
+            if opened:
+                self.speaker.speak("Source builds cannot install updates automatically. Opening the release page.", interrupt=True)
+            else:
+                self._play_menu_feedback("menuedge")
+                self.speaker.speak("Source builds cannot install updates automatically.", interrupt=True)
+            return
         release = self._latest_update_result.release if self._latest_update_result is not None else None
         if release is None:
             self._play_menu_feedback("menuedge")
@@ -801,7 +820,17 @@ class SubwayBlindGame:
         result = self.updater.check_for_updates(APP_VERSION)
         self._latest_update_result = result
         if result.update_available:
-            self._open_mandatory_update_menu(result)
+            self._refresh_update_menu(result)
+            if self.packaged_build or not automatic:
+                self._set_active_menu(self.update_menu)
+            if self.packaged_build:
+                self.speaker.speak(self._update_status_message, interrupt=True)
+                return
+            if announce_result:
+                self.speaker.speak(
+                    f"{self._update_status_message} Open the release page to download the new build.",
+                    interrupt=True,
+                )
             return
         if result.release is not None:
             self._update_status_message = (
@@ -1589,6 +1618,9 @@ class SubwayBlindGame:
                 return True
 
         if self.active_menu == self.update_menu:
+            if action == "back":
+                self._set_active_menu(self.main_menu)
+                return True
             if action == "download_update":
                 self._begin_update_install()
                 return True
