@@ -32,11 +32,14 @@ from subway_blind.game import (
     ACTIVE_GAMEPLAY_SOUND_KEYS,
     HEADSTART_SHAKE_CHANNEL,
     HEADSTART_SPRAY_CHANNEL,
+    HOW_TO_TOPICS,
     LEARN_SOUND_LOOP_PREVIEW_DURATION,
     LEARN_SOUND_PREVIEW_CHANNEL,
     MENU_REPEAT_INITIAL_DELAY,
     MENU_REPEAT_INTERVAL,
     SubwayBlindGame,
+    help_topic_segments,
+    load_whats_new_content,
 )
 from subway_blind.hrtf_audio import OpenALHrtfEngine
 from subway_blind.menu import Menu, MenuItem
@@ -266,10 +269,10 @@ class DummyControllerDevice:
         self.quit_calls += 1
 
 
-def make_release_info(version: str = "0.2.0") -> ReleaseInfo:
+def make_release_info(version: str = "1.1.3") -> ReleaseInfo:
     return ReleaseInfo(
         version=version,
-        page_url="https://github.com/oguzhanproductions/subway_surfers_blind/releases/tag/v0.2.0",
+        page_url=f"https://github.com/oguzhanproductions/subway_surfers_blind/releases/tag/v{version}",
         published_at="2026-03-08T10:00:00Z",
         title=f"v{version}",
         notes="Important fixes.",
@@ -584,9 +587,9 @@ class UpdaterTests(unittest.TestCase):
     def test_check_for_updates_returns_update_available_when_release_is_newer(self):
         updater = GitHubReleaseUpdater(timeout_seconds=2.0)
         release_payload = {
-            "tag_name": "v0.2.0",
-            "name": "v0.2.0",
-            "html_url": "https://github.com/oguzhanproductions/subway_surfers_blind/releases/tag/v0.2.0",
+            "tag_name": "v1.1.3",
+            "name": "v1.1.3",
+            "html_url": "https://github.com/oguzhanproductions/subway_surfers_blind/releases/tag/v1.1.3",
             "published_at": "2026-03-08T10:00:00Z",
             "body": "Notes",
             "assets": [
@@ -613,7 +616,7 @@ class UpdaterTests(unittest.TestCase):
             result = updater.check_for_updates(APP_VERSION)
 
         self.assertTrue(result.update_available)
-        self.assertEqual(result.latest_version, "0.2.0")
+        self.assertEqual(result.latest_version, "1.1.3")
         self.assertEqual(result.release.assets[0].name, "SubwaySurfersBlind.zip")
 
 
@@ -1112,8 +1115,12 @@ class GameTests(unittest.TestCase):
         game.audio = audio
         for menu in (
             game.main_menu,
+            game.whats_new_menu,
             game.shop_menu,
+            game.achievements_menu,
             game.options_menu,
+            game.howto_menu,
+            game.help_topic_menu,
             game.controls_menu,
             game.keyboard_bindings_menu,
             game.controller_bindings_menu,
@@ -1148,29 +1155,30 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.main_menu.title, f"Main Menu   Version: {APP_VERSION}")
         self.assertEqual(
             [item.label for item in game.main_menu.items],
-            ["Start Game", "Shop", "Options", "How to Play", "Learn Game Sounds", "Check for Updates", "Exit"],
+            ["Start Game", "What's New", "Shop", "Achievements", "Options", "How to Play", "Learn Game Sounds", "Check for Updates", "Exit"],
         )
 
     def test_options_menu_includes_output_device_entry(self):
         game, _, _ = self.make_game()
         labels = [item.label for item in game.options_menu.items]
-        self.assertEqual(
-            labels[:7] + labels[8:],
-            [
-                "SFX Volume: 90",
-                "Music Volume: 60",
-                "Check for Updates on Startup: On",
-                "Output Device: System Default",
-                "Menu Sound HRTF: On",
-                "Speech: Off",
-                "SAPI Speech: Off",
-                "SAPI Rate: 0",
-                "SAPI Pitch: 0",
-                "Difficulty: Normal",
-                "Controls",
-                "Back",
-            ],
-        )
+        expected = [
+            "SFX Volume: 90",
+            "Music Volume: 60",
+            "Check for Updates on Startup: On",
+            "Output Device: System Default",
+            "Menu Sound HRTF: On",
+            "Speech: Off",
+            "SAPI Speech: Off",
+            "SAPI Rate: 0",
+            "SAPI Pitch: 0",
+            "Difficulty: Normal",
+            "Meters: Off",
+            "Coin Counters: Off",
+            "Quest Changes: Off",
+            "Controls",
+            "Back",
+        ]
+        self.assertEqual(labels[:7] + labels[8:], expected)
         self.assertTrue(labels[7].startswith("SAPI Voice: Microsoft "))
 
     def test_shop_menu_labels_include_coin_currency(self):
@@ -1185,6 +1193,171 @@ class GameTests(unittest.TestCase):
                 "Back",
             ],
         )
+
+    def test_achievements_menu_shows_progress_and_unlocks(self):
+        game, speaker, _ = self.make_game()
+
+        game.settings["achievement_progress"]["total_coins_collected"] = 1000
+        game._announce_achievement_unlocks()
+        game._refresh_achievements_menu_labels()
+
+        self.assertIn("coin_collector", game.settings["achievements_unlocked"])
+        self.assertEqual(game.achievements_menu.title, "Achievements   1/8")
+        self.assertEqual(game.achievements_menu.items[0].label, "Coin Collector   Unlocked")
+        self.assertTrue(any("Achievement unlocked: Coin Collector." == message for message, _ in speaker.messages))
+
+    def test_commit_run_rewards_tracks_survivor_achievement(self):
+        game, speaker, _ = self.make_game()
+        game.state.running = True
+        game.state.distance = 1500
+
+        game._commit_run_rewards()
+
+        self.assertIn("survivor", game.settings["achievements_unlocked"])
+        self.assertTrue(any("Achievement unlocked: Survivor." == message for message, _ in speaker.messages))
+
+    def test_how_to_play_opens_help_menu_instead_of_reading_one_long_message(self):
+        game, speaker, _ = self.make_game()
+        game.active_menu = game.main_menu
+
+        result = game._handle_menu_action("howto")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.howto_menu)
+        self.assertEqual(game.howto_menu.title, "How to Play")
+        self.assertEqual(game.howto_menu.items[0].label, "Movement and Actions")
+        self.assertNotIn(
+            (
+                "Controls: Left and right move lanes. Up jumps. Down rolls. Space uses a hoverboard.",
+                True,
+            ),
+            speaker.messages,
+        )
+
+    def test_whats_new_opens_line_by_line_dialog(self):
+        game, speaker, _ = self.make_game()
+        game.active_menu = game.main_menu
+
+        result = game._handle_menu_action("whats_new")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.whats_new_menu)
+        self.assertEqual(game.whats_new_menu.title, "What's New   1.1.2")
+        self.assertEqual(game.whats_new_menu.items[0].action, "info_line")
+        self.assertEqual(game.whats_new_menu.items[0].label, "Update Summary")
+        self.assertFalse(any("Update Summary" == message for message, _ in speaker.messages))
+
+    def test_whats_new_lines_can_be_navigated_with_up_and_down(self):
+        game, speaker, _ = self.make_game()
+        game._handle_menu_action("whats_new")
+
+        first_line = game.whats_new_menu.items[0].label
+        second_line = game.whats_new_menu.items[1].label
+        self.assertIn(first_line, speaker.messages[-1][0])
+
+        game.whats_new_menu.handle_key(pygame.K_DOWN)
+
+        self.assertEqual(game.whats_new_menu.index, 1)
+        self.assertEqual(speaker.messages[-1][0], second_line)
+
+    def test_escape_from_whats_new_returns_to_main_menu(self):
+        game, _, _ = self.make_game()
+        game._handle_menu_action("whats_new")
+
+        result = game._handle_menu_action("close")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.main_menu)
+
+    def test_how_to_play_topic_speaks_selected_help_item(self):
+        game, speaker, _ = self.make_game()
+        game.active_menu = game.howto_menu
+
+        result = game._handle_menu_action("howto:movement")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.help_topic_menu)
+        self.assertEqual(game.help_topic_menu.title, "Movement and Actions")
+        self.assertEqual(game.help_topic_menu.items[0].action, "help_topic_line")
+        self.assertTrue(game.help_topic_menu.items[0].label.startswith("Controls:"))
+        self.assertIn(game.help_topic_menu.items[0].label, speaker.messages[-1][0])
+
+    def test_help_topic_back_returns_to_help_topic_list(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.howto_menu
+        game._handle_menu_action("howto:warnings")
+
+        result = game._handle_menu_action("back")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.howto_menu)
+
+    def test_help_topic_lines_can_be_navigated_without_reading_full_topic(self):
+        game, speaker, _ = self.make_game()
+        game.active_menu = game.howto_menu
+        game._handle_menu_action("howto:movement")
+
+        self.assertGreater(len(game.help_topic_menu.items), 2)
+        first_line = game.help_topic_menu.items[0].label
+        second_line = game.help_topic_menu.items[1].label
+        self.assertIn(first_line, speaker.messages[-1][0])
+
+        game.help_topic_menu.handle_key(pygame.K_DOWN)
+
+        self.assertEqual(game.help_topic_menu.index, 1)
+        self.assertEqual(speaker.messages[-1][0], second_line)
+
+    def test_escape_from_help_topic_returns_to_help_menu(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.howto_menu
+        game._handle_menu_action("howto:warnings")
+
+        result = game._handle_menu_action("close")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.howto_menu)
+
+    def test_help_topic_segments_split_text_into_multiple_lines(self):
+        segments = help_topic_segments(HOW_TO_TOPICS[0], "Use Left and Right.")
+
+        self.assertGreater(len(segments), 1)
+
+    def test_load_whats_new_content_uses_latest_changelog_entry(self):
+        content = load_whats_new_content()
+
+        self.assertEqual(content.title, "What's New   1.1.2")
+        self.assertIn("Update Summary", content.lines)
+        self.assertNotIn("Press Enter to repeat the selected line.", content.lines)
+
+    def test_upgrade_version_marks_current_version_seen_without_auto_opening_help(self):
+        settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
+        settings["speech_enabled"] = False
+        settings["last_seen_version"] = "1.1.1"
+        game = SubwayBlindGame(
+            self.screen,
+            pygame.time.Clock(),
+            settings,
+            updater=DummyUpdater(),
+            packaged_build=False,
+        )
+
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertEqual(game.settings["last_seen_version"], APP_VERSION)
+
+    def test_upgrade_help_does_not_reopen_when_version_already_seen(self):
+        settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
+        settings["speech_enabled"] = False
+        settings["last_seen_version"] = APP_VERSION
+        game = SubwayBlindGame(
+            self.screen,
+            pygame.time.Clock(),
+            settings,
+            updater=DummyUpdater(),
+            packaged_build=False,
+        )
+
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertEqual(game.settings["last_seen_version"], APP_VERSION)
 
     def test_game_starts_with_menu_music_request(self):
         game, _, audio = self.make_game()
@@ -1335,7 +1508,7 @@ class GameTests(unittest.TestCase):
         game._handle_menu_action("check_updates")
 
         self.assertIs(game.active_menu, game.update_menu)
-        self.assertEqual(game.update_menu.title, "Update Available   0.1.0 -> 0.2.0")
+        self.assertEqual(game.update_menu.title, f"Update Available   {APP_VERSION} -> 0.2.0")
         self.assertEqual(game.update_menu.items[0].action, "open_release_page")
         self.assertEqual(game.update_menu.items[2].action, "back")
 
@@ -1552,10 +1725,10 @@ class GameTests(unittest.TestCase):
 
         game._adjust_selected_option(1)
 
-        self.assertEqual(game.settings["sfx_volume"], 0.5)
-        self.assertEqual(game.options_menu.items[0].label, "SFX Volume: 50")
+        self.assertEqual(game.settings["sfx_volume"], 0.41)
+        self.assertEqual(game.options_menu.items[0].label, "SFX Volume: 41")
         self.assertEqual(audio.refreshed, 1)
-        self.assertEqual(speaker.messages[-1][0], "SFX Volume: 50")
+        self.assertEqual(speaker.messages[-1][0], "SFX Volume: 41")
         self.assertIsNotNone(audio.play_calls[-1]["pan"])
 
     def test_adjust_selected_option_changes_music_with_left_arrow(self):
@@ -1566,10 +1739,10 @@ class GameTests(unittest.TestCase):
 
         game._adjust_selected_option(-1)
 
-        self.assertEqual(game.settings["music_volume"], 0.5)
-        self.assertEqual(game.options_menu.items[1].label, "Music Volume: 50")
+        self.assertEqual(game.settings["music_volume"], 0.59)
+        self.assertEqual(game.options_menu.items[1].label, "Music Volume: 59")
         self.assertEqual(audio.refreshed, 1)
-        self.assertEqual(speaker.messages[-1][0], "Music Volume: 50")
+        self.assertEqual(speaker.messages[-1][0], "Music Volume: 59")
 
     def test_adjust_selected_option_toggles_startup_update_checks(self):
         game, speaker, audio = self.make_game()
@@ -1610,7 +1783,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_on_back_only_plays_edge_feedback(self):
         game, _, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 12
+        game.options_menu.index = 15
 
         game._adjust_selected_option(1)
 
@@ -1620,7 +1793,7 @@ class GameTests(unittest.TestCase):
     def test_enter_on_back_returns_to_main_menu_from_options(self):
         game, _, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 12
+        game.options_menu.index = 15
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -1666,7 +1839,7 @@ class GameTests(unittest.TestCase):
     def test_options_controls_entry_opens_controls_menu(self):
         game, _, _ = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 11
+        game.options_menu.index = 14
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -1678,7 +1851,7 @@ class GameTests(unittest.TestCase):
         game, _, _ = self.make_game()
         self.attach_controller(game, family=PLAYSTATION_FAMILY, name="Wireless Controller")
         game.active_menu = game.options_menu
-        game.options_menu.index = 11
+        game.options_menu.index = 14
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -1759,7 +1932,7 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.settings["sfx_volume"], 0.4)
 
         game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_l}))
-        self.assertEqual(game.settings["sfx_volume"], 0.5)
+        self.assertEqual(game.settings["sfx_volume"], 0.41)
 
     def test_controller_binding_capture_updates_playstation_jump_label(self):
         game, speaker, _ = self.make_game()
@@ -1906,6 +2079,39 @@ class GameTests(unittest.TestCase):
         self.assertIn(("confirm", "ui", False), audio.played)
         self.assertEqual(speaker.messages[-1][0], "Difficulty: Easy")
 
+    def test_adjust_selected_option_toggles_meters(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 11
+
+        game._adjust_selected_option(1)
+
+        self.assertTrue(game.settings["meter_announcements_enabled"])
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][0], "Meters: On")
+
+    def test_adjust_selected_option_toggles_coin_counters(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 12
+
+        game._adjust_selected_option(1)
+
+        self.assertTrue(game.settings["coin_counters_enabled"])
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][0], "Coin Counters: On")
+
+    def test_adjust_selected_option_toggles_quest_changes(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 13
+
+        game._adjust_selected_option(1)
+
+        self.assertTrue(game.settings["quest_changes_enabled"])
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][0], "Quest Changes: On")
+
     def test_menu_repeat_moves_quickly_after_hold_delay(self):
         game, speaker, _ = self.make_game()
         game.active_menu = game.main_menu
@@ -1915,7 +2121,7 @@ class GameTests(unittest.TestCase):
         game._update_menu_repeat(MENU_REPEAT_INITIAL_DELAY + (MENU_REPEAT_INTERVAL * 2.1))
 
         self.assertEqual(game.main_menu.index, 3)
-        self.assertEqual(speaker.messages[-1][0], "How to Play")
+        self.assertEqual(speaker.messages[-1][0], "Achievements")
 
     def test_menu_repeat_adjusts_option_values_while_holding_horizontal_arrow(self):
         game, speaker, _ = self.make_game()
@@ -1926,9 +2132,9 @@ class GameTests(unittest.TestCase):
         game._prime_menu_repeat(pygame.K_RIGHT)
         game._update_menu_repeat(MENU_REPEAT_INITIAL_DELAY + MENU_REPEAT_INTERVAL)
 
-        self.assertEqual(game.settings["sfx_volume"], 0.6)
-        self.assertEqual(game.options_menu.items[0].label, "SFX Volume: 60")
-        self.assertEqual(speaker.messages[-1][0], "SFX Volume: 60")
+        self.assertEqual(game.settings["sfx_volume"], 0.42)
+        self.assertEqual(game.options_menu.items[0].label, "SFX Volume: 42")
+        self.assertEqual(speaker.messages[-1][0], "SFX Volume: 42")
 
     def test_pause_menu_close_resumes_run(self):
         game, speaker, audio = self.make_game()
@@ -2237,6 +2443,7 @@ class GameTests(unittest.TestCase):
 
     def test_record_mission_event_completes_set_and_increases_multiplier(self):
         game, speaker, _ = self.make_game()
+        game.settings["quest_changes_enabled"] = True
         goals = game._mission_goals()
         for goal in goals[:-1]:
             game.settings["mission_metrics"][goal.metric] = goal.target
@@ -2277,6 +2484,7 @@ class GameTests(unittest.TestCase):
 
     def test_coin_announcement_hotkey_works_during_headstart(self):
         game, speaker, _ = self.make_game()
+        game.settings["coin_counters_enabled"] = True
         game.state.coins = 17
         game.player.headstart = 3.0
 
@@ -2286,6 +2494,7 @@ class GameTests(unittest.TestCase):
 
     def test_coin_announcement_hotkey_works_through_keyboard_translation(self):
         game, speaker, _ = self.make_game()
+        game.settings["coin_counters_enabled"] = True
         game.state.coins = 23
         game.active_menu = None
 
@@ -2293,6 +2502,64 @@ class GameTests(unittest.TestCase):
         game._handle_keyboard_event(event)
 
         self.assertIn(("Coins collected: 23.", False), speaker.messages)
+
+    def test_tracking_toggles_default_to_disabled(self):
+        game, _, _ = self.make_game()
+
+        self.assertFalse(game.settings["meter_announcements_enabled"])
+        self.assertFalse(game.settings["coin_counters_enabled"])
+        self.assertFalse(game.settings["quest_changes_enabled"])
+
+    def test_coin_hotkey_is_silent_when_coin_counters_disabled(self):
+        game, speaker, _ = self.make_game()
+        game.state.coins = 17
+
+        game._handle_game_key(pygame.K_r)
+
+        self.assertNotIn(("Coins collected: 17.", False), speaker.messages)
+
+    def test_spawn_things_still_creates_coin_lines_when_coin_counters_disabled(self):
+        game, _, _ = self.make_game()
+        game.state.next_spawn = 999.0
+        game.state.next_support = 999.0
+        game.state.next_coinline = 0.0
+
+        game._spawn_things(0.016)
+
+        coins = [obstacle for obstacle in game.obstacles if obstacle.kind == "coin"]
+        self.assertTrue(coins)
+
+    def test_record_mission_event_does_not_advance_metrics_when_quest_changes_disabled(self):
+        game, _, _ = self.make_game()
+
+        game._record_mission_event("coins")
+
+        self.assertEqual(game.settings["mission_metrics"]["coins"], 0)
+
+    def test_meter_milestone_is_silent_when_meters_disabled(self):
+        game, speaker, audio = self.make_game()
+        game.state.distance = 249.0
+        game.state.milestone = 0
+        game.state.running = True
+        game.speed_profile = SPEED_PROFILES["normal"]
+
+        game._update_game(0.2)
+
+        self.assertNotIn(("250 meters", False), speaker.messages)
+        self.assertNotIn(("mission_reward", "ui", False), audio.played)
+
+    def test_meter_milestone_speaks_when_meters_enabled(self):
+        game, speaker, audio = self.make_game()
+        game.settings["meter_announcements_enabled"] = True
+        game.state.distance = 249.0
+        game.state.milestone = 0
+        game.state.running = True
+        game.speed_profile = SPEED_PROFILES["normal"]
+
+        game._update_game(0.2)
+
+        self.assertIn(("250 meters", False), speaker.messages)
+        self.assertIn(("mission_reward", "ui", False), audio.played)
 
     def test_jetpack_auto_collects_coins_while_airborne(self):
         game, _, _ = self.make_game()
