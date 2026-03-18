@@ -4,6 +4,7 @@ import sys
 import textwrap
 from dataclasses import dataclass
 import random
+import re
 import threading
 from typing import Optional
 
@@ -20,7 +21,7 @@ from subway_blind.audio import (
     SYSTEM_DEFAULT_OUTPUT_LABEL,
 )
 from subway_blind.balance import SpeedProfile, speed_profile_for_difficulty
-from subway_blind.config import save_settings
+from subway_blind.config import resource_path, save_settings
 from subway_blind.controls import (
     ACTION_DEFINITIONS_BY_KEY,
     CONTROLLER_ACTION_ORDER,
@@ -49,23 +50,34 @@ from subway_blind.features import (
 from subway_blind.menu import Menu, MenuItem
 from subway_blind.models import LANES, Obstacle, Player, RunState, lane_name, lane_to_pan, normalize_lane
 from subway_blind.progression import (
+    achievement_definitions,
+    achievement_progress,
     can_claim_season_reward,
     claim_season_reward,
     completed_mission_metrics,
     daily_word_for,
     ensure_progression_state,
     mission_goals_for_set,
+    newly_unlocked_achievements,
     next_season_reward_threshold,
     pick_super_mystery_box_reward,
+    record_achievement_progress,
     register_season_token,
     register_word_letter,
     remaining_word_letters,
+    set_achievement_progress_max,
     update_word_hunt_streak,
     word_hunt_reward_for_streak,
 )
 from subway_blind.spawn import RoutePattern, SpawnDirector
 from subway_blind.spatial_audio import SpatialThreatAudio
-from subway_blind.updater import GitHubReleaseUpdater, UpdateCheckResult, UpdateInstallProgress, UpdateInstallResult
+from subway_blind.updater import (
+    GitHubReleaseUpdater,
+    UpdateCheckResult,
+    UpdateInstallProgress,
+    UpdateInstallResult,
+    version_key,
+)
 from subway_blind.version import APP_VERSION
 
 DIFFICULTY_LABELS = {
@@ -100,6 +112,19 @@ class LearnSoundEntry:
     description: str
     loop: bool = False
     gain: float = 1.0
+
+
+@dataclass(frozen=True)
+class HelpTopic:
+    key: str
+    label: str
+    description: str
+
+
+@dataclass(frozen=True)
+class InfoDialogContent:
+    title: str
+    lines: tuple[str, ...]
 
 
 LEARN_SOUND_DETAILS: dict[str, LearnSoundEntry] = {
@@ -193,15 +218,68 @@ ACTIVE_GAMEPLAY_SOUND_KEYS: tuple[str, ...] = (
 LEARN_SOUND_LIBRARY: tuple[LearnSoundEntry, ...] = tuple(
     LEARN_SOUND_DETAILS[key] for key in ACTIVE_GAMEPLAY_SOUND_KEYS
 )
-
-
+HOW_TO_TOPICS: tuple[HelpTopic, ...] = (
+    HelpTopic("movement", "Movement and Actions", "Move left and right to change lanes. Jump over low barriers and bushes. Roll under high barriers. Press Space to activate a hoverboard."),
+    HelpTopic("warnings", "Hazards and Warnings", "Listen for danger speech and warning sounds. The callout focuses on the action needed for your current lane, such as jump, roll, turn left, or turn right."),
+    HelpTopic("powerups", "Power Ups", "Collect magnets, jetpacks, score boosts, super sneakers, and pogo sticks to survive longer and build bigger scores."),
+    HelpTopic("rewards", "Coins and Rewards", "Collect coins during the run, then bank them when the run ends. Keys can revive you after a crash. Mystery boxes can grant extra items and bonuses."),
+    HelpTopic("progression", "Progress and Shop", "Missions raise your permanent multiplier. Word Hunt letters and Season Hunt tokens appear during runs. Spend saved coins in the shop on hoverboards, headstarts, score boosters, and boxes."),
+)
+UPGRADE_HELP_TOPICS: dict[str, tuple[HelpTopic, ...]] = {
+    "1.1.2": (
+        HelpTopic(
+            "update_1_1_2",
+            "What's New in 1.1.2",
+            "Version 1.1.2 adds an Achievements menu with badge progress and unlock announcements. How to Play is now split into a list of topics so it no longer reads everything at once.",
+        ),
+    ),
+}
 def step_volume(value: float, direction: int) -> float:
-    stepped = round(float(value) + (0.1 * direction), 1)
+    stepped = round(float(value) + (0.01 * direction), 2)
     return max(0.0, min(1.0, stepped))
 
 
 def step_int(value: int, direction: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, int(value) + direction))
+
+
+def help_topic_segments(topic: HelpTopic, controls_summary: str) -> tuple[str, ...]:
+    if topic.key == "movement":
+        text = f"Controls: {controls_summary} {topic.description}"
+    else:
+        text = topic.description
+    parts = [segment.strip() for segment in re.split(r"(?<=[.!?])\s+", text) if segment.strip()]
+    return tuple(parts) if parts else (text.strip(),)
+
+
+def load_whats_new_content() -> InfoDialogContent:
+    fallback = InfoDialogContent(
+        title=f"What's New   {APP_VERSION}",
+        lines=("No update notes were provided for this version.",),
+    )
+    try:
+        changelog_path = resource_path("CHANGELOG.txt")
+        with open(changelog_path, "r", encoding="utf-8") as handle:
+            lines = [line.rstrip() for line in handle]
+    except Exception:
+        return fallback
+
+    entry_lines: list[str] = []
+    found_date = False
+    for line in lines:
+        stripped = line.strip()
+        if not found_date:
+            if stripped.startswith("Date: "):
+                found_date = True
+            continue
+        if stripped == "------------------------------------------------------------":
+            break
+        if stripped:
+            entry_lines.append(stripped)
+
+    if not entry_lines:
+        return fallback
+    return InfoDialogContent(title=f"What's New   {APP_VERSION}", lines=tuple(entry_lines))
 
 
 class SubwayBlindGame:
@@ -257,6 +335,7 @@ class SubwayBlindGame:
         self._update_restart_script_path: str | None = None
         self._update_install_error = ""
         self._update_ready_announced = False
+        self._showing_upgrade_help = False
         self.controls = ControllerSupport(settings)
         self._binding_capture: BindingCaptureRequest | None = None
         self._selected_binding_device = "controller" if self.controls.active_controller() is not None else "keyboard"
@@ -311,7 +390,9 @@ class SubwayBlindGame:
             self._main_menu_title(),
             [
                 MenuItem("Start Game", "start"),
+                MenuItem("What's New", "whats_new"),
                 MenuItem("Shop", "shop"),
+                MenuItem("Achievements", "achievements"),
                 MenuItem("Options", "options"),
                 MenuItem("How to Play", "howto"),
                 MenuItem("Learn Game Sounds", "learn_sounds"),
@@ -346,6 +427,9 @@ class SubwayBlindGame:
                 MenuItem(self._sapi_rate_option_label(), "opt_sapi_rate"),
                 MenuItem(self._sapi_pitch_option_label(), "opt_sapi_pitch"),
                 MenuItem(self._difficulty_option_label(), "opt_diff"),
+                MenuItem(self._meter_option_label(), "opt_meters"),
+                MenuItem(self._coin_counter_option_label(), "opt_coin_counters"),
+                MenuItem(self._quest_changes_option_label(), "opt_quest_changes"),
                 MenuItem("Controls", "opt_controls"),
                 MenuItem("Back", "back"),
             ],
@@ -386,6 +470,33 @@ class SubwayBlindGame:
             "Learn Game Sounds",
             [MenuItem(entry.label, f"learn_sound:{entry.key}") for entry in LEARN_SOUND_LIBRARY] + [MenuItem("Back", "back")],
         )
+        self.howto_menu = Menu(
+            self.speaker,
+            self.audio,
+            "How to Play",
+            [],
+        )
+        self._refresh_howto_menu_labels()
+        self.help_topic_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Help",
+            [MenuItem("Back", "back")],
+        )
+        self._selected_help_topic: HelpTopic | None = None
+        self.whats_new_menu = Menu(
+            self.speaker,
+            self.audio,
+            "What's New",
+            [MenuItem("Back", "back")],
+        )
+        self._selected_info_dialog: InfoDialogContent | None = None
+        self.achievements_menu = Menu(
+            self.speaker,
+            self.audio,
+            self._achievements_menu_title(),
+            [],
+        )
         self.update_menu = Menu(
             self.speaker,
             self.audio,
@@ -404,12 +515,21 @@ class SubwayBlindGame:
         if self.active_menu == self.main_menu and not self.main_menu.opened:
             self.active_menu.open()
             self._sync_music_context()
+        self._mark_current_version_seen()
 
     def _sfx_option_label(self) -> str:
         return f"SFX Volume: {int(float(self.settings['sfx_volume']) * 100)}"
 
     def _main_menu_title(self) -> str:
         return f"Main Menu   Version: {APP_VERSION}"
+
+    def _achievements_menu_title(self) -> str:
+        unlocked = len(self.settings.get("achievements_unlocked", []))
+        total = len(achievement_definitions())
+        return f"Achievements   {unlocked}/{total}"
+
+    def _howto_menu_title(self) -> str:
+        return f"Updated Help   {APP_VERSION}" if self._showing_upgrade_help else "How to Play"
 
     def _shop_title(self) -> str:
         return "Shop"
@@ -451,6 +571,15 @@ class SubwayBlindGame:
     def _difficulty_option_label(self) -> str:
         difficulty = DIFFICULTY_LABELS.get(str(self.settings["difficulty"]), "Normal")
         return f"Difficulty: {difficulty}"
+
+    def _meter_option_label(self) -> str:
+        return f"Meters: {'On' if self._meters_enabled() else 'Off'}"
+
+    def _coin_counter_option_label(self) -> str:
+        return f"Coin Counters: {'On' if self._coin_counters_enabled() else 'Off'}"
+
+    def _quest_changes_option_label(self) -> str:
+        return f"Quest Changes: {'On' if self._quest_changes_enabled() else 'Off'}"
 
     def _headstart_option_label(self) -> str:
         owned = int(self.settings.get("headstarts", 0))
@@ -498,7 +627,10 @@ class SubwayBlindGame:
         self.options_menu.items[8].label = self._sapi_rate_option_label()
         self.options_menu.items[9].label = self._sapi_pitch_option_label()
         self.options_menu.items[10].label = self._difficulty_option_label()
-        self.options_menu.items[11].label = "Controls"
+        self.options_menu.items[11].label = self._meter_option_label()
+        self.options_menu.items[12].label = self._coin_counter_option_label()
+        self.options_menu.items[13].label = self._quest_changes_option_label()
+        self.options_menu.items[14].label = "Controls"
 
     def _refresh_loadout_menu_labels(self) -> None:
         self.loadout_menu.items[0].label = self._headstart_option_label()
@@ -521,6 +653,89 @@ class SubwayBlindGame:
         self.shop_menu.items[1].label = self._shop_box_label()
         self.shop_menu.items[2].label = self._shop_headstart_label()
         self.shop_menu.items[3].label = self._shop_score_booster_label()
+
+    def _howto_topics(self) -> tuple[HelpTopic, ...]:
+        if self._showing_upgrade_help:
+            return UPGRADE_HELP_TOPICS.get(APP_VERSION, ()) + HOW_TO_TOPICS
+        return HOW_TO_TOPICS
+
+    def _refresh_howto_menu_labels(self) -> None:
+        self.howto_menu.title = self._howto_menu_title()
+        self.howto_menu.items = [MenuItem(topic.label, f"howto:{topic.key}") for topic in self._howto_topics()] + [
+            MenuItem("Back", "back")
+        ]
+
+    def _help_topic_for_key(self, key: str) -> HelpTopic | None:
+        for topic in UPGRADE_HELP_TOPICS.get(APP_VERSION, ()):
+            if topic.key == key:
+                return topic
+        for topic in HOW_TO_TOPICS:
+            if topic.key == key:
+                return topic
+        return None
+
+    def _open_help_topic(self, key: str) -> None:
+        topic = self._help_topic_for_key(key)
+        if topic is None:
+            self._play_menu_feedback("menuedge")
+            return
+        self._selected_help_topic = topic
+        self.help_topic_menu.title = topic.label
+        self.help_topic_menu.items = [
+            MenuItem(segment, "help_topic_line") for segment in help_topic_segments(topic, self._gameplay_controls_summary())
+        ] + [MenuItem("Back", "back")]
+        self._set_active_menu(self.help_topic_menu)
+
+    def _open_info_dialog(self, content: InfoDialogContent, menu: Menu) -> None:
+        self._selected_info_dialog = content
+        menu.title = content.title
+        menu.items = [MenuItem(line, "info_line") for line in content.lines] + [MenuItem("Back", "back")]
+        self._set_active_menu(menu)
+
+    def _mark_current_version_seen(self) -> None:
+        seen_version = str(self.settings.get("last_seen_version", "") or "").strip()
+        if not seen_version:
+            self.settings["last_seen_version"] = APP_VERSION
+            return
+        if version_key(APP_VERSION) <= version_key(seen_version):
+            self.settings["last_seen_version"] = APP_VERSION
+            return
+        self.settings["last_seen_version"] = APP_VERSION
+
+    def _achievement_item_label(self, key: str) -> str:
+        progress = achievement_progress(self.settings)
+        unlocked = set(self.settings.get("achievements_unlocked", []))
+        for achievement in achievement_definitions():
+            if achievement.key != key:
+                continue
+            current = min(int(progress.get(achievement.metric, 0)), achievement.target)
+            status = "Unlocked" if key in unlocked else f"{current}/{achievement.target}"
+            return f"{achievement.label}   {status}"
+        return key
+
+    def _refresh_achievements_menu_labels(self) -> None:
+        self.achievements_menu.title = self._achievements_menu_title()
+        self.achievements_menu.items = [
+            MenuItem(self._achievement_item_label(achievement.key), f"achievement:{achievement.key}")
+            for achievement in achievement_definitions()
+        ] + [MenuItem("Back", "back")]
+
+    def _announce_achievement_unlocks(self) -> None:
+        unlocks = newly_unlocked_achievements(self.settings)
+        if not unlocks:
+            return
+        self.audio.play("unlock", channel="ui")
+        for achievement in unlocks:
+            self.speaker.speak(f"Achievement unlocked: {achievement.label}.", interrupt=False)
+        self._refresh_achievements_menu_labels()
+
+    def _record_achievement_metric(self, metric: str, amount: int = 1) -> None:
+        record_achievement_progress(self.settings, metric, amount)
+        self._announce_achievement_unlocks()
+
+    def _record_achievement_max(self, metric: str, value: int) -> None:
+        set_achievement_progress_max(self.settings, metric, value)
+        self._announce_achievement_unlocks()
 
     def _build_controls_menu(self) -> None:
         self._sync_selected_binding_device()
@@ -654,6 +869,15 @@ class SubwayBlindGame:
             if item.action == action:
                 return index
         return 0
+
+    def _meters_enabled(self) -> bool:
+        return bool(self.settings.get("meter_announcements_enabled", False))
+
+    def _coin_counters_enabled(self) -> bool:
+        return bool(self.settings.get("coin_counters_enabled", False))
+
+    def _quest_changes_enabled(self) -> bool:
+        return bool(self.settings.get("quest_changes_enabled", False))
 
     def _refresh_update_menu(self, result: UpdateCheckResult) -> None:
         latest_version = result.latest_version or "Unknown"
@@ -932,10 +1156,10 @@ class SubwayBlindGame:
         if not active_pogo:
             kinds.append("pogo")
             weights.append(0.09)
-        if self._remaining_word_letters() and not active_word:
+        if self._quest_changes_enabled() and self._remaining_word_letters() and not active_word:
             kinds.append("word")
             weights.append(0.08)
-        if next_season_reward_threshold(self.settings) is not None and not active_token:
+        if self._quest_changes_enabled() and next_season_reward_threshold(self.settings) is not None and not active_token:
             kinds.append("season_token")
             weights.append(0.05)
         return random.choices(kinds, weights=weights, k=1)[0]
@@ -967,8 +1191,17 @@ class SubwayBlindGame:
 
     def _record_mission_event(self, metric: str, amount: int = 1) -> None:
         ensure_progression_state(self.settings)
+        achievement_metric = {
+            "jumps": "total_jumps",
+            "rolls": "total_rolls",
+            "dodges": "total_dodges",
+        }.get(metric)
+        if achievement_metric is not None:
+            self._record_achievement_metric(achievement_metric, amount)
         metrics = self.settings.get("mission_metrics", {})
         if metric not in metrics or amount <= 0:
+            return
+        if not self._quest_changes_enabled():
             return
         goals = self._mission_goals()
         completed_before = completed_mission_metrics(self.settings)
@@ -983,6 +1216,7 @@ class SubwayBlindGame:
             self._complete_mission_set()
 
     def _open_super_mystery_box(self, source: str) -> None:
+        self._record_achievement_metric("total_boxes_opened", 1)
         reward = pick_super_mystery_box_reward()
         self.audio.play("mystery_box_open", channel="ui")
         self.audio.play("mystery_combo", channel="ui2")
@@ -1043,6 +1277,7 @@ class SubwayBlindGame:
 
     def _complete_word_hunt(self) -> None:
         streak = update_word_hunt_streak(self.settings)
+        self._record_achievement_max("best_word_hunt_streak", streak)
         reward_kind, amount = word_hunt_reward_for_streak(streak)
         self.audio.play("mission_reward", channel="ui")
         if reward_kind == "coins":
@@ -1163,6 +1398,7 @@ class SubwayBlindGame:
         self._run_rewards_committed = True
         saved_coins = int(self.state.coins)
         self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + saved_coins
+        self._record_achievement_max("best_distance", int(self.state.distance))
         if saved_coins > 0:
             self.audio.play("coin_gui", channel="ui")
             self.audio.play("gui_cash", channel="ui2")
@@ -1352,6 +1588,7 @@ class SubwayBlindGame:
         if amount <= 0:
             return
         self.state.coins += amount
+        self._record_achievement_metric("total_coins_collected", amount)
         # Fatal collisions can commit rewards mid-frame; bank late coin pickups immediately.
         if self._run_rewards_committed:
             self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + amount
@@ -1484,6 +1721,12 @@ class SubwayBlindGame:
             if self.active_menu == self.pause_confirm_menu:
                 self._set_active_menu(self.pause_menu, start_index=1)
                 return True
+            if self.active_menu == self.help_topic_menu:
+                self._set_active_menu(self.howto_menu)
+                return True
+            if self.active_menu == self.whats_new_menu:
+                self._set_active_menu(self.main_menu)
+                return True
             self._set_active_menu(self.main_menu)
             return True
 
@@ -1494,17 +1737,26 @@ class SubwayBlindGame:
                 self._refresh_loadout_menu_labels()
                 self._set_active_menu(self.loadout_menu)
                 return True
+            if action == "whats_new":
+                self._open_info_dialog(load_whats_new_content(), self.whats_new_menu)
+                return True
             if action == "shop":
                 self._refresh_shop_menu_labels()
                 self._set_active_menu(self.shop_menu)
                 self.speaker.speak(self._shop_coins_label(), interrupt=False)
+                return True
+            if action == "achievements":
+                self._refresh_achievements_menu_labels()
+                self._set_active_menu(self.achievements_menu)
                 return True
             if action == "options":
                 self._refresh_options_menu_labels()
                 self._set_active_menu(self.options_menu)
                 return True
             if action == "howto":
-                self._say_how_to_play()
+                self._showing_upgrade_help = False
+                self._refresh_howto_menu_labels()
+                self._set_active_menu(self.howto_menu)
                 return True
             if action == "learn_sounds":
                 self._set_active_menu(self.learn_sounds_menu)
@@ -1680,9 +1932,47 @@ class SubwayBlindGame:
                 self._purchase_shop_item("score_booster")
                 return True
 
+        if self.active_menu == self.achievements_menu:
+            if action == "back":
+                self._set_active_menu(self.main_menu)
+                return True
+            if action.startswith("achievement:"):
+                achievement_key = action.split(":", 1)[1]
+                for achievement in achievement_definitions():
+                    if achievement.key == achievement_key:
+                        self.speaker.speak(achievement.description, interrupt=True)
+                        break
+                return True
+
         if self.active_menu == self.learn_sounds_menu:
             if action == "back":
                 self._set_active_menu(self.main_menu)
+                return True
+
+        if self.active_menu == self.howto_menu:
+            if action == "back":
+                self._showing_upgrade_help = False
+                self._refresh_howto_menu_labels()
+                self._set_active_menu(self.main_menu)
+                return True
+            if action.startswith("howto:"):
+                self._open_help_topic(action.split(":", 1)[1])
+                return True
+
+        if self.active_menu == self.help_topic_menu:
+            if action == "back":
+                self._set_active_menu(self.howto_menu)
+                return True
+            if action == "help_topic_line":
+                self.speaker.speak(self.help_topic_menu.items[self.help_topic_menu.index].label, interrupt=True)
+                return True
+
+        if self.active_menu == self.whats_new_menu:
+            if action == "back":
+                self._set_active_menu(self.main_menu)
+                return True
+            if action == "info_line":
+                self.speaker.speak(self.whats_new_menu.items[self.whats_new_menu.index].label, interrupt=True)
                 return True
 
         if self.active_menu == self.pause_menu:
@@ -1863,19 +2153,33 @@ class SubwayBlindGame:
             self._play_menu_feedback("confirm")
             self._refresh_options_menu_labels()
             self.speaker.speak(self.options_menu.items[self._update_option_index("opt_diff")].label, interrupt=True)
-
-    def _say_how_to_play(self) -> None:
-        self.speaker.speak(
-            f"Controls: {self._gameplay_controls_summary()} "
-            "Danger speech now only calls the action for your current lane. "
-            "Bushes must be jumped. Before each run you can stack up to three Headstarts and three Score Boosters. "
-            "Press R anytime during a run to hear your current collected coins. "
-            "This is useful when many announcements are playing and you want a quick coin check. "
-            "Keys can revive you after a crash. Missions raise your permanent multiplier. "
-            "Word Hunt letters and Season Hunt tokens appear during runs. "
-            "The shop lets you spend saved coins on items and mystery boxes.",
-            interrupt=True,
-        )
+            return
+        if selected_action == "opt_meters":
+            self.settings["meter_announcements_enabled"] = direction > 0
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(
+                self.options_menu.items[self._update_option_index("opt_meters")].label,
+                interrupt=True,
+            )
+            return
+        if selected_action == "opt_coin_counters":
+            self.settings["coin_counters_enabled"] = direction > 0
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(
+                self.options_menu.items[self._update_option_index("opt_coin_counters")].label,
+                interrupt=True,
+            )
+            return
+        if selected_action == "opt_quest_changes":
+            self.settings["quest_changes_enabled"] = direction > 0
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(
+                self.options_menu.items[self._update_option_index("opt_quest_changes")].label,
+                interrupt=True,
+            )
 
     def start_run(self) -> None:
         ensure_progression_state(self.settings)
@@ -1951,7 +2255,8 @@ class SubwayBlindGame:
             self.audio.play("menuclose", channel="ui")
             return
         if key == pygame.K_r:
-            self.speaker.speak(f"Coins collected: {self.state.coins}.", interrupt=False)
+            if self._coin_counters_enabled():
+                self.speaker.speak(f"Coins collected: {self.state.coins}.", interrupt=False)
             return
 
         if self.state.paused or self.player.jetpack > 0 or self.player.headstart > 0:
@@ -2073,7 +2378,7 @@ class SubwayBlindGame:
         self.obstacles = [obstacle for obstacle in self.obstacles if obstacle.z > -5]
 
         milestone = int(self.state.distance // 250)
-        if milestone > self.state.milestone:
+        if self._meters_enabled() and milestone > self.state.milestone:
             self.state.milestone = milestone
             self.audio.play("mission_reward", channel="ui")
             self.speaker.speak(f"{milestone * 250:.0f} meters", interrupt=False)
@@ -2318,7 +2623,7 @@ class SubwayBlindGame:
         self._record_mission_event("coins")
         self.audio.play("coin", pan=lane_to_pan(obstacle.lane), channel="coin")
         announce_every = int(self.settings.get("announce_coins_every", 10) or 0)
-        if announce_every and self.state.coins % announce_every == 0:
+        if self._coin_counters_enabled() and announce_every and self.state.coins % announce_every == 0:
             self.speaker.speak(f"{self.state.coins} coins", interrupt=False)
 
     def _collect_power(self) -> None:
@@ -2359,6 +2664,7 @@ class SubwayBlindGame:
 
     def _collect_box(self) -> None:
         self._record_mission_event("boxes")
+        self._record_achievement_metric("total_boxes_opened", 1)
         reward = pick_mystery_box_reward()
         self.speaker.speak("Opening Mystery Box.", interrupt=True)
         self.audio.play("mystery_box_open", channel="act")
@@ -2413,6 +2719,7 @@ class SubwayBlindGame:
 
     def _collect_season_token(self) -> None:
         tokens, next_threshold = register_season_token(self.settings)
+        self._record_achievement_metric("total_season_tokens", 1)
         self.audio.play("coin_gui", channel="ui")
         if can_claim_season_reward(self.settings):
             self.speaker.speak("Season token. Reward unlocked.", interrupt=False)
@@ -2641,6 +2948,10 @@ class SubwayBlindGame:
                 line_surface = self.font.render(line, True, (180, 180, 180))
                 self.screen.blit(line_surface, (40, notes_top + 28 + (line_index * 24)))
             hint_text = self._menu_navigation_hint()
+        elif menu == self.help_topic_menu and self._selected_help_topic is not None:
+            prompt_surface = self.font.render("Use Up and Down to read each help line. Escape returns to Help.", True, (205, 205, 205))
+            self.screen.blit(prompt_surface, (40, max(height - 100, y_position + 18)))
+            hint_text = self._menu_navigation_hint()
         elif menu == self.options_menu:
             hint_text = f"{self._menu_navigation_hint()} {self._option_adjustment_hint()}"
         elif menu in {self.keyboard_bindings_menu, self.controller_bindings_menu} and self._binding_capture is not None:
@@ -2718,11 +3029,16 @@ class SubwayBlindGame:
         player_height = 50 if self.player.rolling <= 0 else 28
         pygame.draw.rect(self.screen, (80, 160, 255), (player_x - 18, player_y - player_height, 36, player_height))
 
-        hud = (
-            f"Score: {int(self.state.score)}   Coins: {self.state.coins}   "
-            f"Multiplier: x{self._score_multiplier()}   Speed: {self.state.speed:.1f}   "
-            f"Boards: {self.player.hoverboards}   Keys: {int(self.settings.get('keys', 0))}"
-        )
+        hud_parts = [
+            f"Score: {int(self.state.score)}",
+            f"Multiplier: x{self._score_multiplier()}",
+            f"Speed: {self.state.speed:.1f}",
+            f"Boards: {self.player.hoverboards}",
+            f"Keys: {int(self.settings.get('keys', 0))}",
+        ]
+        if self._coin_counters_enabled():
+            hud_parts.insert(0, f"Coins: {self.state.coins}")
+        hud = "   ".join(hud_parts)
         if self.player.hover_active > 0:
             hud += "   [Hoverboard]"
         if self.player.headstart > 0:
@@ -2738,21 +3054,22 @@ class SubwayBlindGame:
         hud_surface = self.font.render(hud, True, (230, 230, 230))
         self.screen.blit(hud_surface, (15, 10))
 
-        next_threshold = next_season_reward_threshold(self.settings)
-        word = self._current_word()
-        found_letters = str(self.settings.get("word_hunt_letters", ""))
-        season_progress = (
-            f"{int(self.settings.get('season_tokens', 0))}/{next_threshold}"
-            if next_threshold is not None
-            else f"{int(self.settings.get('season_tokens', 0))}/done"
-        )
-        meta_hud = (
-            f"{self._mission_status_text()}   "
-            f"Word Hunt: {found_letters or '-'} / {word}   "
-            f"Season Hunt: {season_progress}"
-        )
-        meta_surface = self.font.render(meta_hud, True, (205, 205, 205))
-        self.screen.blit(meta_surface, (15, 36))
+        if self._quest_changes_enabled():
+            next_threshold = next_season_reward_threshold(self.settings)
+            word = self._current_word()
+            found_letters = str(self.settings.get("word_hunt_letters", ""))
+            season_progress = (
+                f"{int(self.settings.get('season_tokens', 0))}/{next_threshold}"
+                if next_threshold is not None
+                else f"{int(self.settings.get('season_tokens', 0))}/done"
+            )
+            meta_hud = (
+                f"{self._mission_status_text()}   "
+                f"Word Hunt: {found_letters or '-'} / {word}   "
+                f"Season Hunt: {season_progress}"
+            )
+            meta_surface = self.font.render(meta_hud, True, (205, 205, 205))
+            self.screen.blit(meta_surface, (15, 36))
 
         if self.state.paused:
             overlay = pygame.Surface((width, height), pygame.SRCALPHA)

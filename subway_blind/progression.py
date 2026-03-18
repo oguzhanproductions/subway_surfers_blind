@@ -21,6 +21,15 @@ class MissionTemplate:
     cap: int
 
 
+@dataclass(frozen=True)
+class Achievement:
+    key: str
+    label: str
+    description: str
+    metric: str
+    target: int
+
+
 MISSION_TEMPLATES: tuple[MissionTemplate, ...] = (
     MissionTemplate("coins", "Collect {target} coins", 55, 12, 220),
     MissionTemplate("jumps", "Jump {target} times", 12, 3, 45),
@@ -75,6 +84,28 @@ SUPER_MYSTERY_BOX_REWARD_WEIGHTS = {
     "mission_bonus": 4,
 }
 
+ACHIEVEMENT_PROGRESS_DEFAULTS = {
+    "total_coins_collected": 0,
+    "total_jumps": 0,
+    "total_rolls": 0,
+    "total_dodges": 0,
+    "total_boxes_opened": 0,
+    "best_distance": 0,
+    "best_word_hunt_streak": 0,
+    "total_season_tokens": 0,
+}
+
+ACHIEVEMENTS: tuple[Achievement, ...] = (
+    Achievement("coin_collector", "Coin Collector", "Collect 1000 total coins.", "total_coins_collected", 1000),
+    Achievement("dodger", "Dodger", "Change lanes 500 times.", "total_dodges", 500),
+    Achievement("jumper", "Jumper", "Jump 300 times.", "total_jumps", 300),
+    Achievement("roll_master", "Roll Master", "Roll 300 times.", "total_rolls", 300),
+    Achievement("box_hunter", "Box Hunter", "Open 25 mystery or super boxes.", "total_boxes_opened", 25),
+    Achievement("survivor", "Survivor", "Reach 1500 meters in a single run.", "best_distance", 1500),
+    Achievement("daily_streak", "Daily Streak", "Reach a Word Hunt streak of 3.", "best_word_hunt_streak", 3),
+    Achievement("season_grinder", "Season Grinder", "Collect 20 Season Hunt tokens.", "total_season_tokens", 20),
+)
+
 
 def ensure_progression_state(settings: dict, today: date | None = None) -> None:
     current_day = today or date.today()
@@ -110,6 +141,18 @@ def ensure_progression_state(settings: dict, today: date | None = None) -> None:
         settings["season_reward_stage"] = 0
     settings["season_tokens"] = max(0, int(settings.get("season_tokens", 0)))
     settings["season_reward_stage"] = max(0, int(settings.get("season_reward_stage", 0)))
+    achievement_progress = settings.get("achievement_progress")
+    if not isinstance(achievement_progress, dict):
+        achievement_progress = {}
+    normalized_achievement_progress: dict[str, int] = {}
+    for metric, default_value in ACHIEVEMENT_PROGRESS_DEFAULTS.items():
+        normalized_achievement_progress[metric] = max(0, int(achievement_progress.get(metric, default_value)))
+    settings["achievement_progress"] = normalized_achievement_progress
+    unlocked = settings.get("achievements_unlocked")
+    if not isinstance(unlocked, list):
+        unlocked = []
+    valid_keys = {achievement.key for achievement in ACHIEVEMENTS}
+    settings["achievements_unlocked"] = [str(key) for key in unlocked if str(key) in valid_keys]
 
 
 def mission_goals_for_set(set_number: int) -> tuple[MissionGoal, ...]:
@@ -226,3 +269,44 @@ def pick_super_mystery_box_reward() -> str:
     rewards = list(SUPER_MYSTERY_BOX_REWARD_WEIGHTS.keys())
     weights = list(SUPER_MYSTERY_BOX_REWARD_WEIGHTS.values())
     return random.choices(rewards, weights=weights, k=1)[0]
+
+
+def achievement_definitions() -> tuple[Achievement, ...]:
+    return ACHIEVEMENTS
+
+
+def achievement_progress(settings: dict) -> dict[str, int]:
+    ensure_progression_state(settings)
+    return settings["achievement_progress"]
+
+
+def record_achievement_progress(settings: dict, metric: str, amount: int = 1) -> int:
+    ensure_progression_state(settings)
+    if amount <= 0:
+        return int(settings["achievement_progress"].get(metric, 0))
+    progress = settings["achievement_progress"]
+    progress[metric] = max(0, int(progress.get(metric, 0)) + int(amount))
+    return int(progress[metric])
+
+
+def set_achievement_progress_max(settings: dict, metric: str, value: int) -> int:
+    ensure_progression_state(settings)
+    progress = settings["achievement_progress"]
+    progress[metric] = max(int(progress.get(metric, 0)), max(0, int(value)))
+    return int(progress[metric])
+
+
+def newly_unlocked_achievements(settings: dict) -> tuple[Achievement, ...]:
+    ensure_progression_state(settings)
+    progress = settings["achievement_progress"]
+    unlocked = set(settings.get("achievements_unlocked", []))
+    new_unlocks: list[Achievement] = []
+    for achievement in ACHIEVEMENTS:
+        if achievement.key in unlocked:
+            continue
+        if int(progress.get(achievement.metric, 0)) >= achievement.target:
+            unlocked.add(achievement.key)
+            new_unlocks.append(achievement)
+    if new_unlocks:
+        settings["achievements_unlocked"] = [achievement.key for achievement in ACHIEVEMENTS if achievement.key in unlocked]
+    return tuple(new_unlocks)

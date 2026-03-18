@@ -1,9 +1,39 @@
 Subway Surfers Blind Edition
 Changelog
 
+Date: 2026-03-18
+
+Update Summary
+- Updated the game version to 1.1.2.
+- Added a persistent Achievements system with unlock tracking across runs.
+- Reworked How to Play and What's New into cleaner navigable dialog flows.
+
+Gameplay Changes
+- Added badges for lifetime coins, jumps, rolls, dodges, mystery box opens, best run distance, Word Hunt streaks, and total Season Hunt tokens, with automatic progress updates during gameplay.
+- Added version tracking so the game can remember which build has already been seen.
+
+Audio or UI Updates
+- Changed SFX and Music volume adjustment to move by 1 per step instead of 10.
+
+------------------------------------------------------------
+
+Date: 2026-03-13
+
+Update Summary
+- Split the previous shared tracking toggle into separate controls for meters, coin counters, and quest changes.
+- Defaulted those progress-related options to off so players can enable only the information they want.
+
+Gameplay Changes
+- Coin counters can now be disabled without removing coin spawns from the run.
+- Quest changes can now be disabled to stop mission, Word Hunt, and Season Hunt progression updates independently.
+
+Audio or UI Updates
+- Added separate Options menu toggles for Meters, Coin Counters, and Quest Changes.
+- Hid coin count and quest HUD sections when their related toggles are disabled.
+
+------------------------------------------------------------
+
 Date: 2026-03-10
-Version: 0.1.0
-Title: Audio, Difficulty, and Lane Spawn Update
 
 Update Summary
 - Improved HRTF and spatial audio so obstacle placement feels more believable in 3D space.
@@ -30,8 +60,6 @@ Display Updates
 
 Template For Future Entries
 Date: YYYY-MM-DD
-Version: x.y.z
-Title: Short update title
 
 Update Summary
 - Short summary item
