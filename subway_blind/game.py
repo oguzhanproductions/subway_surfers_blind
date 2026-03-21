@@ -3151,6 +3151,15 @@ class SubwayBlindGame:
         for lane in LANES:
             self.audio.stop(f"spatial_{lane}")
 
+    @staticmethod
+    def _stumble_sound_for_variant(variant: str) -> str:
+        return {
+            "train": "stumble_side",
+            "bush": "stumble_bush",
+            "low": "stumble",
+            "high": "stumble",
+        }.get(variant, "stumble")
+
     def _on_hit(self, variant: str = "train") -> None:
         if self.player.hover_active > 0:
             self.player.hover_active = 0.0
@@ -3166,13 +3175,8 @@ class SubwayBlindGame:
             self._queue_revive_or_finish()
             return
 
-        if variant == "bush":
-            stumble_sound = "stumble_bush"
-        else:
-            stumble_sound = "stumble_side" if self.player.lane != 0 else "stumble"
         self._guard_loop_timer = GUARD_LOOP_DURATION
-        self.audio.play(stumble_sound, channel="act")
-        self.audio.play("crash", channel="act2")
+        self.audio.play(self._stumble_sound_for_variant(variant), channel="act")
         self.speaker.speak("You crashed. One chance left.", interrupt=True)
 
     def _update_near_miss_audio(self) -> None:

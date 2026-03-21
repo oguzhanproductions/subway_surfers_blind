@@ -2399,6 +2399,7 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.player.hover_active, 0.0)
         self.assertEqual(game.player.stumbles, 0)
         self.assertEqual(speaker.messages[-1][0], "Hoverboard destroyed.")
+        self.assertIn(("crash", "act", False), game.audio.played)
 
     def test_hoverboard_uses_original_duration_and_pauses_during_jetpack(self):
         game, _, _ = self.make_game()
@@ -2418,7 +2419,25 @@ class GameTests(unittest.TestCase):
         game._on_hit("bush")
 
         self.assertIn(("stumble_bush", "act", False), audio.played)
+        self.assertNotIn(("crash", "act2", False), audio.played)
         self.assertEqual(speaker.messages[-1][0], "You crashed. One chance left.")
+
+    def test_train_hit_uses_train_stumble_sound_without_generic_crash_layer(self):
+        game, _, audio = self.make_game()
+
+        game._on_hit("train")
+
+        self.assertIn(("stumble_side", "act", False), audio.played)
+        self.assertNotIn(("crash", "act2", False), audio.played)
+
+    def test_low_and_high_hits_use_standard_stumble_sound(self):
+        for variant in ("low", "high"):
+            game, _, audio = self.make_game()
+
+            game._on_hit(variant)
+
+            self.assertIn(("stumble", "act", False), audio.played)
+            self.assertNotIn(("crash", "act2", False), audio.played)
 
     def test_first_stumble_starts_guard_loop_for_recovery_window(self):
         game, _, audio = self.make_game()
