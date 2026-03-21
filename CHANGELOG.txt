@@ -2,8 +2,10 @@ Subway Surfers Blind Edition
 Changelog
 
 Date: 2026-03-21
+Version: 1.1.3
 
 Update Summary
+- Updated the game version to 1.1.3.
 - Added a persistent Character Upgrades section inside the Shop with unlock, active character selection, and per-character leveling.
 - Expanded the roster to the officially referenced classic crew: Jake, Tricky, Fresh, Yutani, Spike, Dino, and Boombot.
 - Moved SAPI controls into a dedicated submenu under Options and added direct SAPI volume control.
@@ -24,6 +26,7 @@ Audio or UI Updates
 - Added current active character status to the Shop and Character Upgrades menus.
 - Added a dedicated SAPI Settings submenu with On or Off, volume, voice, rate, and pitch controls.
 - Fixed the updater so packaged builds now apply extracted files into the game folder on restart and clean leftover update ZIP files.
+- Fixed collision audio so each obstacle type now triggers its intended hit sound instead of falling back to the same generic crash layer.
 
 ------------------------------------------------------------
 

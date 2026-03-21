@@ -240,11 +240,11 @@ HOW_TO_TOPICS: tuple[HelpTopic, ...] = (
     HelpTopic("progression", "Progress and Shop", "Missions raise your permanent multiplier. Word Hunt letters and Season Hunt tokens appear during runs. Spend saved coins in the shop on hoverboards, headstarts, score boosters, boxes, and character upgrades with unique passive bonuses."),
 )
 UPGRADE_HELP_TOPICS: dict[str, tuple[HelpTopic, ...]] = {
-    "1.1.2": (
+    "1.1.3": (
         HelpTopic(
-            "update_1_1_2",
-            "What's New in 1.1.2",
-            "Version 1.1.2 adds an Achievements menu with badge progress and unlock announcements. How to Play is now split into a list of topics so it no longer reads everything at once.",
+            "update_1_1_3",
+            "What's New in 1.1.3",
+            "Version 1.1.3 fixes obstacle collision audio so each hazard now triggers its intended hit sound instead of falling back to a generic crash layer.",
         ),
     ),
 }
