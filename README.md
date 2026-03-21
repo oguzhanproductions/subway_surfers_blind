@@ -11,8 +11,8 @@ This project is designed as an open source game codebase that can be run from so
 - Multiple speech backends: `accessible_output2` by default, optional Microsoft SAPI voices on Windows
 - Layered audio system with menu cues, gameplay SFX, ambient warning pulses, and music playback
 - Difficulty scaling with readable spawn patterns instead of purely random obstacle spam
-- Shop, consumables, revive flow, hoverboards, headstarts, score boosters, and mystery boxes
-- Progression systems including missions, Word Hunt, Season Hunt, and Super Mystery Box rewards
+- Shop, consumables, revive flow, hoverboards, headstarts, score boosters, mystery boxes, and character upgrades
+- Progression systems including missions, Word Hunt, Season Hunt, Super Mystery Box rewards, achievements, and persistent character unlocks
 - GitHub Releases updater integrated into the in-game menu
 - PyInstaller spec for shipping a Windows build with bundled assets and native dependencies
 
@@ -26,7 +26,7 @@ The core run loop is lane-based:
 - Avoid trains and react to spoken danger prompts
 - Collect coins, keys, power-ups, mystery boxes, Word Hunt letters, and Season Hunt tokens
 
-The game tracks run score, saved coins, consumables, mission metrics, and progression state between sessions.
+The game tracks run score, saved coins, consumables, mission metrics, character progression, and progression state between sessions.
 
 ## Accessibility and Audio
 
@@ -39,6 +39,7 @@ Accessibility is the central design goal of the project.
 - Menu open, move, edge, confirm, and close states have dedicated audio cues
 - Gameplay can announce lane changes, coin milestones, reward events, and urgent obstacle actions
 - Speech can be toggled during gameplay with `M`
+- Windows SAPI voice management is available through `Options -> SAPI Settings`
 
 ### Audio stack
 
@@ -90,6 +91,8 @@ The main menu includes a dedicated sound library browser so players can preview 
 - Score boosters
 - Mystery boxes
 - Super Mystery Boxes
+- Character unlocks
+- Character upgrade levels
 
 ### Progression
 
@@ -97,6 +100,29 @@ The main menu includes a dedicated sound library browser so players can preview 
 - Daily Word Hunt
 - Monthly Season Hunt progression
 - Reward thresholds and unlockable milestone payouts
+- Achievement tracking with unlock announcements
+- Character roster with persistent unlock state, active selection, and passive run bonuses
+
+### Character upgrade system
+
+The shop includes a `Character Upgrades` section with a persistent roster and an active-character selection flow.
+
+Current roster:
+
+- Jake
+- Tricky
+- Fresh
+- Yutani
+- Spike
+- Dino
+- Boombot
+
+Character bonuses are tied to the active runner and scale by upgrade level. The current system supports:
+
+- Extra banked coins at the end of a run
+- Longer hoverboard protection
+- Longer temporary power-up duration
+- Higher starting multiplier
 
 ### Distribution features
 
@@ -106,7 +132,7 @@ The main menu includes a dedicated sound library browser so players can preview 
 
 ## Controls
 
-The game now supports keyboard plus SDL-compatible Xbox and PlayStation controllers on both wired and Bluetooth connections. Open `Options -> Controls` to review the active device, see device-specific button labels, and remap keyboard or controller bindings.
+The game supports keyboard plus SDL-compatible Xbox and PlayStation controllers on both wired and Bluetooth connections. Open `Options -> Controls` to review the active device, see device-specific button labels, and remap keyboard or controller bindings. Open `Options -> SAPI Settings` to manage the Windows SAPI backend, including enable state, volume, voice, rate, and pitch.
 
 ### In menus
 
@@ -116,7 +142,7 @@ The game now supports keyboard plus SDL-compatible Xbox and PlayStation controll
 - `End`: jump to last item
 - `Enter`: confirm
 - `Escape`: close or go back
-- `Left` / `Right`: adjust values in the Options menu
+- `Left` / `Right`: adjust values in the Options and SAPI Settings menus
 
 ### During a run
 
@@ -144,7 +170,9 @@ The current user-facing menus include:
 
 - Main Menu
   - Start Game
+  - What's New
   - Shop
+  - Achievements
   - Options
   - How to Play
   - Learn Game Sounds
@@ -161,14 +189,21 @@ The current user-facing menus include:
   - Output device selection
   - Menu HRTF toggle
   - Speech toggle
+  - SAPI Settings
+  - Difficulty
+  - Meter announcements
+  - Coin counters
+  - Quest change announcements
+  - Controls
+- SAPI Settings
   - SAPI speech toggle
+  - SAPI volume
   - SAPI voice selection
   - SAPI rate
   - SAPI pitch
-  - Difficulty
-  - Controls
 - Controls
   - Active input summary
+  - Binding profile selection
   - Keyboard bindings
   - Connected controller bindings
 - Shop
@@ -176,6 +211,7 @@ The current user-facing menus include:
   - Mystery boxes
   - Headstarts
   - Score boosters
+  - Character Upgrades
 
 ## Requirements
 
@@ -253,29 +289,31 @@ The code also contains migration logic to pull forward older save layouts if the
 
 ```text
 subway_surfers_blind/
-├─ main.py
-├─ SubwaySurfersBlind.spec
-├─ assets/
-│  ├─ menu/
-│  ├─ music/
-│  └─ sfx/
-├─ subway_blind/
-│  ├─ app.py
-│  ├─ audio.py
-│  ├─ balance.py
-│  ├─ config.py
-│  ├─ features.py
-│  ├─ game.py
-│  ├─ hrtf_audio.py
-│  ├─ menu.py
-│  ├─ models.py
-│  ├─ progression.py
-│  ├─ spatial_audio.py
-│  ├─ spawn.py
-│  ├─ updater.py
-│  └─ version.py
-└─ tests/
-   └─ test_game.py
+|- main.py
+|- SubwaySurfersBlind.spec
+|- assets/
+|  |- menu/
+|  |- music/
+|  `- sfx/
+|- subway_blind/
+|  |- app.py
+|  |- audio.py
+|  |- balance.py
+|  |- characters.py
+|  |- config.py
+|  |- controls.py
+|  |- features.py
+|  |- game.py
+|  |- hrtf_audio.py
+|  |- menu.py
+|  |- models.py
+|  |- progression.py
+|  |- spatial_audio.py
+|  |- spawn.py
+|  |- updater.py
+|  `- version.py
+`- tests/
+   `- test_game.py
 ```
 
 ## Code Architecture
@@ -300,6 +338,7 @@ Primary game controller. Owns:
 - HUD rendering
 - input handling
 - reward logic
+- character upgrade flow
 - updater workflow integration
 
 This is the orchestration layer of the project.
@@ -334,7 +373,7 @@ Controls obstacle and support-item placement using readable route patterns, safe
 
 ### `subway_blind/progression.py`
 
-Handles mission targets, Word Hunt rotation, Season Hunt state, and reward claims.
+Handles mission targets, Word Hunt rotation, Season Hunt state, achievement progress, and reward claims.
 
 ### `subway_blind/features.py`
 
@@ -344,6 +383,10 @@ Contains balancing rules for consumables, shop prices, reward tables, and myster
 
 Defines per-difficulty speed and spawn-gap curves.
 
+### `subway_blind/characters.py`
+
+Defines the character roster, unlock costs, upgrade tiers, perk summaries, save-state normalization, and runtime bonus resolution for the active character.
+
 ### `subway_blind/config.py`
 
 Manages:
@@ -352,6 +395,8 @@ Manages:
 - save data directory resolution
 - default settings
 - settings load and save
+- SAPI voice configuration defaults and persistence
+- selected character persistence and character progression state
 - migration from legacy data locations
 
 ### `subway_blind/updater.py`
@@ -367,7 +412,7 @@ Implements the GitHub Releases updater:
 
 ### `tests/test_game.py`
 
-Regression coverage for gameplay rules, settings behavior, spawning logic, audio-adjacent flow, and progression behavior.
+Regression coverage for gameplay rules, settings behavior, spawning logic, audio-adjacent flow, progression behavior, updater behavior, and character progression.
 
 ## Music and Asset Handling
 
@@ -436,7 +481,7 @@ If you contribute:
 - keep accessibility behavior intact
 - preserve keyboard-only usability
 - do not commit `dist/` or `build/` artifacts
-- add or update automated tests when gameplay or progression logic changes
+- add or update automated tests when gameplay, updater, or progression logic changes
 - keep audio asset references and packaging behavior consistent with `SubwaySurfersBlind.spec`
 
 ## License
