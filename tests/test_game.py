@@ -66,6 +66,7 @@ class DummySpeaker:
         self.sapi_voice_id = ""
         self.sapi_rate = 0
         self.sapi_pitch = 0
+        self.sapi_volume = 100
         self._sapi_voices = [
             ("voice-zira", "Microsoft Zira Desktop - English (United States)"),
             ("voice-david", "Microsoft David Desktop - English (United States)"),
@@ -85,6 +86,7 @@ class DummySpeaker:
         self.use_sapi = bool(settings.get("sapi_speech_enabled", False))
         self.sapi_rate = max(SAPI_RATE_MIN, min(SAPI_RATE_MAX, int(settings.get("sapi_rate", 0))))
         self.sapi_pitch = max(SAPI_PITCH_MIN, min(SAPI_PITCH_MAX, int(settings.get("sapi_pitch", 0))))
+        self.sapi_volume = max(0, min(100, int(settings.get("sapi_volume", 100))))
         requested_voice_id = str(settings.get("sapi_voice_id", "") or "").strip()
         if any(voice_id == requested_voice_id for voice_id, _ in self._sapi_voices):
             self.sapi_voice_id = requested_voice_id
@@ -394,11 +396,14 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded["sapi_voice_id"], config_module.DEFAULT_SETTINGS["sapi_voice_id"])
         self.assertEqual(loaded["sapi_rate"], config_module.DEFAULT_SETTINGS["sapi_rate"])
         self.assertEqual(loaded["sapi_pitch"], config_module.DEFAULT_SETTINGS["sapi_pitch"])
+        self.assertEqual(loaded["sapi_volume"], config_module.DEFAULT_SETTINGS["sapi_volume"])
         self.assertEqual(
             loaded["check_updates_on_startup"],
             config_module.DEFAULT_SETTINGS["check_updates_on_startup"],
         )
         self.assertEqual(loaded["difficulty"], "normal")
+        self.assertEqual(loaded["selected_character"], config_module.DEFAULT_SETTINGS["selected_character"])
+        self.assertEqual(loaded["character_progress"], config_module.DEFAULT_SETTINGS["character_progress"])
 
     def test_default_storage_base_dir_uses_roaming_appdata_vendor_and_game_name(self):
         with patch.dict(os.environ, {"APPDATA": r"C:\Users\Test\AppData\Roaming"}, clear=False):
@@ -1117,8 +1122,11 @@ class GameTests(unittest.TestCase):
             game.main_menu,
             game.whats_new_menu,
             game.shop_menu,
+            game.character_menu,
+            game.character_detail_menu,
             game.achievements_menu,
             game.options_menu,
+            game.sapi_menu,
             game.howto_menu,
             game.help_topic_menu,
             game.controls_menu,
@@ -1134,6 +1142,7 @@ class GameTests(unittest.TestCase):
         ):
             menu.speaker = speaker
             menu.audio = audio
+        game._persist_settings = lambda: None
         game._sync_music_context()
         return game, speaker, audio
 
@@ -1168,9 +1177,7 @@ class GameTests(unittest.TestCase):
             "Output Device: System Default",
             "Menu Sound HRTF: On",
             "Speech: Off",
-            "SAPI Speech: Off",
-            "SAPI Rate: 0",
-            "SAPI Pitch: 0",
+            "SAPI Settings",
             "Difficulty: Normal",
             "Meters: Off",
             "Coin Counters: Off",
@@ -1178,8 +1185,7 @@ class GameTests(unittest.TestCase):
             "Controls",
             "Back",
         ]
-        self.assertEqual(labels[:7] + labels[8:], expected)
-        self.assertTrue(labels[7].startswith("SAPI Voice: Microsoft "))
+        self.assertEqual(labels, expected)
 
     def test_shop_menu_labels_include_coin_currency(self):
         game, _, _ = self.make_game()
@@ -1190,8 +1196,20 @@ class GameTests(unittest.TestCase):
                 f"Open Mystery Box   Cost: {SHOP_PRICES['mystery_box']} Coins",
                 f"Buy Headstart   Cost: {SHOP_PRICES['headstart']} Coins   Owned: 2",
                 f"Buy Score Booster   Cost: {SHOP_PRICES['score_booster']} Coins   Owned: 3",
+                "Character Upgrades   Active: Jake",
                 "Back",
             ],
+        )
+
+    def test_character_menu_lists_officially_added_characters(self):
+        game, _, _ = self.make_game()
+
+        game._refresh_character_menu_labels()
+
+        labels = [item.label for item in game.character_menu.items[:-1]]
+        self.assertEqual(
+            [label.split("   ")[0] for label in labels],
+            ["Jake", "Tricky", "Fresh", "Yutani", "Spike", "Dino", "Boombot"],
         )
 
     def test_achievements_menu_shows_progress_and_unlocks(self):
@@ -1783,7 +1801,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_on_back_only_plays_edge_feedback(self):
         game, _, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 15
+        game.options_menu.index = 12
 
         game._adjust_selected_option(1)
 
@@ -1793,7 +1811,7 @@ class GameTests(unittest.TestCase):
     def test_enter_on_back_returns_to_main_menu_from_options(self):
         game, _, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 15
+        game.options_menu.index = 12
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -1839,7 +1857,7 @@ class GameTests(unittest.TestCase):
     def test_options_controls_entry_opens_controls_menu(self):
         game, _, _ = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 14
+        game.options_menu.index = 11
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -1851,7 +1869,7 @@ class GameTests(unittest.TestCase):
         game, _, _ = self.make_game()
         self.attach_controller(game, family=PLAYSTATION_FAMILY, name="Wireless Controller")
         game.active_menu = game.options_menu
-        game.options_menu.index = 14
+        game.options_menu.index = 11
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -2015,8 +2033,8 @@ class GameTests(unittest.TestCase):
 
     def test_adjust_selected_option_toggles_sapi_speech(self):
         game, speaker, audio = self.make_game()
-        game.active_menu = game.options_menu
-        game.options_menu.index = 6
+        game.active_menu = game.sapi_menu
+        game.sapi_menu.index = 0
         game.settings["speech_enabled"] = True
         game.settings["sapi_speech_enabled"] = False
 
@@ -2027,50 +2045,87 @@ class GameTests(unittest.TestCase):
         self.assertIn(("confirm", "ui", False), audio.played)
         self.assertEqual(speaker.messages[-1][0], "SAPI Speech: On")
 
+    def test_options_sapi_entry_opens_sapi_submenu(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 6
+
+        result = game._handle_active_menu_key(pygame.K_RETURN)
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.sapi_menu)
+        self.assertEqual(game.sapi_menu.title, "SAPI Settings")
+
+    def test_sapi_submenu_back_returns_to_options(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.sapi_menu
+        game.sapi_menu.index = 5
+
+        result = game._handle_active_menu_key(pygame.K_RETURN)
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.options_menu)
+        self.assertEqual(game.options_menu.index, 6)
+
+    def test_adjust_selected_option_changes_sapi_volume(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.sapi_menu
+        game.sapi_menu.index = 1
+        game.settings["sapi_volume"] = 100
+
+        game._adjust_selected_option(-1)
+
+        self.assertEqual(game.settings["sapi_volume"], 99)
+        self.assertEqual(speaker.sapi_volume, 99)
+        self.assertEqual(game.sapi_menu.items[1].label, "SAPI Volume: 99")
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(game.options_menu.items[6].label, "SAPI Settings")
+        self.assertEqual(speaker.messages[-1][0], "SAPI Volume: 99")
+
     def test_adjust_selected_option_cycles_sapi_voice(self):
         game, speaker, audio = self.make_game()
-        game.active_menu = game.options_menu
-        game.options_menu.index = 7
+        game.active_menu = game.sapi_menu
+        game.sapi_menu.index = 2
 
         game._adjust_selected_option(1)
 
         self.assertEqual(game.settings["sapi_voice_id"], "voice-david")
-        self.assertEqual(game.options_menu.items[7].label, "SAPI Voice: Microsoft David Desktop - English (United States)")
+        self.assertEqual(game.sapi_menu.items[2].label, "SAPI Voice: Microsoft David Desktop - English (United States)")
         self.assertIn(("confirm", "ui", False), audio.played)
         self.assertEqual(speaker.messages[-1][0], "SAPI Voice: Microsoft David Desktop - English (United States)")
 
     def test_adjust_selected_option_changes_sapi_rate(self):
         game, speaker, audio = self.make_game()
-        game.active_menu = game.options_menu
-        game.options_menu.index = 8
+        game.active_menu = game.sapi_menu
+        game.sapi_menu.index = 3
         game.settings["sapi_rate"] = 0
 
         game._adjust_selected_option(1)
 
         self.assertEqual(game.settings["sapi_rate"], 1)
         self.assertEqual(speaker.sapi_rate, 1)
-        self.assertEqual(game.options_menu.items[8].label, "SAPI Rate: 1")
+        self.assertEqual(game.sapi_menu.items[3].label, "SAPI Rate: 1")
         self.assertIn(("confirm", "ui", False), audio.played)
         self.assertEqual(speaker.messages[-1][0], "SAPI Rate: 1")
 
     def test_adjust_selected_option_changes_sapi_pitch(self):
         game, speaker, audio = self.make_game()
-        game.active_menu = game.options_menu
-        game.options_menu.index = 9
+        game.active_menu = game.sapi_menu
+        game.sapi_menu.index = 4
         game.settings["sapi_pitch"] = 0
 
         game._adjust_selected_option(-1)
 
         self.assertEqual(game.settings["sapi_pitch"], -1)
         self.assertEqual(speaker.sapi_pitch, -1)
-        self.assertEqual(game.options_menu.items[9].label, "SAPI Pitch: -1")
+        self.assertEqual(game.sapi_menu.items[4].label, "SAPI Pitch: -1")
         self.assertIn(("confirm", "ui", False), audio.played)
         self.assertEqual(speaker.messages[-1][0], "SAPI Pitch: -1")
 
     def test_adjust_selected_option_cycles_difficulty_backward(self):
         game, speaker, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 10
+        game.options_menu.index = 7
         game.settings["difficulty"] = "normal"
 
         game._adjust_selected_option(-1)
@@ -2082,7 +2137,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_toggles_meters(self):
         game, speaker, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 11
+        game.options_menu.index = 8
 
         game._adjust_selected_option(1)
 
@@ -2093,7 +2148,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_toggles_coin_counters(self):
         game, speaker, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 12
+        game.options_menu.index = 9
 
         game._adjust_selected_option(1)
 
@@ -2104,7 +2159,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_toggles_quest_changes(self):
         game, speaker, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 13
+        game.options_menu.index = 10
 
         game._adjust_selected_option(1)
 
@@ -2200,6 +2255,92 @@ class GameTests(unittest.TestCase):
 
         self.assertEqual(game.settings["hoverboards"], 3)
         self.assertIn(("Mystery box: 3 hoverboards.", False), speaker.messages)
+
+    def test_unlock_character_spends_bank_coins_and_marks_character_unlocked(self):
+        game, speaker, _ = self.make_game()
+        game.settings["bank_coins"] = 2200
+
+        game._unlock_character("tricky")
+
+        self.assertEqual(game.settings["bank_coins"], 0)
+        self.assertTrue(game.settings["character_progress"]["tricky"]["unlocked"])
+        self.assertIn(("Tricky unlocked.", True), speaker.messages)
+
+    def test_select_character_sets_active_character(self):
+        game, speaker, _ = self.make_game()
+        game.settings["character_progress"]["tricky"]["unlocked"] = True
+        game._sync_character_progress()
+
+        game._select_character("tricky")
+
+        self.assertEqual(game.settings["selected_character"], "tricky")
+        self.assertEqual(game.shop_menu.items[4].label, "Character Upgrades   Active: Tricky")
+        self.assertIn(("Tricky selected.", True), speaker.messages)
+
+    def test_upgrade_character_increases_level_and_updates_perk_summary(self):
+        game, speaker, _ = self.make_game()
+        game.settings["character_progress"]["fresh"]["unlocked"] = True
+        game.settings["bank_coins"] = 1100
+        game._sync_character_progress()
+
+        game._upgrade_character("fresh")
+
+        self.assertEqual(game.settings["character_progress"]["fresh"]["level"], 1)
+        self.assertIn(("Fresh upgraded to level 1. Power duration +8%.", True), speaker.messages)
+
+    def test_jake_bonus_banks_extra_run_coins(self):
+        game, speaker, _ = self.make_game()
+        game.settings["selected_character"] = "jake"
+        game.settings["character_progress"]["jake"]["level"] = 2
+        game._sync_character_progress()
+        game.state.running = True
+        game.state.coins = 100
+
+        game._commit_run_rewards()
+
+        self.assertEqual(game.settings["bank_coins"], 112)
+        self.assertIn(("Jake bonus saved 12 extra coins.", False), speaker.messages)
+
+    def test_tricky_bonus_extends_hoverboard_duration(self):
+        game, _, _ = self.make_game()
+        game.settings["selected_character"] = "tricky"
+        game.settings["character_progress"]["tricky"] = {"unlocked": True, "level": 2}
+        game._sync_character_progress()
+        game.player.hoverboards = 1
+
+        game._try_hoverboard()
+
+        self.assertEqual(game.player.hover_active, HOVERBOARD_DURATION + 4.0)
+
+    def test_fresh_bonus_extends_powerup_duration(self):
+        game, _, _ = self.make_game()
+        game.settings["selected_character"] = "fresh"
+        game.settings["character_progress"]["fresh"] = {"unlocked": True, "level": 3}
+        game._sync_character_progress()
+
+        game._apply_power_reward("jetpack", from_headstart=False)
+
+        self.assertAlmostEqual(game.player.jetpack, 6.5 * 1.24)
+
+    def test_yutani_bonus_increases_starting_multiplier(self):
+        game, _, _ = self.make_game()
+        game.settings["selected_character"] = "yutani"
+        game.settings["character_progress"]["yutani"] = {"unlocked": True, "level": 2}
+        game._sync_character_progress()
+
+        game.start_run()
+
+        self.assertEqual(game.state.multiplier, 3)
+
+    def test_boombot_bonus_extends_powerup_duration_more_than_fresh_level_one(self):
+        game, _, _ = self.make_game()
+        game.settings["selected_character"] = "boombot"
+        game.settings["character_progress"]["boombot"] = {"unlocked": True, "level": 1}
+        game._sync_character_progress()
+
+        game._apply_power_reward("magnet", from_headstart=False)
+
+        self.assertAlmostEqual(game.player.magnet, 9.0 * 1.1)
 
     def test_hoverboard_absorbs_hit(self):
         game, speaker, _ = self.make_game()

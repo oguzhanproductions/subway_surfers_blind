@@ -8,6 +8,7 @@ import shutil
 import sys
 from typing import Any
 
+from subway_blind.characters import DEFAULT_SELECTED_CHARACTER_KEY, default_character_progress_state
 from subway_blind.controls import default_controller_bindings, default_keyboard_bindings
 from subway_blind.version import APP_NAME
 
@@ -37,6 +38,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "sapi_voice_id": "",
     "sapi_rate": 0,
     "sapi_pitch": 0,
+    "sapi_volume": 100,
     "check_updates_on_startup": True,
     "last_seen_version": "",
     "difficulty": "normal",
@@ -50,6 +52,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "hoverboards": 3,
     "headstarts": 2,
     "score_boosters": 3,
+    "selected_character": DEFAULT_SELECTED_CHARACTER_KEY,
+    "character_progress": default_character_progress_state(),
     "mission_set": 1,
     "mission_multiplier_bonus": 0,
     "mission_metrics": {

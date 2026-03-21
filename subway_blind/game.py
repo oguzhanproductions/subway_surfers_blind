@@ -18,9 +18,23 @@ from subway_blind.audio import (
     SAPI_PITCH_MAX,
     SAPI_PITCH_MIN,
     SAPI_VOICE_UNAVAILABLE_LABEL,
+    SAPI_VOLUME_MAX,
+    SAPI_VOLUME_MIN,
     SYSTEM_DEFAULT_OUTPUT_LABEL,
 )
 from subway_blind.balance import SpeedProfile, speed_profile_for_difficulty
+from subway_blind.characters import (
+    CharacterRuntimeBonuses,
+    character_definition,
+    character_definitions,
+    character_level,
+    character_perk_summary,
+    character_runtime_bonuses,
+    character_unlocked,
+    ensure_character_progress_state,
+    next_character_upgrade_cost,
+    selected_character_definition,
+)
 from subway_blind.config import resource_path, save_settings
 from subway_blind.controls import (
     ACTION_DEFINITIONS_BY_KEY,
@@ -223,7 +237,7 @@ HOW_TO_TOPICS: tuple[HelpTopic, ...] = (
     HelpTopic("warnings", "Hazards and Warnings", "Listen for danger speech and warning sounds. The callout focuses on the action needed for your current lane, such as jump, roll, turn left, or turn right."),
     HelpTopic("powerups", "Power Ups", "Collect magnets, jetpacks, score boosts, super sneakers, and pogo sticks to survive longer and build bigger scores."),
     HelpTopic("rewards", "Coins and Rewards", "Collect coins during the run, then bank them when the run ends. Keys can revive you after a crash. Mystery boxes can grant extra items and bonuses."),
-    HelpTopic("progression", "Progress and Shop", "Missions raise your permanent multiplier. Word Hunt letters and Season Hunt tokens appear during runs. Spend saved coins in the shop on hoverboards, headstarts, score boosters, and boxes."),
+    HelpTopic("progression", "Progress and Shop", "Missions raise your permanent multiplier. Word Hunt letters and Season Hunt tokens appear during runs. Spend saved coins in the shop on hoverboards, headstarts, score boosters, boxes, and character upgrades with unique passive bonuses."),
 )
 UPGRADE_HELP_TOPICS: dict[str, tuple[HelpTopic, ...]] = {
     "1.1.2": (
@@ -301,6 +315,7 @@ class SubwayBlindGame:
         self.font = pygame.font.SysFont("segoeui", 22)
         self.big = pygame.font.SysFont("segoeui", 38, bold=True)
         ensure_progression_state(self.settings)
+        ensure_character_progress_state(self.settings)
 
         self.state = RunState()
         self.player = Player()
@@ -336,6 +351,8 @@ class SubwayBlindGame:
         self._update_install_error = ""
         self._update_ready_announced = False
         self._showing_upgrade_help = False
+        self._active_character_bonuses = CharacterRuntimeBonuses()
+        self._character_detail_key = selected_character_definition(self.settings).key
         self.controls = ControllerSupport(settings)
         self._binding_capture: BindingCaptureRequest | None = None
         self._selected_binding_device = "controller" if self.controls.active_controller() is not None else "keyboard"
@@ -422,15 +439,25 @@ class SubwayBlindGame:
                 MenuItem(self._audio_output_option_label(), "opt_output"),
                 MenuItem(self._menu_sound_hrtf_option_label(), "opt_menu_hrtf"),
                 MenuItem(self._speech_option_label(), "opt_speech"),
-                MenuItem(self._sapi_speech_option_label(), "opt_sapi"),
-                MenuItem(self._sapi_voice_option_label(), "opt_sapi_voice"),
-                MenuItem(self._sapi_rate_option_label(), "opt_sapi_rate"),
-                MenuItem(self._sapi_pitch_option_label(), "opt_sapi_pitch"),
+                MenuItem(self._sapi_menu_entry_label(), "opt_sapi_menu"),
                 MenuItem(self._difficulty_option_label(), "opt_diff"),
                 MenuItem(self._meter_option_label(), "opt_meters"),
                 MenuItem(self._coin_counter_option_label(), "opt_coin_counters"),
                 MenuItem(self._quest_changes_option_label(), "opt_quest_changes"),
                 MenuItem("Controls", "opt_controls"),
+                MenuItem("Back", "back"),
+            ],
+        )
+        self.sapi_menu = Menu(
+            self.speaker,
+            self.audio,
+            "SAPI Settings",
+            [
+                MenuItem(self._sapi_speech_option_label(), "opt_sapi"),
+                MenuItem(self._sapi_volume_option_label(), "opt_sapi_volume"),
+                MenuItem(self._sapi_voice_option_label(), "opt_sapi_voice"),
+                MenuItem(self._sapi_rate_option_label(), "opt_sapi_rate"),
+                MenuItem(self._sapi_pitch_option_label(), "opt_sapi_pitch"),
                 MenuItem("Back", "back"),
             ],
         )
@@ -461,8 +488,21 @@ class SubwayBlindGame:
                 MenuItem(self._shop_box_label(), "buy_box"),
                 MenuItem(self._shop_headstart_label(), "buy_headstart"),
                 MenuItem(self._shop_score_booster_label(), "buy_score_booster"),
+                MenuItem(self._shop_character_upgrade_label(), "open_character_upgrades"),
                 MenuItem("Back", "back"),
             ],
+        )
+        self.character_menu = Menu(
+            self.speaker,
+            self.audio,
+            self._character_menu_title(),
+            [],
+        )
+        self.character_detail_menu = Menu(
+            self.speaker,
+            self.audio,
+            selected_character_definition(self.settings).name,
+            [],
         )
         self.learn_sounds_menu = Menu(
             self.speaker,
@@ -507,6 +547,8 @@ class SubwayBlindGame:
                 MenuItem("Quit Game", "quit"),
             ],
         )
+        self._refresh_character_menu_labels()
+        self._refresh_character_detail_menu_labels(self._character_detail_key)
         self._refresh_control_menus()
 
         self.active_menu: Optional[Menu] = self.main_menu
@@ -515,6 +557,7 @@ class SubwayBlindGame:
         if self.active_menu == self.main_menu and not self.main_menu.opened:
             self.active_menu.open()
             self._sync_music_context()
+        self._sync_character_progress()
         self._mark_current_version_seen()
 
     def _sfx_option_label(self) -> str:
@@ -552,6 +595,9 @@ class SubwayBlindGame:
     def _sapi_speech_option_label(self) -> str:
         return f"SAPI Speech: {'On' if self.settings['sapi_speech_enabled'] else 'Off'}"
 
+    def _sapi_menu_entry_label(self) -> str:
+        return "SAPI Settings"
+
     def _audio_output_option_label(self) -> str:
         return f"Output Device: {self.audio.output_device_display_name()}"
 
@@ -567,6 +613,9 @@ class SubwayBlindGame:
 
     def _sapi_pitch_option_label(self) -> str:
         return f"SAPI Pitch: {int(self.settings.get('sapi_pitch', 0))}"
+
+    def _sapi_volume_option_label(self) -> str:
+        return f"SAPI Volume: {int(self.settings.get('sapi_volume', 100))}"
 
     def _difficulty_option_label(self) -> str:
         difficulty = DIFFICULTY_LABELS.get(str(self.settings["difficulty"]), "Normal")
@@ -615,6 +664,56 @@ class SubwayBlindGame:
             f"Owned: {int(self.settings.get('score_boosters', 0))}"
         )
 
+    def _shop_character_upgrade_label(self) -> str:
+        active_character = selected_character_definition(self.settings)
+        return f"Character Upgrades   Active: {active_character.name}"
+
+    def _character_menu_title(self) -> str:
+        active_character = selected_character_definition(self.settings)
+        return f"Character Upgrades   Active: {active_character.name}"
+
+    def _character_list_item_label(self, key: str) -> str:
+        definition = character_definition(key)
+        if not character_unlocked(self.settings, key):
+            return f"{definition.name}   Locked   Unlock: {definition.unlock_cost} Coins"
+        level = character_level(self.settings, key)
+        active_status = "Active" if selected_character_definition(self.settings).key == key else "Unlocked"
+        return (
+            f"{definition.name}   {active_status}   Level {level}/{definition.max_level}   "
+            f"{character_perk_summary(definition, level)}"
+        )
+
+    def _character_status_label(self, key: str) -> str:
+        definition = character_definition(key)
+        if not character_unlocked(self.settings, key):
+            return f"Status: Locked   Unlock cost: {definition.unlock_cost} Coins"
+        level = character_level(self.settings, key)
+        active_status = "Active" if selected_character_definition(self.settings).key == key else "Unlocked"
+        return f"Status: {active_status}   Level {level} of {definition.max_level}"
+
+    def _character_perk_label(self, key: str) -> str:
+        definition = character_definition(key)
+        level = character_level(self.settings, key)
+        return f"Perk: {character_perk_summary(definition, level)}"
+
+    def _character_primary_action_label(self, key: str) -> str:
+        definition = character_definition(key)
+        if not character_unlocked(self.settings, key):
+            return f"Unlock Character   Cost: {definition.unlock_cost} Coins"
+        if selected_character_definition(self.settings).key == key:
+            return "Character Active"
+        return "Set as Active Character"
+
+    def _character_upgrade_action_label(self, key: str) -> str:
+        if not character_unlocked(self.settings, key):
+            return "Unlock character first to upgrade"
+        definition = character_definition(key)
+        next_cost = next_character_upgrade_cost(self.settings, key)
+        if next_cost is None:
+            return "Max Level Reached"
+        next_level = character_level(self.settings, key) + 1
+        return f"Upgrade to Level {next_level}   Cost: {next_cost} Coins"
+
     def _refresh_options_menu_labels(self) -> None:
         self.options_menu.items[0].label = self._sfx_option_label()
         self.options_menu.items[1].label = self._music_option_label()
@@ -622,15 +721,19 @@ class SubwayBlindGame:
         self.options_menu.items[3].label = self._audio_output_option_label()
         self.options_menu.items[4].label = self._menu_sound_hrtf_option_label()
         self.options_menu.items[5].label = self._speech_option_label()
-        self.options_menu.items[6].label = self._sapi_speech_option_label()
-        self.options_menu.items[7].label = self._sapi_voice_option_label()
-        self.options_menu.items[8].label = self._sapi_rate_option_label()
-        self.options_menu.items[9].label = self._sapi_pitch_option_label()
-        self.options_menu.items[10].label = self._difficulty_option_label()
-        self.options_menu.items[11].label = self._meter_option_label()
-        self.options_menu.items[12].label = self._coin_counter_option_label()
-        self.options_menu.items[13].label = self._quest_changes_option_label()
-        self.options_menu.items[14].label = "Controls"
+        self.options_menu.items[6].label = self._sapi_menu_entry_label()
+        self.options_menu.items[7].label = self._difficulty_option_label()
+        self.options_menu.items[8].label = self._meter_option_label()
+        self.options_menu.items[9].label = self._coin_counter_option_label()
+        self.options_menu.items[10].label = self._quest_changes_option_label()
+        self.options_menu.items[11].label = "Controls"
+
+    def _refresh_sapi_menu_labels(self) -> None:
+        self.sapi_menu.items[0].label = self._sapi_speech_option_label()
+        self.sapi_menu.items[1].label = self._sapi_volume_option_label()
+        self.sapi_menu.items[2].label = self._sapi_voice_option_label()
+        self.sapi_menu.items[3].label = self._sapi_rate_option_label()
+        self.sapi_menu.items[4].label = self._sapi_pitch_option_label()
 
     def _refresh_loadout_menu_labels(self) -> None:
         self.loadout_menu.items[0].label = self._headstart_option_label()
@@ -653,6 +756,39 @@ class SubwayBlindGame:
         self.shop_menu.items[1].label = self._shop_box_label()
         self.shop_menu.items[2].label = self._shop_headstart_label()
         self.shop_menu.items[3].label = self._shop_score_booster_label()
+        self.shop_menu.items[4].label = self._shop_character_upgrade_label()
+
+    def _refresh_character_menu_labels(self) -> None:
+        self.character_menu.title = self._character_menu_title()
+        self.character_menu.items = [
+            MenuItem(self._character_list_item_label(definition.key), f"character_open:{definition.key}")
+            for definition in character_definitions()
+        ] + [MenuItem("Back", "back")]
+
+    def _refresh_character_detail_menu_labels(self, key: str) -> None:
+        definition = character_definition(key)
+        self._character_detail_key = definition.key
+        self.character_detail_menu.title = definition.name
+        if not character_unlocked(self.settings, key):
+            primary_action = f"character_unlock:{definition.key}"
+        elif selected_character_definition(self.settings).key == definition.key:
+            primary_action = f"character_active_info:{definition.key}"
+        else:
+            primary_action = f"character_select:{definition.key}"
+        next_upgrade_cost = next_character_upgrade_cost(self.settings, key)
+        if not character_unlocked(self.settings, key):
+            upgrade_action = f"character_unlock_hint:{definition.key}"
+        elif next_upgrade_cost is None:
+            upgrade_action = f"character_max_info:{definition.key}"
+        else:
+            upgrade_action = f"character_upgrade:{definition.key}"
+        self.character_detail_menu.items = [
+            MenuItem(self._character_status_label(definition.key), f"character_status_info:{definition.key}"),
+            MenuItem(self._character_perk_label(definition.key), f"character_perk_info:{definition.key}"),
+            MenuItem(self._character_primary_action_label(definition.key), primary_action),
+            MenuItem(self._character_upgrade_action_label(definition.key), upgrade_action),
+            MenuItem("Back", "back"),
+        ]
 
     def _howto_topics(self) -> tuple[HelpTopic, ...]:
         if self._showing_upgrade_help:
@@ -1324,6 +1460,77 @@ class SubwayBlindGame:
         self.audio.play("gui_cash", channel="ui")
         return True
 
+    def _persist_settings(self) -> None:
+        save_settings(self.settings)
+
+    def _sync_character_progress(self) -> None:
+        ensure_character_progress_state(self.settings)
+        self._active_character_bonuses = character_runtime_bonuses(self.settings)
+
+    def _unlock_character(self, key: str) -> None:
+        definition = character_definition(key)
+        if character_unlocked(self.settings, definition.key):
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(f"{definition.name} is already unlocked.", interrupt=True)
+            return
+        if not self._spend_bank_coins(definition.unlock_cost):
+            return
+        self.settings["character_progress"][definition.key]["unlocked"] = True
+        self._sync_character_progress()
+        self._refresh_shop_menu_labels()
+        self._refresh_character_menu_labels()
+        self._refresh_character_detail_menu_labels(definition.key)
+        self._persist_settings()
+        self.audio.play("unlock", channel="ui3")
+        self.speaker.speak(f"{definition.name} unlocked.", interrupt=True)
+        self.speaker.speak(self._shop_coins_label(), interrupt=False)
+
+    def _select_character(self, key: str) -> None:
+        definition = character_definition(key)
+        if not character_unlocked(self.settings, definition.key):
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(f"{definition.name} is still locked.", interrupt=True)
+            return
+        if selected_character_definition(self.settings).key == definition.key:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(f"{definition.name} is already active.", interrupt=True)
+            return
+        self.settings["selected_character"] = definition.key
+        self._sync_character_progress()
+        self._refresh_shop_menu_labels()
+        self._refresh_character_menu_labels()
+        self._refresh_character_detail_menu_labels(definition.key)
+        self._persist_settings()
+        self.audio.play("confirm", channel="ui")
+        self.speaker.speak(f"{definition.name} selected.", interrupt=True)
+
+    def _upgrade_character(self, key: str) -> None:
+        definition = character_definition(key)
+        if not character_unlocked(self.settings, definition.key):
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("Unlock the character before upgrading.", interrupt=True)
+            return
+        upgrade_cost = next_character_upgrade_cost(self.settings, definition.key)
+        if upgrade_cost is None:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(f"{definition.name} is already at max level.", interrupt=True)
+            return
+        if not self._spend_bank_coins(upgrade_cost):
+            return
+        self.settings["character_progress"][definition.key]["level"] = character_level(self.settings, definition.key) + 1
+        self._sync_character_progress()
+        self._refresh_shop_menu_labels()
+        self._refresh_character_menu_labels()
+        self._refresh_character_detail_menu_labels(definition.key)
+        self._persist_settings()
+        upgraded_level = character_level(self.settings, definition.key)
+        self.audio.play("unlock", channel="ui3")
+        self.speaker.speak(
+            f"{definition.name} upgraded to level {upgraded_level}. {character_perk_summary(definition, upgraded_level)}.",
+            interrupt=True,
+        )
+        self.speaker.speak(self._shop_coins_label(), interrupt=False)
+
     def _purchase_shop_item(self, item: str) -> None:
         if item == "hoverboard":
             if not self._spend_bank_coins(SHOP_PRICES["hoverboard"]):
@@ -1348,6 +1555,7 @@ class SubwayBlindGame:
             self.audio.play("unlock", channel="ui3")
             self.speaker.speak("Score booster purchased.", interrupt=True)
         self._refresh_shop_menu_labels()
+        self._persist_settings()
         self.speaker.speak(self._shop_coins_label(), interrupt=False)
 
     def _grant_shop_box_reward(self, reward: str) -> None:
@@ -1397,11 +1605,17 @@ class SubwayBlindGame:
             return
         self._run_rewards_committed = True
         saved_coins = int(self.state.coins)
-        self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + saved_coins
+        character_bonus = int(saved_coins * self._active_character_bonuses.banked_coin_bonus_ratio)
+        total_saved_coins = saved_coins + character_bonus
+        self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + total_saved_coins
         self._record_achievement_max("best_distance", int(self.state.distance))
-        if saved_coins > 0:
+        if total_saved_coins > 0:
             self.audio.play("coin_gui", channel="ui")
             self.audio.play("gui_cash", channel="ui2")
+        if character_bonus > 0:
+            active_character = selected_character_definition(self.settings)
+            self.speaker.speak(f"{active_character.name} bonus saved {character_bonus} extra coins.", interrupt=False)
+        self._persist_settings()
 
     def _clear_menu_repeat(self) -> None:
         self._menu_repeat_key = None
@@ -1659,7 +1873,16 @@ class SubwayBlindGame:
                 return True
             if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 selected_action = self.options_menu.items[self.options_menu.index].action
-                if selected_action in {"back", "opt_controls"}:
+                if selected_action in {"back", "opt_controls", "opt_sapi_menu"}:
+                    return self._handle_menu_action(selected_action)
+                return True
+        if self.active_menu == self.sapi_menu:
+            if key in (pygame.K_LEFT, pygame.K_RIGHT):
+                self._adjust_selected_option(-1 if key == pygame.K_LEFT else 1)
+                return True
+            if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                selected_action = self.sapi_menu.items[self.sapi_menu.index].action
+                if selected_action == "back":
                     return self._handle_menu_action(selected_action)
                 return True
         if self.active_menu == self.controls_menu:
@@ -1708,6 +1931,10 @@ class SubwayBlindGame:
                 self._refresh_options_menu_labels()
                 self._set_active_menu(self.options_menu, start_index=self._update_option_index("opt_controls"))
                 return True
+            if self.active_menu == self.sapi_menu:
+                self._refresh_options_menu_labels()
+                self._set_active_menu(self.options_menu, start_index=self._update_option_index("opt_sapi_menu"))
+                return True
             if self.active_menu in {self.keyboard_bindings_menu, self.controller_bindings_menu}:
                 self._build_controls_menu()
                 self._set_active_menu(self.controls_menu)
@@ -1723,6 +1950,14 @@ class SubwayBlindGame:
                 return True
             if self.active_menu == self.help_topic_menu:
                 self._set_active_menu(self.howto_menu)
+                return True
+            if self.active_menu == self.character_detail_menu:
+                self._refresh_character_menu_labels()
+                self._set_active_menu(self.character_menu)
+                return True
+            if self.active_menu == self.character_menu:
+                self._refresh_shop_menu_labels()
+                self._set_active_menu(self.shop_menu, start_index=4)
                 return True
             if self.active_menu == self.whats_new_menu:
                 self._set_active_menu(self.main_menu)
@@ -1798,6 +2033,10 @@ class SubwayBlindGame:
                 return True
 
         if self.active_menu == self.options_menu:
+            if action == "opt_sapi_menu":
+                self._refresh_sapi_menu_labels()
+                self._set_active_menu(self.sapi_menu)
+                return True
             if action == "opt_controls":
                 self._selected_binding_device = "controller" if self.controls.active_controller() is not None else "keyboard"
                 self._refresh_control_menus()
@@ -1806,6 +2045,13 @@ class SubwayBlindGame:
             if action == "back":
                 self.audio.play("menuclose", channel="ui")
                 self._set_active_menu(self.main_menu)
+                return True
+            return True
+
+        if self.active_menu == self.sapi_menu:
+            if action == "back":
+                self._refresh_options_menu_labels()
+                self._set_active_menu(self.options_menu, start_index=self._update_option_index("opt_sapi_menu"))
                 return True
             return True
 
@@ -1931,6 +2177,67 @@ class SubwayBlindGame:
             if action == "buy_score_booster":
                 self._purchase_shop_item("score_booster")
                 return True
+            if action == "open_character_upgrades":
+                self._refresh_character_menu_labels()
+                self._set_active_menu(self.character_menu)
+                self.speaker.speak(self._shop_coins_label(), interrupt=False)
+                return True
+
+        if self.active_menu == self.character_menu:
+            if action == "back":
+                self._refresh_shop_menu_labels()
+                self._set_active_menu(self.shop_menu, start_index=4)
+                return True
+            if action.startswith("character_open:"):
+                self._refresh_character_detail_menu_labels(action.split(":", 1)[1])
+                self._set_active_menu(self.character_detail_menu)
+                return True
+
+        if self.active_menu == self.character_detail_menu:
+            if action == "back":
+                self._refresh_character_menu_labels()
+                character_keys = [definition.key for definition in character_definitions()]
+                try:
+                    start_index = character_keys.index(self._character_detail_key)
+                except ValueError:
+                    start_index = 0
+                self._set_active_menu(self.character_menu, start_index=start_index)
+                return True
+            if action.startswith("character_status_info:"):
+                definition = character_definition(action.split(":", 1)[1])
+                self.speaker.speak(
+                    f"{definition.name}. {self._character_status_label(definition.key)}.",
+                    interrupt=True,
+                )
+                return True
+            if action.startswith("character_perk_info:"):
+                definition = character_definition(action.split(":", 1)[1])
+                self.speaker.speak(
+                    f"{definition.name}. {definition.description} Current perk: {character_perk_summary(definition, character_level(self.settings, definition.key))}.",
+                    interrupt=True,
+                )
+                return True
+            if action.startswith("character_unlock:"):
+                self._unlock_character(action.split(":", 1)[1])
+                return True
+            if action.startswith("character_select:"):
+                self._select_character(action.split(":", 1)[1])
+                return True
+            if action.startswith("character_upgrade:"):
+                self._upgrade_character(action.split(":", 1)[1])
+                return True
+            if action.startswith("character_active_info:"):
+                definition = character_definition(action.split(":", 1)[1])
+                self.speaker.speak(f"{definition.name} is already your active character.", interrupt=True)
+                return True
+            if action.startswith("character_unlock_hint:"):
+                definition = character_definition(action.split(":", 1)[1])
+                self.speaker.speak(f"Unlock {definition.name} before upgrading.", interrupt=True)
+                return True
+            if action.startswith("character_max_info:"):
+                definition = character_definition(action.split(":", 1)[1])
+                self.speaker.speak(f"{definition.name} is already at max level.", interrupt=True)
+                return True
 
         if self.active_menu == self.achievements_menu:
             if action == "back":
@@ -2042,9 +2349,9 @@ class SubwayBlindGame:
         self.speaker.apply_settings(self.settings)
 
     def _adjust_selected_option(self, direction: int) -> None:
-        if self.active_menu != self.options_menu or direction not in (-1, 1):
+        if self.active_menu not in {self.options_menu, self.sapi_menu} or direction not in (-1, 1):
             return
-        selected_action = self.options_menu.items[self.options_menu.index].action
+        selected_action = self.active_menu.items[self.active_menu.index].action
         if selected_action == "back":
             return
         if selected_action == "opt_sfx":
@@ -2104,7 +2411,21 @@ class SubwayBlindGame:
             self._apply_speaker_settings()
             self._play_menu_feedback("confirm")
             self._refresh_options_menu_labels()
-            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_sapi")].label, interrupt=True)
+            self._refresh_sapi_menu_labels()
+            self.speaker.speak(self.sapi_menu.items[0].label, interrupt=True)
+            return
+        if selected_action == "opt_sapi_volume":
+            current = int(self.settings.get("sapi_volume", 100))
+            updated = step_int(current, direction, SAPI_VOLUME_MIN, SAPI_VOLUME_MAX)
+            if updated == current:
+                self._play_menu_feedback("menuedge")
+                return
+            self.settings["sapi_volume"] = updated
+            self._apply_speaker_settings()
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self._refresh_sapi_menu_labels()
+            self.speaker.speak(self.sapi_menu.items[1].label, interrupt=True)
             return
         if selected_action == "opt_sapi_voice":
             selected_voice = self.speaker.cycle_sapi_voice(direction)
@@ -2116,7 +2437,8 @@ class SubwayBlindGame:
             self._apply_speaker_settings()
             self._play_menu_feedback("confirm")
             self._refresh_options_menu_labels()
-            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_sapi_voice")].label, interrupt=True)
+            self._refresh_sapi_menu_labels()
+            self.speaker.speak(self.sapi_menu.items[2].label, interrupt=True)
             return
         if selected_action == "opt_sapi_rate":
             current = int(self.settings.get("sapi_rate", 0))
@@ -2128,7 +2450,8 @@ class SubwayBlindGame:
             self._apply_speaker_settings()
             self._play_menu_feedback("confirm")
             self._refresh_options_menu_labels()
-            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_sapi_rate")].label, interrupt=True)
+            self._refresh_sapi_menu_labels()
+            self.speaker.speak(self.sapi_menu.items[3].label, interrupt=True)
             return
         if selected_action == "opt_sapi_pitch":
             current = int(self.settings.get("sapi_pitch", 0))
@@ -2140,7 +2463,8 @@ class SubwayBlindGame:
             self._apply_speaker_settings()
             self._play_menu_feedback("confirm")
             self._refresh_options_menu_labels()
-            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_sapi_pitch")].label, interrupt=True)
+            self._refresh_sapi_menu_labels()
+            self.speaker.speak(self.sapi_menu.items[4].label, interrupt=True)
             return
         if selected_action == "opt_diff":
             order = ["easy", "normal", "hard"]
@@ -2183,6 +2507,7 @@ class SubwayBlindGame:
 
     def start_run(self) -> None:
         ensure_progression_state(self.settings)
+        self._sync_character_progress()
         self.state = RunState(running=True)
         self._set_active_menu(None)
         self.player = Player()
@@ -2193,7 +2518,7 @@ class SubwayBlindGame:
         self.spawn_director.reset()
         self.state.multiplier = 1 + int(self.settings.get("mission_multiplier_bonus", 0)) + score_booster_bonus(
             self.selected_score_boosters
-        )
+        ) + self._active_character_bonuses.starting_multiplier_bonus
         self.state.speed = self.speed_profile.base_speed
         self._footstep_timer = 0.0
         self._left_foot_next = True
@@ -2204,6 +2529,7 @@ class SubwayBlindGame:
         self._game_over_summary = {"score": 0, "coins": 0, "death_reason": "Run ended."}
         self._magnet_loop_active = False
         self._jetpack_loop_active = False
+        active_character = selected_character_definition(self.settings)
 
         if self.selected_headstarts > 0:
             self.settings["headstarts"] = max(0, int(self.settings.get("headstarts", 0)) - self.selected_headstarts)
@@ -2227,11 +2553,11 @@ class SubwayBlindGame:
         self.audio.music_start("gameplay")
         if self.selected_headstarts > 0:
             self.speaker.speak(
-                f"Run started. Headstart active for {self.selected_headstarts} charge{'s' if self.selected_headstarts != 1 else ''}.",
+                f"Run started. {active_character.name} active. Headstart active for {self.selected_headstarts} charge{'s' if self.selected_headstarts != 1 else ''}.",
                 interrupt=True,
             )
         else:
-            self.speaker.speak("Run started. Center lane.", interrupt=True)
+            self.speaker.speak(f"Run started. {active_character.name} active. Center lane.", interrupt=True)
 
         self.selected_headstarts = 0
         self.selected_score_boosters = 0
@@ -2320,7 +2646,7 @@ class SubwayBlindGame:
             return
         self.player.hoverboards -= 1
         self.settings["hoverboards"] = max(0, int(self.settings.get("hoverboards", 0)) - 1)
-        self.player.hover_active = HOVERBOARD_DURATION
+        self.player.hover_active = HOVERBOARD_DURATION + self._active_character_bonuses.hoverboard_duration_bonus
         self.audio.play("powerup", channel="act")
         self.speaker.speak("Hoverboard active.", interrupt=False)
 
@@ -2744,23 +3070,26 @@ class SubwayBlindGame:
         if was_inactive:
             self.audio.play("jetpack_loop", loop=True, channel="loop_jetpack")
 
+    def _character_adjusted_power_duration(self, duration: float) -> float:
+        return float(duration) * self._active_character_bonuses.power_duration_multiplier
+
     def _apply_power_reward(self, reward: str, from_headstart: bool) -> None:
         if reward == "magnet":
-            self._activate_magnet(9.0)
+            self._activate_magnet(self._character_adjusted_power_duration(9.0))
             message = "Headstart reward: magnet." if from_headstart else "Magnet."
             self.speaker.speak(message, interrupt=False)
             return
         if reward == "jetpack":
-            self._activate_jetpack(6.5)
+            self._activate_jetpack(self._character_adjusted_power_duration(6.5))
             self.speaker.speak("Jetpack.", interrupt=False)
             return
         if reward == "mult2x":
-            self.player.mult2x = max(self.player.mult2x, 10.0)
+            self.player.mult2x = max(self.player.mult2x, self._character_adjusted_power_duration(10.0))
             message = "Headstart reward: double score." if from_headstart else "Double score."
             self.speaker.speak(message, interrupt=False)
             return
         if reward == "sneakers":
-            self.player.super_sneakers = 10.0
+            self.player.super_sneakers = self._character_adjusted_power_duration(10.0)
             message = "Headstart reward: super sneakers." if from_headstart else "Super sneakers."
             self.speaker.speak(message, interrupt=False)
 
@@ -2889,7 +3218,7 @@ class SubwayBlindGame:
         start_index = max(0, min(menu.index - (visible_rows // 2), max_start_index))
         visible_items = menu.items[start_index : start_index + visible_rows]
         y_position = list_top
-        if menu == self.shop_menu:
+        if menu in {self.shop_menu, self.character_menu, self.character_detail_menu}:
             coins_surface = self.font.render(self._shop_coins_label(), True, (220, 220, 220))
             self.screen.blit(coins_surface, (70, y_position))
             y_position += 40

@@ -76,6 +76,8 @@ SAPI_RATE_MIN = -10
 SAPI_RATE_MAX = 10
 SAPI_PITCH_MIN = -10
 SAPI_PITCH_MAX = 10
+SAPI_VOLUME_MIN = 0
+SAPI_VOLUME_MAX = 100
 MUSIC_FILE_EXTENSIONS = (".ogg", ".wav", ".mp3")
 MUSIC_TRACK_CANDIDATES = {
     "menu": ("menu_intro", "game_intro", "menu_theme", "menu"),
@@ -144,12 +146,14 @@ class Speaker:
         sapi_voice_id: str | None = None,
         sapi_rate: int = 0,
         sapi_pitch: int = 0,
+        sapi_volume: int = 100,
     ):
         self.enabled = bool(enabled)
         self.use_sapi = bool(use_sapi)
         self.sapi_voice_id = self._normalize_voice_id(sapi_voice_id)
         self.sapi_rate = self._normalize_sapi_rate(sapi_rate)
         self.sapi_pitch = self._normalize_sapi_pitch(sapi_pitch)
+        self.sapi_volume = self._normalize_sapi_volume(sapi_volume)
         self._driver = None
         self._sapi_voice = None
         self._sapi_voice_name = SAPI_VOICE_DEFAULT_LABEL
@@ -165,6 +169,7 @@ class Speaker:
             sapi_voice_id=settings.get("sapi_voice_id"),
             sapi_rate=settings.get("sapi_rate", 0),
             sapi_pitch=settings.get("sapi_pitch", 0),
+            sapi_volume=settings.get("sapi_volume", 100),
         )
 
     @staticmethod
@@ -188,18 +193,28 @@ class Speaker:
             normalized = 0
         return max(SAPI_PITCH_MIN, min(SAPI_PITCH_MAX, normalized))
 
+    @staticmethod
+    def _normalize_sapi_volume(value: object) -> int:
+        try:
+            normalized = int(round(float(value)))
+        except (TypeError, ValueError):
+            normalized = 100
+        return max(SAPI_VOLUME_MIN, min(SAPI_VOLUME_MAX, normalized))
+
     def apply_settings(self, settings: dict) -> None:
         enabled = bool(settings.get("speech_enabled", True))
         use_sapi = bool(settings.get("sapi_speech_enabled", False))
         sapi_voice_id = self._normalize_voice_id(settings.get("sapi_voice_id"))
         sapi_rate = self._normalize_sapi_rate(settings.get("sapi_rate", 0))
         sapi_pitch = self._normalize_sapi_pitch(settings.get("sapi_pitch", 0))
+        sapi_volume = self._normalize_sapi_volume(settings.get("sapi_volume", 100))
         if (
             enabled == self.enabled
             and use_sapi == self.use_sapi
             and sapi_voice_id == self.sapi_voice_id
             and sapi_rate == self.sapi_rate
             and sapi_pitch == self.sapi_pitch
+            and sapi_volume == self.sapi_volume
         ):
             return
         should_reinitialize = (
@@ -212,10 +227,12 @@ class Speaker:
         self.sapi_voice_id = sapi_voice_id
         self.sapi_rate = sapi_rate
         self.sapi_pitch = sapi_pitch
+        self.sapi_volume = sapi_volume
         if should_reinitialize:
             self._initialize_backend()
             return
         self._apply_sapi_rate()
+        self._apply_sapi_volume()
 
     def _initialize_backend(self) -> None:
         self._driver = None
@@ -225,6 +242,7 @@ class Speaker:
             return
         if self.use_sapi and self._initialize_sapi():
             self._apply_sapi_rate()
+            self._apply_sapi_volume()
             return
         self._initialize_accessible_output()
 
@@ -375,6 +393,14 @@ class Speaker:
         target_rate = self.sapi_rate + dynamic_rate_offset
         try:
             self._sapi_voice.Rate = max(SAPI_RATE_MIN, min(SAPI_RATE_MAX, target_rate))
+        except Exception:
+            return
+
+    def _apply_sapi_volume(self) -> None:
+        if self._sapi_voice is None:
+            return
+        try:
+            self._sapi_voice.Volume = self.sapi_volume
         except Exception:
             return
 
