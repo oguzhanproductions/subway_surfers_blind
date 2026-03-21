@@ -1175,6 +1175,7 @@ class GameTests(unittest.TestCase):
             game.achievements_menu,
             game.options_menu,
             game.sapi_menu,
+            game.announcements_menu,
             game.howto_menu,
             game.help_topic_menu,
             game.controls_menu,
@@ -1227,13 +1228,16 @@ class GameTests(unittest.TestCase):
             "Speech: Off",
             "SAPI Settings",
             "Difficulty: Normal",
-            "Meters: Off",
-            "Coin Counters: Off",
-            "Quest Changes: Off",
+            "Gameplay Announcements",
             "Controls",
             "Back",
         ]
         self.assertEqual(labels, expected)
+
+    def test_gameplay_announcements_menu_lists_runtime_announcement_toggles(self):
+        game, _, _ = self.make_game()
+        labels = [item.label for item in game.announcements_menu.items]
+        self.assertEqual(labels, ["Meters: Off", "Coin Counters: Off", "Quest Changes: Off", "Back"])
 
     def test_shop_menu_labels_include_coin_currency(self):
         game, _, _ = self.make_game()
@@ -1849,7 +1853,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_on_back_only_plays_edge_feedback(self):
         game, _, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 12
+        game.options_menu.index = 10
 
         game._adjust_selected_option(1)
 
@@ -1859,7 +1863,7 @@ class GameTests(unittest.TestCase):
     def test_enter_on_back_returns_to_main_menu_from_options(self):
         game, _, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 12
+        game.options_menu.index = 10
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -1905,7 +1909,7 @@ class GameTests(unittest.TestCase):
     def test_options_controls_entry_opens_controls_menu(self):
         game, _, _ = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 11
+        game.options_menu.index = 9
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -1917,13 +1921,35 @@ class GameTests(unittest.TestCase):
         game, _, _ = self.make_game()
         self.attach_controller(game, family=PLAYSTATION_FAMILY, name="Wireless Controller")
         game.active_menu = game.options_menu
-        game.options_menu.index = 11
+        game.options_menu.index = 9
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.controls_menu)
         self.assertEqual(game.controls_menu.items[1].label, "Binding Profile: PlayStation Controller")
+
+    def test_options_gameplay_announcements_entry_opens_submenu(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 8
+
+        result = game._handle_active_menu_key(pygame.K_RETURN)
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.announcements_menu)
+        self.assertEqual(game.announcements_menu.items[0].label, "Meters: Off")
+
+    def test_gameplay_announcements_back_returns_to_options_entry(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.announcements_menu
+        game.announcements_menu.index = 3
+
+        result = game._handle_active_menu_key(pygame.K_RETURN)
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.options_menu)
+        self.assertEqual(game.options_menu.index, 8)
 
     def test_controls_menu_can_switch_binding_profile_like_options(self):
         game, speaker, _ = self.make_game()
@@ -2184,8 +2210,8 @@ class GameTests(unittest.TestCase):
 
     def test_adjust_selected_option_toggles_meters(self):
         game, speaker, audio = self.make_game()
-        game.active_menu = game.options_menu
-        game.options_menu.index = 8
+        game.active_menu = game.announcements_menu
+        game.announcements_menu.index = 0
 
         game._adjust_selected_option(1)
 
@@ -2195,8 +2221,8 @@ class GameTests(unittest.TestCase):
 
     def test_adjust_selected_option_toggles_coin_counters(self):
         game, speaker, audio = self.make_game()
-        game.active_menu = game.options_menu
-        game.options_menu.index = 9
+        game.active_menu = game.announcements_menu
+        game.announcements_menu.index = 1
 
         game._adjust_selected_option(1)
 
@@ -2206,8 +2232,8 @@ class GameTests(unittest.TestCase):
 
     def test_adjust_selected_option_toggles_quest_changes(self):
         game, speaker, audio = self.make_game()
-        game.active_menu = game.options_menu
-        game.options_menu.index = 10
+        game.active_menu = game.announcements_menu
+        game.announcements_menu.index = 2
 
         game._adjust_selected_option(1)
 

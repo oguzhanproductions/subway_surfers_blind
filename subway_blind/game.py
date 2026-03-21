@@ -441,9 +441,7 @@ class SubwayBlindGame:
                 MenuItem(self._speech_option_label(), "opt_speech"),
                 MenuItem(self._sapi_menu_entry_label(), "opt_sapi_menu"),
                 MenuItem(self._difficulty_option_label(), "opt_diff"),
-                MenuItem(self._meter_option_label(), "opt_meters"),
-                MenuItem(self._coin_counter_option_label(), "opt_coin_counters"),
-                MenuItem(self._quest_changes_option_label(), "opt_quest_changes"),
+                MenuItem("Gameplay Announcements", "opt_gameplay_announcements"),
                 MenuItem("Controls", "opt_controls"),
                 MenuItem("Back", "back"),
             ],
@@ -458,6 +456,17 @@ class SubwayBlindGame:
                 MenuItem(self._sapi_voice_option_label(), "opt_sapi_voice"),
                 MenuItem(self._sapi_rate_option_label(), "opt_sapi_rate"),
                 MenuItem(self._sapi_pitch_option_label(), "opt_sapi_pitch"),
+                MenuItem("Back", "back"),
+            ],
+        )
+        self.announcements_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Gameplay Announcements",
+            [
+                MenuItem(self._meter_option_label(), "opt_meters"),
+                MenuItem(self._coin_counter_option_label(), "opt_coin_counters"),
+                MenuItem(self._quest_changes_option_label(), "opt_quest_changes"),
                 MenuItem("Back", "back"),
             ],
         )
@@ -723,10 +732,13 @@ class SubwayBlindGame:
         self.options_menu.items[5].label = self._speech_option_label()
         self.options_menu.items[6].label = self._sapi_menu_entry_label()
         self.options_menu.items[7].label = self._difficulty_option_label()
-        self.options_menu.items[8].label = self._meter_option_label()
-        self.options_menu.items[9].label = self._coin_counter_option_label()
-        self.options_menu.items[10].label = self._quest_changes_option_label()
-        self.options_menu.items[11].label = "Controls"
+        self.options_menu.items[8].label = "Gameplay Announcements"
+        self.options_menu.items[9].label = "Controls"
+
+    def _refresh_announcements_menu_labels(self) -> None:
+        self.announcements_menu.items[0].label = self._meter_option_label()
+        self.announcements_menu.items[1].label = self._coin_counter_option_label()
+        self.announcements_menu.items[2].label = self._quest_changes_option_label()
 
     def _refresh_sapi_menu_labels(self) -> None:
         self.sapi_menu.items[0].label = self._sapi_speech_option_label()
@@ -1002,6 +1014,12 @@ class SubwayBlindGame:
 
     def _update_option_index(self, action: str) -> int:
         for index, item in enumerate(self.options_menu.items):
+            if item.action == action:
+                return index
+        return 0
+
+    def _update_announcements_index(self, action: str) -> int:
+        for index, item in enumerate(self.announcements_menu.items):
             if item.action == action:
                 return index
         return 0
@@ -1636,7 +1654,7 @@ class SubwayBlindGame:
             return False
         if key in (pygame.K_UP, pygame.K_DOWN, pygame.K_w, pygame.K_s):
             return True
-        if self.active_menu == self.options_menu and key in (pygame.K_LEFT, pygame.K_RIGHT):
+        if self.active_menu in {self.options_menu, self.sapi_menu, self.announcements_menu} and key in (pygame.K_LEFT, pygame.K_RIGHT):
             return True
         if self.active_menu == self.controls_menu and key in (pygame.K_LEFT, pygame.K_RIGHT):
             selected_action = self.controls_menu.items[self.controls_menu.index].action if self.controls_menu.items else ""
@@ -1873,7 +1891,7 @@ class SubwayBlindGame:
                 return True
             if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 selected_action = self.options_menu.items[self.options_menu.index].action
-                if selected_action in {"back", "opt_controls", "opt_sapi_menu"}:
+                if selected_action in {"back", "opt_controls", "opt_sapi_menu", "opt_gameplay_announcements"}:
                     return self._handle_menu_action(selected_action)
                 return True
         if self.active_menu == self.sapi_menu:
@@ -1882,6 +1900,15 @@ class SubwayBlindGame:
                 return True
             if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 selected_action = self.sapi_menu.items[self.sapi_menu.index].action
+                if selected_action == "back":
+                    return self._handle_menu_action(selected_action)
+                return True
+        if self.active_menu == self.announcements_menu:
+            if key in (pygame.K_LEFT, pygame.K_RIGHT):
+                self._adjust_selected_option(-1 if key == pygame.K_LEFT else 1)
+                return True
+            if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                selected_action = self.announcements_menu.items[self.announcements_menu.index].action
                 if selected_action == "back":
                     return self._handle_menu_action(selected_action)
                 return True
@@ -1934,6 +1961,13 @@ class SubwayBlindGame:
             if self.active_menu == self.sapi_menu:
                 self._refresh_options_menu_labels()
                 self._set_active_menu(self.options_menu, start_index=self._update_option_index("opt_sapi_menu"))
+                return True
+            if self.active_menu == self.announcements_menu:
+                self._refresh_options_menu_labels()
+                self._set_active_menu(
+                    self.options_menu,
+                    start_index=self._update_option_index("opt_gameplay_announcements"),
+                )
                 return True
             if self.active_menu in {self.keyboard_bindings_menu, self.controller_bindings_menu}:
                 self._build_controls_menu()
@@ -2037,6 +2071,10 @@ class SubwayBlindGame:
                 self._refresh_sapi_menu_labels()
                 self._set_active_menu(self.sapi_menu)
                 return True
+            if action == "opt_gameplay_announcements":
+                self._refresh_announcements_menu_labels()
+                self._set_active_menu(self.announcements_menu)
+                return True
             if action == "opt_controls":
                 self._selected_binding_device = "controller" if self.controls.active_controller() is not None else "keyboard"
                 self._refresh_control_menus()
@@ -2052,6 +2090,16 @@ class SubwayBlindGame:
             if action == "back":
                 self._refresh_options_menu_labels()
                 self._set_active_menu(self.options_menu, start_index=self._update_option_index("opt_sapi_menu"))
+                return True
+            return True
+
+        if self.active_menu == self.announcements_menu:
+            if action == "back":
+                self._refresh_options_menu_labels()
+                self._set_active_menu(
+                    self.options_menu,
+                    start_index=self._update_option_index("opt_gameplay_announcements"),
+                )
                 return True
             return True
 
@@ -2349,7 +2397,7 @@ class SubwayBlindGame:
         self.speaker.apply_settings(self.settings)
 
     def _adjust_selected_option(self, direction: int) -> None:
-        if self.active_menu not in {self.options_menu, self.sapi_menu} or direction not in (-1, 1):
+        if self.active_menu not in {self.options_menu, self.sapi_menu, self.announcements_menu} or direction not in (-1, 1):
             return
         selected_action = self.active_menu.items[self.active_menu.index].action
         if selected_action == "back":
@@ -2481,27 +2529,27 @@ class SubwayBlindGame:
         if selected_action == "opt_meters":
             self.settings["meter_announcements_enabled"] = direction > 0
             self._play_menu_feedback("confirm")
-            self._refresh_options_menu_labels()
+            self._refresh_announcements_menu_labels()
             self.speaker.speak(
-                self.options_menu.items[self._update_option_index("opt_meters")].label,
+                self.announcements_menu.items[self._update_announcements_index("opt_meters")].label,
                 interrupt=True,
             )
             return
         if selected_action == "opt_coin_counters":
             self.settings["coin_counters_enabled"] = direction > 0
             self._play_menu_feedback("confirm")
-            self._refresh_options_menu_labels()
+            self._refresh_announcements_menu_labels()
             self.speaker.speak(
-                self.options_menu.items[self._update_option_index("opt_coin_counters")].label,
+                self.announcements_menu.items[self._update_announcements_index("opt_coin_counters")].label,
                 interrupt=True,
             )
             return
         if selected_action == "opt_quest_changes":
             self.settings["quest_changes_enabled"] = direction > 0
             self._play_menu_feedback("confirm")
-            self._refresh_options_menu_labels()
+            self._refresh_announcements_menu_labels()
             self.speaker.speak(
-                self.options_menu.items[self._update_option_index("opt_quest_changes")].label,
+                self.announcements_menu.items[self._update_announcements_index("opt_quest_changes")].label,
                 interrupt=True,
             )
 
@@ -3285,7 +3333,7 @@ class SubwayBlindGame:
             prompt_surface = self.font.render("Use Up and Down to read each help line. Escape returns to Help.", True, (205, 205, 205))
             self.screen.blit(prompt_surface, (40, max(height - 100, y_position + 18)))
             hint_text = self._menu_navigation_hint()
-        elif menu == self.options_menu:
+        elif menu in {self.options_menu, self.sapi_menu, self.announcements_menu}:
             hint_text = f"{self._menu_navigation_hint()} {self._option_adjustment_hint()}"
         elif menu in {self.keyboard_bindings_menu, self.controller_bindings_menu} and self._binding_capture is not None:
             capture_prompt = (

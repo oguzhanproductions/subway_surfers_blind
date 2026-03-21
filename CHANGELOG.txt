@@ -25,6 +25,7 @@ Audio or UI Updates
 - Added accessible spoken feedback for character lock state, current level, perk summary, unlock purchases, selection changes, and max-level handling.
 - Added current active character status to the Shop and Character Upgrades menus.
 - Added a dedicated SAPI Settings submenu with On or Off, volume, voice, rate, and pitch controls.
+- Moved gameplay announcement toggles into a dedicated submenu under Options so runtime speech preferences stay grouped together.
 - Fixed the updater so packaged builds now apply extracted files into the game folder on restart and clean leftover update ZIP files.
 - Fixed collision audio so each obstacle type now triggers its intended hit sound instead of falling back to the same generic crash layer.
 
