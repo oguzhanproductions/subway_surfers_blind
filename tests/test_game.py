@@ -1,9 +1,12 @@
 import os
+import sys
 import tempfile
 import unittest
 import copy
+import io
 import json
 import wave
+import zipfile
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
@@ -14,6 +17,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame
 
 from subway_blind import config as config_module
+from subway_blind import updater as updater_module
 from subway_blind.audio import (
     Audio,
     Speaker,
@@ -623,6 +627,50 @@ class UpdaterTests(unittest.TestCase):
         self.assertTrue(result.update_available)
         self.assertEqual(result.latest_version, "1.1.3")
         self.assertEqual(result.release.assets[0].name, "SubwaySurfersBlind.zip")
+
+    def test_download_and_install_stages_release_and_removes_archive(self):
+        updater = GitHubReleaseUpdater(timeout_seconds=2.0)
+        release = make_release_info("0.2.0")
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as archive:
+            archive.writestr("SubwaySurfersBlind/SubwaySurfersBlind.exe", b"updated-exe")
+            archive.writestr("SubwaySurfersBlind/assets/manifest.txt", b"manifest")
+        payload = zip_buffer.getvalue()
+
+        class FakeResponse:
+            def __init__(self, data: bytes):
+                self._stream = io.BytesIO(data)
+                self.headers = {"Content-Length": str(len(data))}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, size: int = -1):
+                return self._stream.read(size)
+
+        progress_updates: list[UpdateInstallProgress] = []
+        with tempfile.TemporaryDirectory() as temp_directory, patch.object(
+            updater_module, "BASE_DIR", Path(temp_directory)
+        ), patch("subway_blind.updater.urllib.request.urlopen", return_value=FakeResponse(payload)), patch.object(
+            sys, "frozen", True, create=True
+        ):
+            result = updater.download_and_install(release, progress_callback=progress_updates.append)
+            updates_root = Path(temp_directory) / "updates"
+            self.assertTrue(result.success)
+            self.assertIsNotNone(result.restart_script_path)
+            self.assertFalse((updates_root / "SubwaySurfersBlind.zip").exists())
+            staged_executable = next(updates_root.rglob("SubwaySurfersBlind.exe"))
+            staged_manifest = next(updates_root.rglob("manifest.txt"))
+            self.assertEqual(staged_executable.read_bytes(), b"updated-exe")
+            self.assertEqual(staged_manifest.read_bytes(), b"manifest")
+            script_text = Path(result.restart_script_path).read_text(encoding="utf-8")
+            self.assertIn("Copy-Item -LiteralPath '%STAGE%\\*'", script_text)
+            self.assertIn("rmdir /S /Q \"%STAGE%\"", script_text)
+            self.assertIn("del /Q \"%ARCHIVE%\"", script_text)
+        self.assertEqual(progress_updates[-1].stage, "ready")
 
 
 class SpeakerTests(unittest.TestCase):

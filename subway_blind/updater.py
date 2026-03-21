@@ -25,6 +25,7 @@ REQUEST_HEADERS = {
 }
 VERSION_PATTERN = re.compile(r"^\s*v?(?P<major>\d+)(?:\.(?P<minor>\d+))?(?:\.(?P<patch>\d+))?(?:[-+].*)?\s*$")
 DOWNLOAD_CHUNK_SIZE = 1024 * 256
+SAFE_PATH_TOKEN_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 @dataclass(frozen=True)
@@ -177,6 +178,7 @@ class GitHubReleaseUpdater:
         archive_path = cache_directory / asset.name
         install_directory = self._install_directory()
         install_directory.mkdir(parents=True, exist_ok=True)
+        staging_directory = self._create_staging_directory(cache_directory, release.version)
 
         progress = progress_callback or (lambda _progress: None)
         progress(UpdateInstallProgress("download", 0.0, "Starting update download."))
@@ -204,7 +206,7 @@ class GitHubReleaseUpdater:
 
         progress(UpdateInstallProgress("extract", 0.0, "Extracting update package."))
         try:
-            extraction_result = self._extract_release_archive(archive_path, install_directory, progress)
+            self._extract_release_archive(archive_path, staging_directory, progress)
         except Exception:
             return UpdateInstallResult(
                 success=False,
@@ -212,12 +214,8 @@ class GitHubReleaseUpdater:
                 restart_required=False,
             )
 
-        restart_script_path = None
-        if extraction_result["replacement_source"] is not None and extraction_result["replacement_target"] is not None:
-            restart_script_path = self._create_restart_script(
-                Path(extraction_result["replacement_source"]),
-                Path(extraction_result["replacement_target"]),
-            )
+        restart_script_path = self._create_restart_script(staging_directory, install_directory, archive_path)
+        self._delete_file_if_exists(archive_path)
 
         progress(UpdateInstallProgress("ready", 100.0, "Update installed. Restart the game to finish applying it."))
         return UpdateInstallResult(
@@ -280,10 +278,7 @@ class GitHubReleaseUpdater:
         zip_assets.sort(key=lambda asset: asset.name.lower())
         return zip_assets[0]
 
-    def _extract_release_archive(self, archive_path: Path, install_directory: Path, progress_callback) -> dict[str, str | None]:
-        replacement_source: Path | None = None
-        replacement_target: Path | None = None
-        current_executable = Path(sys.executable).resolve() if getattr(sys, "frozen", False) else None
+    def _extract_release_archive(self, archive_path: Path, staging_directory: Path, progress_callback) -> None:
         with zipfile.ZipFile(archive_path, "r") as archive:
             file_infos = [info for info in archive.infolist() if not info.is_dir()]
             root_prefix = self._common_archive_root(file_infos)
@@ -292,14 +287,9 @@ class GitHubReleaseUpdater:
                 relative_path = self._normalized_member_path(info.filename, root_prefix)
                 if relative_path is None:
                     continue
-                target_path = install_directory.joinpath(*relative_path.parts)
+                target_path = staging_directory.joinpath(*relative_path.parts)
                 target_path.parent.mkdir(parents=True, exist_ok=True)
-                extracted_target = target_path
-                if current_executable is not None and target_path.resolve() == current_executable:
-                    extracted_target = target_path.with_suffix(target_path.suffix + ".updated")
-                    replacement_source = extracted_target
-                    replacement_target = target_path
-                with archive.open(info, "r") as source_handle, extracted_target.open("wb") as destination_handle:
+                with archive.open(info, "r") as source_handle, target_path.open("wb") as destination_handle:
                     shutil.copyfileobj(source_handle, destination_handle)
                 percent = min(100.0, (entry_index / total_entries) * 100.0)
                 progress_callback(
@@ -309,10 +299,6 @@ class GitHubReleaseUpdater:
                         f"Extracting update package. {int(percent)} percent.",
                     )
                 )
-        return {
-            "replacement_source": str(replacement_source) if replacement_source is not None else None,
-            "replacement_target": str(replacement_target) if replacement_target is not None else None,
-        }
 
     def _common_archive_root(self, file_infos: list[zipfile.ZipInfo]) -> str | None:
         if not file_infos:
@@ -345,21 +331,36 @@ class GitHubReleaseUpdater:
     def _update_cache_directory(self) -> Path:
         return BASE_DIR / "updates"
 
-    def _create_restart_script(self, replacement_source: Path, replacement_target: Path) -> str:
+    def _create_staging_directory(self, cache_directory: Path, version: str) -> Path:
+        safe_version = SAFE_PATH_TOKEN_PATTERN.sub("_", normalize_version(version) or "latest").strip("._") or "latest"
+        return Path(tempfile.mkdtemp(prefix=f"release_{safe_version}_", dir=cache_directory))
+
+    def _delete_file_if_exists(self, path: Path) -> None:
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            return
+
+    def _create_restart_script(self, staging_directory: Path, install_directory: Path, archive_path: Path) -> str:
         script_directory = Path(tempfile.mkdtemp(prefix="subway_blind_update_"))
         script_path = script_directory / "apply_update.cmd"
-        launch_path = replacement_target
+        launch_path = Path(sys.executable).resolve() if getattr(sys, "frozen", False) else install_directory / "main.py"
         script_path.write_text(
             "@echo off\n"
             "setlocal\n"
-            f"set SOURCE={replacement_source}\n"
-            f"set TARGET={replacement_target}\n"
+            f"set STAGE={staging_directory}\n"
+            f"set TARGET={install_directory}\n"
+            f"set ARCHIVE={archive_path}\n"
             ":retry\n"
-            "move /Y \"%SOURCE%\" \"%TARGET%\" >nul 2>nul\n"
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command \""
+            "$ErrorActionPreference = 'Stop'; "
+            "Copy-Item -LiteralPath '%STAGE%\\*' -Destination '%TARGET%' -Recurse -Force\" >nul 2>nul\n"
             "if errorlevel 1 (\n"
             "  timeout /t 1 /nobreak >nul\n"
             "  goto retry\n"
             ")\n"
+            "rmdir /S /Q \"%STAGE%\" >nul 2>nul\n"
+            "del /Q \"%ARCHIVE%\" >nul 2>nul\n"
             f"start \"\" \"{launch_path}\"\n"
             "exit /b 0\n",
             encoding="utf-8",

@@ -7,6 +7,7 @@ Update Summary
 - Added a persistent Character Upgrades section inside the Shop with unlock, active character selection, and per-character leveling.
 - Expanded the roster to the officially referenced classic crew: Jake, Tricky, Fresh, Yutani, Spike, Dino, and Boombot.
 - Moved SAPI controls into a dedicated submenu under Options and added direct SAPI volume control.
+- Reworked updater installation so release ZIP contents are staged, applied on restart, and cleaned up automatically after install.
 - Cleaned the changelog structure after the previous merge conflict markers.
 
 Gameplay Changes
@@ -22,6 +23,7 @@ Audio or UI Updates
 - Added accessible spoken feedback for character lock state, current level, perk summary, unlock purchases, selection changes, and max-level handling.
 - Added current active character status to the Shop and Character Upgrades menus.
 - Added a dedicated SAPI Settings submenu with On or Off, volume, voice, rate, and pitch controls.
+- Fixed the updater so packaged builds now apply extracted files into the game folder on restart and clean leftover update ZIP files.
 
 ------------------------------------------------------------
 
