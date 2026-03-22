@@ -1,6 +1,28 @@
 Subway Surfers Blind Edition
 Changelog
 
+Date: 2026-03-22
+Version: 1.1.4
+
+Update Summary
+- Updated the game version to 1.1.4.
+- Added an original-style Item Upgrades submenu inside the Shop for Coin Magnet, Jetpack, 2X Multiplier, and Super Sneakers.
+- Added persistent per-item upgrade levels with escalating coin costs and immediate in-menu feedback after each purchase.
+
+Gameplay Changes
+- Coin Magnet upgrades now extend magnet pickup duration through five persistent shop levels.
+- Jetpack upgrades now extend flight duration through five persistent shop levels.
+- 2X Multiplier upgrades now extend score multiplier pickup duration through five persistent shop levels.
+- Super Sneakers upgrades now extend jump-boost duration through five persistent shop levels.
+- Headstart, Score Booster, Hoverboard stock, Pogo Stick, Keys, and Mystery Boxes remain outside the item-upgrade ladder so the shop matches the intended original-style system more closely.
+
+Audio or UI Updates
+- Fixed the mono audio routing bug so reward and interface sounds are no longer forced through the HRTF mono path while menu feedback cues stay mono.
+- Added an Item Upgrades shop submenu with list and detail screens, level readouts, duration readouts, max-level handling, and purchase announcements.
+- Updated the in-game What's New and help copy to mention the new item upgrade system and the audio routing fix.
+
+------------------------------------------------------------
+
 Date: 2026-03-21
 Version: 1.1.3
 

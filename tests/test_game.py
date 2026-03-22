@@ -46,6 +46,12 @@ from subway_blind.game import (
     load_whats_new_content,
 )
 from subway_blind.hrtf_audio import OpenALHrtfEngine
+from subway_blind.item_upgrades import (
+    ItemUpgradeDefinition,
+    ensure_item_upgrade_state,
+    item_upgrade_duration,
+    next_item_upgrade_cost,
+)
 from subway_blind.menu import Menu, MenuItem
 from subway_blind.models import Obstacle, lane_name
 from subway_blind.spatial_audio import SpatialThreatAudio
@@ -408,6 +414,32 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded["difficulty"], "normal")
         self.assertEqual(loaded["selected_character"], config_module.DEFAULT_SETTINGS["selected_character"])
         self.assertEqual(loaded["character_progress"], config_module.DEFAULT_SETTINGS["character_progress"])
+        self.assertEqual(loaded["item_upgrades"], config_module.DEFAULT_SETTINGS["item_upgrades"])
+
+    def test_item_upgrade_state_normalizes_invalid_values(self):
+        settings = {"item_upgrades": {"magnet": "2", "jetpack": "bad", "mult2x": -9, "sneakers": 999}}
+
+        ensure_item_upgrade_state(settings)
+
+        self.assertEqual(
+            settings["item_upgrades"],
+            {
+                "magnet": 2,
+                "jetpack": 0,
+                "mult2x": 0,
+                "sneakers": 5,
+            },
+        )
+
+    def test_item_upgrade_definition_rejects_invalid_duration_scale(self):
+        with self.assertRaises(ValueError):
+            ItemUpgradeDefinition(
+                key="invalid",
+                name="Invalid Upgrade",
+                description="Broken",
+                upgrade_costs=(500, 1000),
+                durations=(5.0, 10.0),
+            )
 
     def test_default_storage_base_dir_uses_roaming_appdata_vendor_and_game_name(self):
         with patch.dict(os.environ, {"APPDATA": r"C:\Users\Test\AppData\Roaming"}, clear=False):
@@ -698,9 +730,9 @@ class UpdaterTests(unittest.TestCase):
     def test_check_for_updates_returns_update_available_when_release_is_newer(self):
         updater = GitHubReleaseUpdater(timeout_seconds=2.0)
         release_payload = {
-            "tag_name": "v1.1.4",
-            "name": "v1.1.4",
-            "html_url": "https://github.com/oguzhanproductions/subway_surfers_blind/releases/tag/v1.1.4",
+            "tag_name": "v1.1.5",
+            "name": "v1.1.5",
+            "html_url": "https://github.com/oguzhanproductions/subway_surfers_blind/releases/tag/v1.1.5",
             "published_at": "2026-03-08T10:00:00Z",
             "body": "Notes",
             "assets": [
@@ -727,7 +759,7 @@ class UpdaterTests(unittest.TestCase):
             result = updater.check_for_updates(APP_VERSION)
 
         self.assertTrue(result.update_available)
-        self.assertEqual(result.latest_version, "1.1.4")
+        self.assertEqual(result.latest_version, "1.1.5")
         self.assertEqual(result.release.assets[0].name, "SubwaySurfersBlind.zip")
 
     def test_download_and_install_stages_release_and_removes_archive(self):
@@ -1287,6 +1319,8 @@ class GameTests(unittest.TestCase):
             game.main_menu,
             game.whats_new_menu,
             game.shop_menu,
+            game.item_upgrade_menu,
+            game.item_upgrade_detail_menu,
             game.character_menu,
             game.character_detail_menu,
             game.achievements_menu,
@@ -1365,6 +1399,7 @@ class GameTests(unittest.TestCase):
                 f"Open Mystery Box   Cost: {SHOP_PRICES['mystery_box']} Coins",
                 f"Buy Headstart   Cost: {SHOP_PRICES['headstart']} Coins   Owned: 2",
                 f"Buy Score Booster   Cost: {SHOP_PRICES['score_booster']} Coins   Owned: 3",
+                "Item Upgrades   Maxed: 0/4",
                 "Character Upgrades   Active: Jake",
                 "Back",
             ],
@@ -1429,9 +1464,9 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.whats_new_menu)
-        self.assertEqual(game.whats_new_menu.title, "What's New   1.1.3")
+        self.assertEqual(game.whats_new_menu.title, "What's New   1.1.4")
         self.assertEqual(game.whats_new_menu.items[0].action, "info_line")
-        self.assertEqual(game.whats_new_menu.items[0].label, "Version: 1.1.3")
+        self.assertEqual(game.whats_new_menu.items[0].label, "Version: 1.1.4")
         self.assertFalse(any("Update Summary" == message for message, _ in speaker.messages))
 
     def test_whats_new_lines_can_be_navigated_with_up_and_down(self):
@@ -1512,7 +1547,7 @@ class GameTests(unittest.TestCase):
     def test_load_whats_new_content_uses_latest_changelog_entry(self):
         content = load_whats_new_content()
 
-        self.assertEqual(content.title, "What's New   1.1.3")
+        self.assertEqual(content.title, "What's New   1.1.4")
         self.assertIn("Update Summary", content.lines)
         self.assertNotIn("Press Enter to repeat the selected line.", content.lines)
 
@@ -2465,7 +2500,7 @@ class GameTests(unittest.TestCase):
         game._select_character("tricky")
 
         self.assertEqual(game.settings["selected_character"], "tricky")
-        self.assertEqual(game.shop_menu.items[4].label, "Character Upgrades   Active: Tricky")
+        self.assertEqual(game.shop_menu.items[5].label, "Character Upgrades   Active: Tricky")
         self.assertIn(("Tricky selected.", True), speaker.messages)
 
     def test_upgrade_character_increases_level_and_updates_perk_summary(self):
@@ -2478,6 +2513,57 @@ class GameTests(unittest.TestCase):
 
         self.assertEqual(game.settings["character_progress"]["fresh"]["level"], 1)
         self.assertIn(("Fresh upgraded to level 1. Power duration +8%.", True), speaker.messages)
+
+    def test_open_item_upgrades_menu_from_shop(self):
+        game, speaker, _ = self.make_game()
+        game.active_menu = game.shop_menu
+
+        result = game._handle_menu_action("open_item_upgrades")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.item_upgrade_menu)
+        self.assertEqual(game.item_upgrade_menu.title, "Item Upgrades   Maxed: 0/4")
+        self.assertEqual(game.item_upgrade_menu.items[0].label, "Coin Magnet   Level 0/5   9s")
+        self.assertIn((game._shop_coins_label(), False), speaker.messages)
+
+    def test_purchase_item_upgrade_spends_bank_coins_and_increases_level(self):
+        game, speaker, _ = self.make_game()
+        upgrade_cost = next_item_upgrade_cost(game.settings, "magnet")
+        game.settings["bank_coins"] = int(upgrade_cost or 0)
+        game._refresh_item_upgrade_detail_menu_labels("magnet")
+
+        game._purchase_item_upgrade("magnet")
+
+        self.assertEqual(game.settings["bank_coins"], 0)
+        self.assertEqual(game.settings["item_upgrades"]["magnet"], 1)
+        self.assertIn(("Coin Magnet upgraded to level 1. Pickup duration 10s.", True), speaker.messages)
+        self.assertEqual(game.shop_menu.items[4].label, "Item Upgrades   Maxed: 0/4")
+
+    def test_item_upgrade_max_level_blocks_purchase(self):
+        game, speaker, _ = self.make_game()
+        game.settings["item_upgrades"]["jetpack"] = 5
+
+        game._purchase_item_upgrade("jetpack")
+
+        self.assertIn(("Jetpack is already at max level.", True), speaker.messages)
+
+    def test_item_upgrade_back_returns_to_shop_entry(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.item_upgrade_menu
+
+        result = game._handle_menu_action("back")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.shop_menu)
+        self.assertEqual(game.shop_menu.index, 4)
+
+    def test_item_upgrade_extends_magnet_power_duration(self):
+        game, _, _ = self.make_game()
+        game.settings["item_upgrades"]["magnet"] = 3
+
+        game._apply_power_reward("magnet", from_headstart=False)
+
+        self.assertAlmostEqual(game.player.magnet, item_upgrade_duration(game.settings, "magnet"))
 
     def test_jake_bonus_banks_extra_run_coins(self):
         game, speaker, _ = self.make_game()

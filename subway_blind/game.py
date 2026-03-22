@@ -48,6 +48,15 @@ from subway_blind.controls import (
     family_label,
     keyboard_key_label,
 )
+from subway_blind.item_upgrades import (
+    DEFAULT_ITEM_UPGRADE_KEY,
+    ensure_item_upgrade_state,
+    item_upgrade_definition,
+    item_upgrade_definitions,
+    item_upgrade_duration,
+    item_upgrade_level,
+    next_item_upgrade_cost,
+)
 from subway_blind.features import (
     clamp_headstart_uses,
     HEADSTART_SPEED_BONUS,
@@ -101,7 +110,6 @@ DIFFICULTY_LABELS = {
 }
 
 GUARD_LOOP_DURATION = 1.35
-MULTIPLIER_PICKUP_DURATION = 12.0
 POGO_STICK_DURATION = 5.5
 MENU_REPEAT_INITIAL_DELAY = 0.34
 MENU_REPEAT_INTERVAL = 0.075
@@ -237,14 +245,19 @@ HOW_TO_TOPICS: tuple[HelpTopic, ...] = (
     HelpTopic("warnings", "Hazards and Warnings", "Listen for danger speech and warning sounds. The callout focuses on the action needed for your current lane, such as jump, roll, turn left, or turn right."),
     HelpTopic("powerups", "Power Ups", "Collect magnets, jetpacks, score boosts, super sneakers, and pogo sticks to survive longer and build bigger scores."),
     HelpTopic("rewards", "Coins and Rewards", "Collect coins during the run, then bank them when the run ends. Keys can revive you after a crash. Mystery boxes can grant extra items and bonuses."),
-    HelpTopic("progression", "Progress and Shop", "Missions raise your permanent multiplier. Word Hunt letters and Season Hunt tokens appear during runs. Spend saved coins in the shop on hoverboards, headstarts, score boosters, boxes, and character upgrades with unique passive bonuses."),
+    HelpTopic("progression", "Progress and Shop", "Missions raise your permanent multiplier. Word Hunt letters and Season Hunt tokens appear during runs. Spend saved coins in the shop on hoverboards, headstarts, score boosters, boxes, item upgrades, and character upgrades with unique passive bonuses."),
 )
 UPGRADE_HELP_TOPICS: dict[str, tuple[HelpTopic, ...]] = {
-    "1.1.3": (
+    "1.1.4": (
         HelpTopic(
-            "update_1_1_3",
-            "What's New in 1.1.3",
-            "Version 1.1.3 fixes obstacle collision audio so each hazard now triggers its intended hit sound instead of falling back to a generic crash layer.",
+            "update_1_1_4_audio",
+            "Audio Routing Fixes",
+            "Version 1.1.4 keeps reward and interface sounds out of the forced HRTF mono path while preserving mono menu feedback cues.",
+        ),
+        HelpTopic(
+            "update_1_1_4_items",
+            "Item Upgrades",
+            "The Shop now includes an original-style Item Upgrades submenu for Coin Magnet, Jetpack, 2X Multiplier, and Super Sneakers, each with persistent upgrade levels and longer pickup durations.",
         ),
     ),
 }
@@ -255,6 +268,11 @@ def step_volume(value: float, direction: int) -> float:
 
 def step_int(value: int, direction: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, int(value) + direction))
+
+
+def format_duration_seconds(duration: float) -> str:
+    formatted = f"{float(duration):.1f}".rstrip("0").rstrip(".")
+    return f"{formatted}s"
 
 
 def help_topic_segments(topic: HelpTopic, controls_summary: str) -> tuple[str, ...]:
@@ -316,6 +334,7 @@ class SubwayBlindGame:
         self.big = pygame.font.SysFont("segoeui", 38, bold=True)
         ensure_progression_state(self.settings)
         ensure_character_progress_state(self.settings)
+        ensure_item_upgrade_state(self.settings)
 
         self.state = RunState()
         self.player = Player()
@@ -353,6 +372,7 @@ class SubwayBlindGame:
         self._showing_upgrade_help = False
         self._active_character_bonuses = CharacterRuntimeBonuses()
         self._character_detail_key = selected_character_definition(self.settings).key
+        self._item_upgrade_detail_key = DEFAULT_ITEM_UPGRADE_KEY
         self.controls = ControllerSupport(settings)
         self._binding_capture: BindingCaptureRequest | None = None
         self._selected_binding_device = "controller" if self.controls.active_controller() is not None else "keyboard"
@@ -497,9 +517,22 @@ class SubwayBlindGame:
                 MenuItem(self._shop_box_label(), "buy_box"),
                 MenuItem(self._shop_headstart_label(), "buy_headstart"),
                 MenuItem(self._shop_score_booster_label(), "buy_score_booster"),
+                MenuItem(self._shop_item_upgrade_label(), "open_item_upgrades"),
                 MenuItem(self._shop_character_upgrade_label(), "open_character_upgrades"),
                 MenuItem("Back", "back"),
             ],
+        )
+        self.item_upgrade_menu = Menu(
+            self.speaker,
+            self.audio,
+            self._item_upgrade_menu_title(),
+            [],
+        )
+        self.item_upgrade_detail_menu = Menu(
+            self.speaker,
+            self.audio,
+            item_upgrade_definition(self._item_upgrade_detail_key).name,
+            [],
         )
         self.character_menu = Menu(
             self.speaker,
@@ -556,6 +589,8 @@ class SubwayBlindGame:
                 MenuItem("Quit Game", "quit"),
             ],
         )
+        self._refresh_item_upgrade_menu_labels()
+        self._refresh_item_upgrade_detail_menu_labels(self._item_upgrade_detail_key)
         self._refresh_character_menu_labels()
         self._refresh_character_detail_menu_labels(self._character_detail_key)
         self._refresh_control_menus()
@@ -673,9 +708,57 @@ class SubwayBlindGame:
             f"Owned: {int(self.settings.get('score_boosters', 0))}"
         )
 
+    def _shop_item_upgrade_label(self) -> str:
+        maxed = sum(
+            1
+            for definition in item_upgrade_definitions()
+            if item_upgrade_level(self.settings, definition.key) >= definition.max_level
+        )
+        return f"Item Upgrades   Maxed: {maxed}/{len(item_upgrade_definitions())}"
+
     def _shop_character_upgrade_label(self) -> str:
         active_character = selected_character_definition(self.settings)
         return f"Character Upgrades   Active: {active_character.name}"
+
+    def _item_upgrade_menu_title(self) -> str:
+        maxed = sum(
+            1
+            for definition in item_upgrade_definitions()
+            if item_upgrade_level(self.settings, definition.key) >= definition.max_level
+        )
+        return f"Item Upgrades   Maxed: {maxed}/{len(item_upgrade_definitions())}"
+
+    def _item_upgrade_list_item_label(self, key: str) -> str:
+        definition = item_upgrade_definition(key)
+        level = item_upgrade_level(self.settings, definition.key)
+        duration = item_upgrade_duration(self.settings, definition.key)
+        return f"{definition.name}   Level {level}/{definition.max_level}   {self._format_duration_seconds(duration)}"
+
+    def _item_upgrade_status_label(self, key: str) -> str:
+        definition = item_upgrade_definition(key)
+        level = item_upgrade_level(self.settings, definition.key)
+        return f"Status: Level {level} of {definition.max_level}"
+
+    def _item_upgrade_effect_label(self, key: str) -> str:
+        definition = item_upgrade_definition(key)
+        current_duration = item_upgrade_duration(self.settings, definition.key)
+        next_cost = next_item_upgrade_cost(self.settings, definition.key)
+        if next_cost is None:
+            return f"Effect: {definition.description} Pickup duration {self._format_duration_seconds(current_duration)}"
+        next_level = item_upgrade_level(self.settings, definition.key) + 1
+        next_duration = float(definition.durations[next_level])
+        return (
+            f"Effect: {definition.description} Current {self._format_duration_seconds(current_duration)}   "
+            f"Next {self._format_duration_seconds(next_duration)}"
+        )
+
+    def _item_upgrade_action_label(self, key: str) -> str:
+        definition = item_upgrade_definition(key)
+        next_cost = next_item_upgrade_cost(self.settings, definition.key)
+        if next_cost is None:
+            return "Max Level Reached"
+        next_level = item_upgrade_level(self.settings, definition.key) + 1
+        return f"Upgrade to Level {next_level}   Cost: {next_cost} Coins"
 
     def _character_menu_title(self) -> str:
         active_character = selected_character_definition(self.settings)
@@ -768,7 +851,32 @@ class SubwayBlindGame:
         self.shop_menu.items[1].label = self._shop_box_label()
         self.shop_menu.items[2].label = self._shop_headstart_label()
         self.shop_menu.items[3].label = self._shop_score_booster_label()
-        self.shop_menu.items[4].label = self._shop_character_upgrade_label()
+        self.shop_menu.items[4].label = self._shop_item_upgrade_label()
+        self.shop_menu.items[5].label = self._shop_character_upgrade_label()
+
+    def _refresh_item_upgrade_menu_labels(self) -> None:
+        self.item_upgrade_menu.title = self._item_upgrade_menu_title()
+        self.item_upgrade_menu.items = [
+            MenuItem(self._item_upgrade_list_item_label(definition.key), f"item_upgrade_open:{definition.key}")
+            for definition in item_upgrade_definitions()
+        ] + [MenuItem("Back", "back")]
+
+    def _refresh_item_upgrade_detail_menu_labels(self, key: str) -> None:
+        definition = item_upgrade_definition(key)
+        self._item_upgrade_detail_key = definition.key
+        next_cost = next_item_upgrade_cost(self.settings, definition.key)
+        upgrade_action = (
+            f"item_upgrade_purchase:{definition.key}"
+            if next_cost is not None
+            else f"item_upgrade_max_info:{definition.key}"
+        )
+        self.item_upgrade_detail_menu.title = definition.name
+        self.item_upgrade_detail_menu.items = [
+            MenuItem(self._item_upgrade_status_label(definition.key), f"item_upgrade_status_info:{definition.key}"),
+            MenuItem(self._item_upgrade_effect_label(definition.key), f"item_upgrade_effect_info:{definition.key}"),
+            MenuItem(self._item_upgrade_action_label(definition.key), upgrade_action),
+            MenuItem("Back", "back"),
+        ]
 
     def _refresh_character_menu_labels(self) -> None:
         self.character_menu.title = self._character_menu_title()
@@ -821,6 +929,17 @@ class SubwayBlindGame:
             if topic.key == key:
                 return topic
         return None
+
+    @staticmethod
+    def _format_duration_seconds(duration: float) -> str:
+        return format_duration_seconds(duration)
+
+    @staticmethod
+    def _menu_index_for_action(menu: Menu, action: str) -> int:
+        for index, item in enumerate(menu.items):
+            if item.action == action:
+                return index
+        return 0
 
     def _open_help_topic(self, key: str) -> None:
         topic = self._help_topic_for_key(key)
@@ -1485,6 +1604,9 @@ class SubwayBlindGame:
         ensure_character_progress_state(self.settings)
         self._active_character_bonuses = character_runtime_bonuses(self.settings)
 
+    def _powerup_duration(self, key: str) -> float:
+        return self._character_adjusted_power_duration(item_upgrade_duration(self.settings, key))
+
     def _unlock_character(self, key: str) -> None:
         definition = character_definition(key)
         if character_unlocked(self.settings, definition.key):
@@ -1545,6 +1667,29 @@ class SubwayBlindGame:
         self.audio.play("unlock", channel="ui3")
         self.speaker.speak(
             f"{definition.name} upgraded to level {upgraded_level}. {character_perk_summary(definition, upgraded_level)}.",
+            interrupt=True,
+        )
+        self.speaker.speak(self._shop_coins_label(), interrupt=False)
+
+    def _purchase_item_upgrade(self, key: str) -> None:
+        definition = item_upgrade_definition(key)
+        upgrade_cost = next_item_upgrade_cost(self.settings, definition.key)
+        if upgrade_cost is None:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(f"{definition.name} is already at max level.", interrupt=True)
+            return
+        if not self._spend_bank_coins(upgrade_cost):
+            return
+        self.settings["item_upgrades"][definition.key] = item_upgrade_level(self.settings, definition.key) + 1
+        self._refresh_shop_menu_labels()
+        self._refresh_item_upgrade_menu_labels()
+        self._refresh_item_upgrade_detail_menu_labels(definition.key)
+        self._persist_settings()
+        upgraded_level = item_upgrade_level(self.settings, definition.key)
+        upgraded_duration = item_upgrade_duration(self.settings, definition.key)
+        self.audio.play("unlock", channel="ui3")
+        self.speaker.speak(
+            f"{definition.name} upgraded to level {upgraded_level}. Pickup duration {self._format_duration_seconds(upgraded_duration)}.",
             interrupt=True,
         )
         self.speaker.speak(self._shop_coins_label(), interrupt=False)
@@ -1985,13 +2130,21 @@ class SubwayBlindGame:
             if self.active_menu == self.help_topic_menu:
                 self._set_active_menu(self.howto_menu)
                 return True
+            if self.active_menu == self.item_upgrade_detail_menu:
+                self._refresh_item_upgrade_menu_labels()
+                self._set_active_menu(self.item_upgrade_menu)
+                return True
+            if self.active_menu == self.item_upgrade_menu:
+                self._refresh_shop_menu_labels()
+                self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_item_upgrades"))
+                return True
             if self.active_menu == self.character_detail_menu:
                 self._refresh_character_menu_labels()
                 self._set_active_menu(self.character_menu)
                 return True
             if self.active_menu == self.character_menu:
                 self._refresh_shop_menu_labels()
-                self._set_active_menu(self.shop_menu, start_index=4)
+                self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_character_upgrades"))
                 return True
             if self.active_menu == self.whats_new_menu:
                 self._set_active_menu(self.main_menu)
@@ -2225,16 +2378,57 @@ class SubwayBlindGame:
             if action == "buy_score_booster":
                 self._purchase_shop_item("score_booster")
                 return True
+            if action == "open_item_upgrades":
+                self._refresh_item_upgrade_menu_labels()
+                self._set_active_menu(self.item_upgrade_menu)
+                self.speaker.speak(self._shop_coins_label(), interrupt=False)
+                return True
             if action == "open_character_upgrades":
                 self._refresh_character_menu_labels()
                 self._set_active_menu(self.character_menu)
                 self.speaker.speak(self._shop_coins_label(), interrupt=False)
                 return True
 
+        if self.active_menu == self.item_upgrade_menu:
+            if action == "back":
+                self._refresh_shop_menu_labels()
+                self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_item_upgrades"))
+                return True
+            if action.startswith("item_upgrade_open:"):
+                self._refresh_item_upgrade_detail_menu_labels(action.split(":", 1)[1])
+                self._set_active_menu(self.item_upgrade_detail_menu)
+                return True
+
+        if self.active_menu == self.item_upgrade_detail_menu:
+            if action == "back":
+                self._refresh_item_upgrade_menu_labels()
+                upgrade_keys = [definition.key for definition in item_upgrade_definitions()]
+                try:
+                    start_index = upgrade_keys.index(self._item_upgrade_detail_key)
+                except ValueError:
+                    start_index = 0
+                self._set_active_menu(self.item_upgrade_menu, start_index=start_index)
+                return True
+            if action.startswith("item_upgrade_status_info:"):
+                definition = item_upgrade_definition(action.split(":", 1)[1])
+                self.speaker.speak(f"{definition.name}. {self._item_upgrade_status_label(definition.key)}.", interrupt=True)
+                return True
+            if action.startswith("item_upgrade_effect_info:"):
+                definition = item_upgrade_definition(action.split(":", 1)[1])
+                self.speaker.speak(f"{definition.name}. {self._item_upgrade_effect_label(definition.key)}.", interrupt=True)
+                return True
+            if action.startswith("item_upgrade_purchase:"):
+                self._purchase_item_upgrade(action.split(":", 1)[1])
+                return True
+            if action.startswith("item_upgrade_max_info:"):
+                definition = item_upgrade_definition(action.split(":", 1)[1])
+                self.speaker.speak(f"{definition.name} is already at max level.", interrupt=True)
+                return True
+
         if self.active_menu == self.character_menu:
             if action == "back":
                 self._refresh_shop_menu_labels()
-                self._set_active_menu(self.shop_menu, start_index=4)
+                self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_character_upgrades"))
                 return True
             if action.startswith("character_open:"):
                 self._refresh_character_detail_menu_labels(action.split(":", 1)[1])
@@ -3013,7 +3207,7 @@ class SubwayBlindGame:
     def _collect_multiplier_pickup(self) -> None:
         self._record_mission_event("powerups")
         self.audio.play("powerup", channel="act")
-        self.player.mult2x = max(self.player.mult2x, MULTIPLIER_PICKUP_DURATION)
+        self.player.mult2x = max(self.player.mult2x, self._powerup_duration("mult2x"))
         self.speaker.speak("2x multiplier.", interrupt=False)
 
     def _collect_super_mysterizer(self) -> None:
@@ -3123,21 +3317,21 @@ class SubwayBlindGame:
 
     def _apply_power_reward(self, reward: str, from_headstart: bool) -> None:
         if reward == "magnet":
-            self._activate_magnet(self._character_adjusted_power_duration(9.0))
+            self._activate_magnet(self._powerup_duration("magnet"))
             message = "Headstart reward: magnet." if from_headstart else "Magnet."
             self.speaker.speak(message, interrupt=False)
             return
         if reward == "jetpack":
-            self._activate_jetpack(self._character_adjusted_power_duration(6.5))
+            self._activate_jetpack(self._powerup_duration("jetpack"))
             self.speaker.speak("Jetpack.", interrupt=False)
             return
         if reward == "mult2x":
-            self.player.mult2x = max(self.player.mult2x, self._character_adjusted_power_duration(10.0))
+            self.player.mult2x = max(self.player.mult2x, self._powerup_duration("mult2x"))
             message = "Headstart reward: double score." if from_headstart else "Double score."
             self.speaker.speak(message, interrupt=False)
             return
         if reward == "sneakers":
-            self.player.super_sneakers = self._character_adjusted_power_duration(10.0)
+            self.player.super_sneakers = self._powerup_duration("sneakers")
             message = "Headstart reward: super sneakers." if from_headstart else "Super sneakers."
             self.speaker.speak(message, interrupt=False)
 

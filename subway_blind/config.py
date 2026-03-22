@@ -10,6 +10,7 @@ from typing import Any
 
 from subway_blind.characters import DEFAULT_SELECTED_CHARACTER_KEY, default_character_progress_state
 from subway_blind.controls import default_controller_bindings, default_keyboard_bindings
+from subway_blind.item_upgrades import default_item_upgrade_state
 from subway_blind.version import APP_NAME
 
 BUNDLED_RESOURCE_BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
@@ -52,6 +53,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "hoverboards": 3,
     "headstarts": 2,
     "score_boosters": 3,
+    "item_upgrades": default_item_upgrade_state(),
     "selected_character": DEFAULT_SELECTED_CHARACTER_KEY,
     "character_progress": default_character_progress_state(),
     "mission_set": 1,
