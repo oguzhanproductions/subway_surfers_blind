@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -416,6 +417,29 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded["character_progress"], config_module.DEFAULT_SETTINGS["character_progress"])
         self.assertEqual(loaded["item_upgrades"], config_module.DEFAULT_SETTINGS["item_upgrades"])
 
+    def test_settings_round_trip_preserves_item_upgrades(self):
+        original_base_dir = config_module.BASE_DIR
+        with tempfile.TemporaryDirectory() as temp_directory:
+            config_module.BASE_DIR = Path(temp_directory)
+            settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
+            settings["bank_coins"] = 7200
+            settings["item_upgrades"]["magnet"] = 3
+            settings["item_upgrades"]["jetpack"] = 1
+            config_module.save_settings(settings)
+            loaded = config_module.load_settings()
+        config_module.BASE_DIR = original_base_dir
+
+        self.assertEqual(loaded["bank_coins"], 7200)
+        self.assertEqual(
+            loaded["item_upgrades"],
+            {
+                "magnet": 3,
+                "jetpack": 1,
+                "mult2x": 0,
+                "sneakers": 0,
+            },
+        )
+
     def test_item_upgrade_state_normalizes_invalid_values(self):
         settings = {"item_upgrades": {"magnet": "2", "jetpack": "bad", "mult2x": -9, "sneakers": 999}}
 
@@ -495,6 +519,25 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(loaded["sfx_volume"], 0.2)
         self.assertEqual(loaded["bank_coins"], 321)
+
+    def test_load_settings_uses_backup_when_primary_file_is_corrupt(self):
+        original_base_dir = config_module.BASE_DIR
+        with tempfile.TemporaryDirectory() as temp_directory:
+            config_module.BASE_DIR = Path(temp_directory)
+            settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
+            settings["bank_coins"] = 1800
+            settings["item_upgrades"]["mult2x"] = 2
+            config_module.save_settings(settings)
+            settings_path = config_module._settings_path()
+            backup_path = config_module._settings_backup_path()
+            shutil.copy2(settings_path, backup_path)
+            settings_path.write_text("{broken json", encoding="utf-8")
+
+            loaded = config_module.load_settings()
+        config_module.BASE_DIR = original_base_dir
+
+        self.assertEqual(loaded["bank_coins"], 1800)
+        self.assertEqual(loaded["item_upgrades"]["mult2x"], 2)
 
 
 class BalanceTests(unittest.TestCase):
@@ -2538,6 +2581,23 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.settings["item_upgrades"]["magnet"], 1)
         self.assertIn(("Coin Magnet upgraded to level 1. Pickup duration 10s.", True), speaker.messages)
         self.assertEqual(game.shop_menu.items[4].label, "Item Upgrades   Maxed: 0/4")
+
+    def test_purchase_item_upgrade_persists_after_reload(self):
+        original_base_dir = config_module.BASE_DIR
+        with tempfile.TemporaryDirectory() as temp_directory:
+            config_module.BASE_DIR = Path(temp_directory)
+            game, _, _ = self.make_game()
+            game._persist_settings = lambda: config_module.save_settings(game.settings)
+            upgrade_cost = next_item_upgrade_cost(game.settings, "magnet")
+            game.settings["bank_coins"] = int(upgrade_cost or 0)
+
+            game._purchase_item_upgrade("magnet")
+
+            loaded = config_module.load_settings()
+        config_module.BASE_DIR = original_base_dir
+
+        self.assertEqual(loaded["bank_coins"], 0)
+        self.assertEqual(loaded["item_upgrades"]["magnet"], 1)
 
     def test_item_upgrade_max_level_blocks_purchase(self):
         game, speaker, _ = self.make_game()

@@ -10,6 +10,7 @@ from typing import Optional
 
 import pygame
 
+from subway_blind import config as config_module
 from subway_blind.audio import (
     Audio,
     Speaker,
@@ -35,7 +36,7 @@ from subway_blind.characters import (
     next_character_upgrade_cost,
     selected_character_definition,
 )
-from subway_blind.config import resource_path, save_settings
+from subway_blind.config import resource_path
 from subway_blind.controls import (
     ACTION_DEFINITIONS_BY_KEY,
     CONTROLLER_ACTION_ORDER,
@@ -1598,7 +1599,7 @@ class SubwayBlindGame:
         return True
 
     def _persist_settings(self) -> None:
-        save_settings(self.settings)
+        config_module.save_settings(self.settings)
 
     def _sync_character_progress(self) -> None:
         ensure_character_progress_state(self.settings)
@@ -2019,7 +2020,7 @@ class SubwayBlindGame:
             if self._exit_requested and self.audio.music_is_idle():
                 running = False
 
-        save_settings(self.settings)
+        config_module.save_settings(self.settings)
 
     def _handle_active_menu_key(self, key: int) -> bool:
         if self.active_menu is None:

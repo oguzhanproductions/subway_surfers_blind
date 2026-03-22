@@ -6,11 +6,25 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import tempfile
 from typing import Any
 
-from subway_blind.characters import DEFAULT_SELECTED_CHARACTER_KEY, default_character_progress_state
-from subway_blind.controls import default_controller_bindings, default_keyboard_bindings
-from subway_blind.item_upgrades import default_item_upgrade_state
+from subway_blind.characters import (
+    DEFAULT_SELECTED_CHARACTER_KEY,
+    default_character_progress_state,
+    ensure_character_progress_state,
+)
+from subway_blind.controls import (
+    default_controller_bindings,
+    default_keyboard_bindings,
+    ensure_controller_bindings,
+    ensure_keyboard_bindings,
+)
+from subway_blind.item_upgrades import (
+    default_item_upgrade_state,
+    ensure_item_upgrade_state,
+)
+from subway_blind.progression import ensure_progression_state
 from subway_blind.version import APP_NAME
 
 BUNDLED_RESOURCE_BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
@@ -104,6 +118,10 @@ def _settings_path() -> Path:
     return _data_directory() / "settings.json"
 
 
+def _settings_backup_path() -> Path:
+    return _data_directory() / "settings.json.bak"
+
+
 def _legacy_storage_base_dirs() -> list[Path]:
     candidates = [
         Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / LEGACY_STORAGE_DIR_NAME,
@@ -148,26 +166,62 @@ def ensure_storage_layout() -> None:
 def load_settings() -> dict[str, Any]:
     ensure_storage_layout()
     settings_path = _settings_path()
-    if not settings_path.exists():
-        return copy.deepcopy(DEFAULT_SETTINGS)
-    try:
-        with settings_path.open("r", encoding="utf-8") as handle:
-            loaded = json.load(handle)
-    except Exception:
-        return copy.deepcopy(DEFAULT_SETTINGS)
-    merged = copy.deepcopy(DEFAULT_SETTINGS)
-    for key, default_value in DEFAULT_SETTINGS.items():
-        merged[key] = copy.deepcopy(loaded.get(key, default_value))
-    return merged
+    backup_path = _settings_backup_path()
+    for candidate in (settings_path, backup_path):
+        if not candidate.exists():
+            continue
+        try:
+            with candidate.open("r", encoding="utf-8") as handle:
+                loaded = json.load(handle)
+        except Exception:
+            continue
+        normalized = _normalized_settings(loaded)
+        if candidate == backup_path:
+            save_settings(normalized)
+        return normalized
+    return _normalized_settings({})
 
 
 def save_settings(settings: dict[str, Any]) -> None:
     ensure_storage_layout()
     data_directory = _data_directory()
     data_directory.mkdir(parents=True, exist_ok=True)
-    settings_path = data_directory / "settings.json"
+    settings_path = _settings_path()
+    backup_path = _settings_backup_path()
+    serialized = _normalized_settings(settings)
+    temporary_path: str | None = None
     try:
-        with settings_path.open("w", encoding="utf-8") as handle:
-            json.dump(settings, handle, ensure_ascii=False, indent=2)
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=str(data_directory),
+            delete=False,
+        ) as handle:
+            json.dump(serialized, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+            temporary_path = handle.name
+        if settings_path.exists():
+            shutil.copy2(settings_path, backup_path)
+        os.replace(temporary_path, settings_path)
     except Exception:
         return
+    finally:
+        if temporary_path:
+            try:
+                Path(temporary_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+def _normalized_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
+    merged = copy.deepcopy(DEFAULT_SETTINGS)
+    if isinstance(settings, dict):
+        for key, default_value in DEFAULT_SETTINGS.items():
+            merged[key] = copy.deepcopy(settings.get(key, default_value))
+    ensure_progression_state(merged)
+    ensure_character_progress_state(merged)
+    ensure_item_upgrade_state(merged)
+    merged["keyboard_bindings"] = ensure_keyboard_bindings(merged.get("keyboard_bindings"))
+    merged["controller_bindings"] = ensure_controller_bindings(merged.get("controller_bindings"))
+    return merged
