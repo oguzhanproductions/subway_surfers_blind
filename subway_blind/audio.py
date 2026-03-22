@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from pathlib import Path
 from typing import Optional
+import wave
 from xml.sax.saxutils import escape
 
 import pygame
@@ -64,6 +66,14 @@ CHANNEL_FALLBACK_OVERRIDES = {
     "coin": "player_pickup",
     "headstart_end": "player_reward",
     "headstart_reward": "player_reward",
+}
+
+FORCED_MONO_SOUND_KEYS = {
+    "menumove",
+    "menuedge",
+    "menuopen",
+    "menuclose",
+    "confirm",
 }
 
 SYSTEM_DEFAULT_OUTPUT_LABEL = "System Default"
@@ -438,6 +448,7 @@ class Audio:
         self.settings = settings
         self.sounds: dict[str, pygame.mixer.Sound] = {}
         self.sound_paths: dict[str, str] = {}
+        self.sound_channel_counts: dict[str, int | None] = {}
         self.channels: dict[str, pygame.mixer.Channel] = {}
         self._next_channel_index = 0
         self._output_device_name = normalize_output_device_name(settings.get("audio_output_device"))
@@ -453,19 +464,43 @@ class Audio:
     def _load_sound(self, key: str, path: str) -> None:
         if not os.path.exists(path):
             return
-        self.sound_paths[key] = path
+        playback_path = self._resolve_playback_path(key, path)
+        self.sound_paths[key] = playback_path
+        self.sound_channel_counts[key] = self._read_sound_channel_count(playback_path)
         try:
-            self.hrtf.register_sound(key, path)
+            self.hrtf.register_sound(key, playback_path)
         except Exception:
             pass
         if not self._mixer_ready:
             return
         try:
-            sound = pygame.mixer.Sound(path)
+            sound = pygame.mixer.Sound(playback_path)
         except Exception:
             return
         sound.set_volume(float(self.settings["sfx_volume"]))
         self.sounds[key] = sound
+
+    def _resolve_playback_path(self, key: str, path: str) -> str:
+        if key not in FORCED_MONO_SOUND_KEYS:
+            return path
+        try:
+            prepared_path = self.hrtf._prepare_openal_path(Path(path), spatialize=True)
+        except Exception:
+            return path
+        if self._read_sound_channel_count(prepared_path) != 1:
+            return path
+        return prepared_path
+
+    @staticmethod
+    def _read_sound_channel_count(path: str) -> int | None:
+        if not path.lower().endswith(".wav"):
+            return None
+        try:
+            with wave.open(path, "rb") as reader:
+                channels = int(reader.getnchannels())
+        except Exception:
+            return None
+        return channels if channels > 0 else None
 
     def _pick_menu_sound(self, base_name: str) -> str:
         for extension in (".ogg", ".wav"):
@@ -578,6 +613,7 @@ class Audio:
         self.hrtf = OpenALHrtfEngine(self.settings.get("sfx_volume", 1.0), applied_device)
         self.sounds.clear()
         self.sound_paths.clear()
+        self.sound_channel_counts.clear()
         self.channels.clear()
         self._next_channel_index = 0
         self._load()
@@ -627,7 +663,7 @@ class Audio:
         sound_path = self.sound_paths.get(key)
         requested_channel = channel or f"sfx_{key}"
         target_channel = self._normalize_channel_for_key(key, requested_channel)
-        if self.hrtf.available and sound_path is not None:
+        if self._should_use_non_spatial_hrtf(key, target_channel) and sound_path is not None:
             x, y, z, pitch, relative = self._hrtf_profile(key, target_channel, normalized_pan)
             played = self.hrtf.play_sound(
                 key=key,
@@ -640,6 +676,7 @@ class Audio:
                 pitch=pitch,
                 loop=loop,
                 relative=relative,
+                spatialize=False,
             )
             if played:
                 return
@@ -706,6 +743,7 @@ class Audio:
                 velocity_x=velocity_x,
                 velocity_y=velocity_y,
                 velocity_z=velocity_z,
+                spatialize=True,
             )
         if played:
             return
@@ -795,6 +833,15 @@ class Audio:
             relative = True
 
         return x, y, z, pitch, relative
+
+    def _should_use_non_spatial_hrtf(self, key: str, channel: str) -> bool:
+        if not self.hrtf.available:
+            return False
+        if self.sound_channel_counts.get(key) != 1:
+            return False
+        if channel.startswith("ui") and not bool(self.settings.get("menu_sound_hrtf", True)):
+            return False
+        return True
 
     @staticmethod
     def _normalize_pan_for_key(key: str, pan: Optional[float]) -> Optional[float]:

@@ -56,15 +56,20 @@ class OpenALHrtfEngine:
         )
         os.environ["ALSOFT_CONF"] = str(config_path)
 
-    def register_sound(self, key: str, path: str) -> None:
+    @staticmethod
+    def _buffer_cache_key(key: str, spatialize: bool) -> str:
+        return f"{key}::{'spatial' if spatialize else 'direct'}"
+
+    def register_sound(self, key: str, path: str, spatialize: bool = False) -> str | None:
         if not self.available or self._al is None:
-            return
+            return None
         source_path = Path(path)
         if not source_path.exists():
-            return
-        prepared_path = self._prepare_openal_path(source_path)
-        if self._buffer_paths.get(key) == prepared_path and key in self._buffers:
-            return
+            return None
+        buffer_key = self._buffer_cache_key(key, spatialize)
+        prepared_path = self._prepare_openal_path(source_path, spatialize=spatialize)
+        if self._buffer_paths.get(buffer_key) == prepared_path and buffer_key in self._buffers:
+            return buffer_key
         try:
             audio_data = self._al.AudioData(prepared_path)
             buffer = self._al.Buffer(audio_data)
@@ -72,24 +77,25 @@ class OpenALHrtfEngine:
             if prepared_path != str(source_path):
                 self._discard_cached_asset(Path(prepared_path))
                 try:
-                    prepared_path = self._prepare_openal_path(source_path, refresh=True)
+                    prepared_path = self._prepare_openal_path(source_path, refresh=True, spatialize=spatialize)
                     audio_data = self._al.AudioData(prepared_path)
                     buffer = self._al.Buffer(audio_data)
                 except Exception:
-                    return
+                    return None
             else:
-                return
-        self._buffers[key] = buffer
-        self._buffer_paths[key] = prepared_path
+                return None
+        self._buffers[buffer_key] = buffer
+        self._buffer_paths[buffer_key] = prepared_path
+        return buffer_key
 
-    def _prepare_openal_path(self, source: Path, refresh: bool = False) -> str:
+    def _prepare_openal_path(self, source: Path, refresh: bool = False, spatialize: bool = False) -> str:
         if source.suffix.lower() == ".wav":
-            return self._prepare_wav_path(source, refresh=refresh)
+            return self._prepare_wav_path(source, refresh=refresh, spatialize=spatialize)
         if self._is_ascii_safe_path(source):
             return str(source)
         return self._stage_original_asset(source, refresh=refresh)
 
-    def _prepare_wav_path(self, source: Path, refresh: bool = False) -> str:
+    def _prepare_wav_path(self, source: Path, refresh: bool = False, spatialize: bool = False) -> str:
         requires_ascii_cache = not self._is_ascii_safe_path(source)
         try:
             with wave.open(str(source), "rb") as reader:
@@ -98,6 +104,11 @@ class OpenALHrtfEngine:
                 frame_rate = reader.getframerate()
                 frames = reader.readframes(reader.getnframes())
         except Exception:
+            if requires_ascii_cache:
+                return self._stage_original_asset(source, refresh=refresh)
+            return str(source)
+
+        if not spatialize:
             if requires_ascii_cache:
                 return self._stage_original_asset(source, refresh=refresh)
             return str(source)
@@ -303,11 +314,14 @@ class OpenALHrtfEngine:
         velocity_x: float = 0.0,
         velocity_y: float = 0.0,
         velocity_z: float = 0.0,
+        spatialize: bool = False,
     ) -> bool:
         if not self.available or self._al is None:
             return False
-        self.register_sound(key, path)
-        buffer = self._buffers.get(key)
+        buffer_key = self.register_sound(key, path, spatialize=spatialize)
+        if buffer_key is None:
+            return False
+        buffer = self._buffers.get(buffer_key)
         if buffer is None:
             return False
         source = self._sources.get(channel)

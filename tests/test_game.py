@@ -547,6 +547,7 @@ class AudioTests(unittest.TestCase):
         audio.settings = {"sfx_volume": 1.0}
         audio.sounds = {}
         audio.sound_paths = {}
+        audio.sound_channel_counts = {}
         audio._mixer_ready = False
 
         class RaisingHrtf:
@@ -559,6 +560,107 @@ class AudioTests(unittest.TestCase):
             audio._load_sound("coin", "coin.wav")
 
         self.assertEqual(audio.sound_paths["coin"], "coin.wav")
+
+    def test_resolve_playback_path_forces_menu_feedback_to_mono(self):
+        audio = Audio.__new__(Audio)
+        audio.hrtf = type(
+            "FakeHrtf",
+            (),
+            {
+                "_prepare_openal_path": staticmethod(
+                    lambda source, refresh=False, spatialize=False: "menuopen_mono.wav" if spatialize else str(source)
+                )
+            },
+        )()
+
+        with patch.object(Audio, "_read_sound_channel_count", side_effect=lambda path: 1 if path == "menuopen_mono.wav" else 2):
+            self.assertEqual(audio._resolve_playback_path("menuopen", "menuopen.wav"), "menuopen_mono.wav")
+            self.assertEqual(audio._resolve_playback_path("mission_reward", "mission_reward.wav"), "mission_reward.wav")
+
+    def test_play_uses_mixer_for_stereo_assets_even_when_hrtf_is_available(self):
+        audio = Audio.__new__(Audio)
+        audio.settings = {"sfx_volume": 1.0, "menu_sound_hrtf": True}
+        audio.sound_paths = {"mission_reward": "mission_reward.wav"}
+        audio.sound_channel_counts = {"mission_reward": 2}
+        audio.sounds = {"mission_reward": object()}
+        audio.channels = {}
+        audio._mixer_ready = True
+        audio._get_channel = lambda _name: type(
+            "Channel",
+            (),
+            {
+                "volumes": [],
+                "plays": [],
+                "set_volume": lambda self, *values: self.volumes.append(values),
+                "play": lambda self, sound, loops=0: self.plays.append((sound, loops)),
+            },
+        )()
+
+        class FakeHrtf:
+            available = True
+
+            def play_sound(self, *args, **kwargs):
+                raise AssertionError("Stereo assets should not be routed through HRTF in normal playback")
+
+        audio.hrtf = FakeHrtf()
+
+        audio.play("mission_reward", channel="player_reward")
+
+    def test_play_uses_hrtf_for_mono_assets_when_available(self):
+        audio = Audio.__new__(Audio)
+        audio.settings = {"sfx_volume": 1.0, "menu_sound_hrtf": True}
+        audio.sound_paths = {"warning": "warning.wav"}
+        audio.sound_channel_counts = {"warning": 1}
+        audio.sounds = {}
+        audio.channels = {}
+        audio._mixer_ready = False
+        hrtf_calls: list[dict[str, object]] = []
+
+        class FakeHrtf:
+            available = True
+
+            def play_sound(self, **kwargs):
+                hrtf_calls.append(kwargs)
+                return True
+
+        audio.hrtf = FakeHrtf()
+
+        audio.play("warning", channel="warn_lane", pan=-0.4)
+
+        self.assertEqual(len(hrtf_calls), 1)
+        self.assertFalse(bool(hrtf_calls[0]["spatialize"]))
+
+    def test_play_respects_menu_hrtf_setting_for_ui_channels(self):
+        audio = Audio.__new__(Audio)
+        audio.settings = {"sfx_volume": 1.0, "menu_sound_hrtf": False}
+        audio.sound_paths = {"menuopen": "menuopen.wav"}
+        audio.sound_channel_counts = {"menuopen": 1}
+        audio.sounds = {"menuopen": object()}
+        audio.channels = {}
+        audio._mixer_ready = True
+        captured_channel = type(
+            "Channel",
+            (),
+            {
+                "volumes": [],
+                "plays": [],
+                "set_volume": lambda self, *values: self.volumes.append(values),
+                "play": lambda self, sound, loops=0: self.plays.append((sound, loops)),
+            },
+        )()
+        audio._get_channel = lambda _name: captured_channel
+
+        class FakeHrtf:
+            available = True
+
+            def play_sound(self, *args, **kwargs):
+                raise AssertionError("UI playback should bypass HRTF when menu_sound_hrtf is disabled")
+
+        audio.hrtf = FakeHrtf()
+
+        audio.play("menuopen", channel="ui", pan=0.25)
+
+        self.assertEqual(captured_channel.plays, [(audio.sounds["menuopen"], 0)])
 
     def test_update_starts_pending_track_after_music_fades_out(self):
         audio = Audio.__new__(Audio)
@@ -783,12 +885,15 @@ class HrtfEngineTests(unittest.TestCase):
         engine = OpenALHrtfEngine.__new__(OpenALHrtfEngine)
         engine.available = True
         engine._al = FakeOpenALModule(source)
-        engine._buffers = {"box": object(), "jump": object()}
+        engine._buffers = {
+            "box::direct": object(),
+            "jump::direct": object(),
+        }
         engine._buffer_paths = {}
         engine._sources = {}
         engine._channel_keys = {}
         engine._listener_gain = 1.0
-        engine.register_sound = lambda key, path: None
+        engine.register_sound = lambda key, path, spatialize=False: OpenALHrtfEngine._buffer_cache_key(key, spatialize)
 
         engine.play_sound("box", "box.wav", "player_action", 0.0, 0.0, -1.0, 1.0)
         source.calls.clear()
@@ -856,7 +961,7 @@ class HrtfEngineTests(unittest.TestCase):
                 {"PROGRAMDATA": str(program_data)},
                 clear=False,
             ):
-                prepared_path = Path(engine._prepare_openal_path(source_path))
+                prepared_path = Path(engine._prepare_openal_path(source_path, spatialize=True))
 
             self.assertNotEqual(prepared_path, source_path)
             self.assertTrue(prepared_path.exists())
@@ -873,6 +978,18 @@ class HrtfEngineTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     openal.AudioData(str(source_path))
                 self.assertEqual(openal.AudioData(str(prepared_path)).channels, 1)
+
+    def test_prepare_openal_path_preserves_stereo_wav_when_not_spatialized(self):
+        engine = OpenALHrtfEngine.__new__(OpenALHrtfEngine)
+        with tempfile.TemporaryDirectory() as temp_root:
+            source_path = Path(temp_root) / "reward.wav"
+            self._write_wav(source_path, channels=2)
+
+            prepared_path = Path(engine._prepare_openal_path(source_path, spatialize=False))
+
+            self.assertEqual(prepared_path, source_path)
+            with wave.open(str(prepared_path), "rb") as reader:
+                self.assertEqual(reader.getnchannels(), 2)
 
     def test_register_sound_returns_without_raising_when_openal_load_fails(self):
         class FailingOpenALModule:
