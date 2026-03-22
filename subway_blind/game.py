@@ -248,14 +248,14 @@ HOW_TO_TOPICS: tuple[HelpTopic, ...] = (
     HelpTopic("progression", "Progress and Shop", "Missions raise your permanent multiplier. Word Hunt letters and Season Hunt tokens appear during runs. Spend saved coins in the shop on hoverboards, headstarts, score boosters, boxes, item upgrades, and character upgrades with unique passive bonuses."),
 )
 UPGRADE_HELP_TOPICS: dict[str, tuple[HelpTopic, ...]] = {
-    "1.1.4": (
+    "1.1.3": (
         HelpTopic(
-            "update_1_1_4_audio",
+            "update_1_1_3_audio",
             "Audio Routing Fixes",
-            "Version 1.1.4 keeps reward and interface sounds out of the forced HRTF mono path while preserving mono menu feedback cues.",
+            "Version 1.1.3 keeps reward and interface sounds out of the forced HRTF mono path while preserving mono menu feedback cues.",
         ),
         HelpTopic(
-            "update_1_1_4_items",
+            "update_1_1_3_items",
             "Item Upgrades",
             "The Shop now includes an original-style Item Upgrades submenu for Coin Magnet, Jetpack, 2X Multiplier, and Super Sneakers, each with persistent upgrade levels and longer pickup durations.",
         ),

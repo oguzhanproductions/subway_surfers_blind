@@ -281,7 +281,7 @@ class DummyControllerDevice:
         self.quit_calls += 1
 
 
-def make_release_info(version: str = "1.1.4") -> ReleaseInfo:
+def make_release_info(version: str = "1.1.3") -> ReleaseInfo:
     return ReleaseInfo(
         version=version,
         page_url=f"https://github.com/oguzhanproductions/subway_surfers_blind/releases/tag/v{version}",
@@ -730,9 +730,9 @@ class UpdaterTests(unittest.TestCase):
     def test_check_for_updates_returns_update_available_when_release_is_newer(self):
         updater = GitHubReleaseUpdater(timeout_seconds=2.0)
         release_payload = {
-            "tag_name": "v1.1.5",
-            "name": "v1.1.5",
-            "html_url": "https://github.com/oguzhanproductions/subway_surfers_blind/releases/tag/v1.1.5",
+            "tag_name": "v1.1.4",
+            "name": "v1.1.4",
+            "html_url": "https://github.com/oguzhanproductions/subway_surfers_blind/releases/tag/v1.1.4",
             "published_at": "2026-03-08T10:00:00Z",
             "body": "Notes",
             "assets": [
@@ -759,7 +759,7 @@ class UpdaterTests(unittest.TestCase):
             result = updater.check_for_updates(APP_VERSION)
 
         self.assertTrue(result.update_available)
-        self.assertEqual(result.latest_version, "1.1.5")
+        self.assertEqual(result.latest_version, "1.1.4")
         self.assertEqual(result.release.assets[0].name, "SubwaySurfersBlind.zip")
 
     def test_download_and_install_stages_release_and_removes_archive(self):
@@ -1464,9 +1464,9 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.whats_new_menu)
-        self.assertEqual(game.whats_new_menu.title, "What's New   1.1.4")
+        self.assertEqual(game.whats_new_menu.title, "What's New   1.1.3")
         self.assertEqual(game.whats_new_menu.items[0].action, "info_line")
-        self.assertEqual(game.whats_new_menu.items[0].label, "Version: 1.1.4")
+        self.assertEqual(game.whats_new_menu.items[0].label, "Version: 1.1.3")
         self.assertFalse(any("Update Summary" == message for message, _ in speaker.messages))
 
     def test_whats_new_lines_can_be_navigated_with_up_and_down(self):
@@ -1547,7 +1547,7 @@ class GameTests(unittest.TestCase):
     def test_load_whats_new_content_uses_latest_changelog_entry(self):
         content = load_whats_new_content()
 
-        self.assertEqual(content.title, "What's New   1.1.4")
+        self.assertEqual(content.title, "What's New   1.1.3")
         self.assertIn("Update Summary", content.lines)
         self.assertNotIn("Press Enter to repeat the selected line.", content.lines)
 
