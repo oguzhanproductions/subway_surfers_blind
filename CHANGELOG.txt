@@ -33,6 +33,7 @@ Audio or UI Updates
 - Added current active character status to the Shop and Character Upgrades menus.
 - Added a dedicated SAPI Settings submenu with On or Off, volume, voice, rate, and pitch controls.
 - Moved gameplay announcement toggles into a dedicated submenu under Options so runtime speech preferences stay grouped together.
+- Hardened settings persistence so item upgrade purchases now survive interrupted writes and recover cleanly from a corrupted primary save file.
 - Fixed the updater so packaged builds now apply extracted files into the game folder on restart and clean leftover update ZIP files.
 - Fixed collision audio so each obstacle type now triggers its intended hit sound instead of falling back to the same generic crash layer.
 - Fixed the mono audio routing bug so reward and interface sounds are no longer forced through the HRTF mono path while menu feedback cues stay mono.
