@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import ctypes
 import sys
 import textwrap
 from dataclasses import dataclass
 import random
 import re
 import threading
+import time
 from typing import Optional
 
 import pygame
@@ -313,6 +315,72 @@ def load_whats_new_content() -> InfoDialogContent:
     if not entry_lines:
         return fallback
     return InfoDialogContent(title=f"What's New   {APP_VERSION}", lines=tuple(entry_lines))
+
+
+def copy_text_to_clipboard(text: str) -> bool:
+    normalized_text = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    if sys.platform == "win32" and _copy_text_to_clipboard_windows(normalized_text):
+        return True
+    return _copy_text_to_clipboard_pygame(normalized_text)
+
+
+def _copy_text_to_clipboard_windows(text: str) -> bool:
+    user32 = getattr(ctypes, "windll", None)
+    if user32 is None:
+        return False
+    user32 = user32.user32
+    kernel32 = ctypes.windll.kernel32
+    window_handle = int(pygame.display.get_wm_info().get("window", 0) or 0)
+    clipboard_handle = ctypes.c_void_p(window_handle) if window_handle else None
+    for _ in range(8):
+        if user32.OpenClipboard(clipboard_handle):
+            break
+        time.sleep(0.01)
+    else:
+        return False
+    global_handle = None
+    try:
+        if not user32.EmptyClipboard():
+            return False
+        buffer = ctypes.create_unicode_buffer(text)
+        bytes_required = ctypes.sizeof(buffer)
+        global_handle = kernel32.GlobalAlloc(0x0002, bytes_required)
+        if not global_handle:
+            return False
+        locked_memory = kernel32.GlobalLock(global_handle)
+        if not locked_memory:
+            kernel32.GlobalFree(global_handle)
+            global_handle = None
+            return False
+        try:
+            ctypes.memmove(locked_memory, ctypes.addressof(buffer), bytes_required)
+        finally:
+            kernel32.GlobalUnlock(global_handle)
+        if not user32.SetClipboardData(13, global_handle):
+            kernel32.GlobalFree(global_handle)
+            global_handle = None
+            return False
+        global_handle = None
+        return True
+    finally:
+        user32.CloseClipboard()
+        if global_handle:
+            kernel32.GlobalFree(global_handle)
+
+
+def _copy_text_to_clipboard_pygame(text: str) -> bool:
+    scrap = getattr(pygame, "scrap", None)
+    if scrap is None or not pygame.display.get_init():
+        return False
+    try:
+        scrap.init()
+    except Exception:
+        pass
+    try:
+        scrap.put(pygame.SCRAP_TEXT, text.encode("utf-8"))
+    except Exception:
+        return False
+    return True
 
 
 class SubwayBlindGame:
@@ -965,15 +1033,45 @@ class SubwayBlindGame:
         self._selected_help_topic = topic
         self.help_topic_menu.title = topic.label
         self.help_topic_menu.items = [
-            MenuItem(segment, "help_topic_line") for segment in help_topic_segments(topic, self._gameplay_controls_summary())
-        ] + [MenuItem("Back", "back")]
+            MenuItem(segment, "copy_info_line") for segment in help_topic_segments(topic, self._gameplay_controls_summary())
+        ] + [MenuItem("Copy All", "copy_info_all"), MenuItem("Back", "back")]
         self._set_active_menu(self.help_topic_menu)
 
     def _open_info_dialog(self, content: InfoDialogContent, menu: Menu) -> None:
         self._selected_info_dialog = content
         menu.title = content.title
-        menu.items = [MenuItem(line, "info_line") for line in content.lines] + [MenuItem("Back", "back")]
+        menu.items = [MenuItem(line, "copy_info_line") for line in content.lines] + [MenuItem("Copy All", "copy_info_all"), MenuItem("Back", "back")]
         self._set_active_menu(menu)
+
+    def _copy_menu_text(self, text: str, success_message: str) -> bool:
+        if not text:
+            self._play_menu_feedback("menuedge")
+            self.speaker.speak("Nothing available to copy.", interrupt=True)
+            return True
+        if copy_text_to_clipboard(text):
+            self._play_menu_feedback("confirm")
+            self.speaker.speak(success_message, interrupt=True)
+            return True
+        self._play_menu_feedback("menuedge")
+        self.speaker.speak("Unable to copy text to the clipboard.", interrupt=True)
+        return True
+
+    def _selected_info_menu_lines(self, menu: Menu) -> tuple[str, ...]:
+        if menu == self.help_topic_menu and self._selected_help_topic is not None:
+            return help_topic_segments(self._selected_help_topic, self._gameplay_controls_summary())
+        if menu == self.whats_new_menu and self._selected_info_dialog is not None:
+            return self._selected_info_dialog.lines
+        return ()
+
+    def _selected_info_copy_all_text(self, menu: Menu) -> str:
+        lines = self._selected_info_menu_lines(menu)
+        if not lines:
+            return ""
+        return "\n".join((menu.title, "", *lines))
+
+    @staticmethod
+    def _selected_info_copy_all_message(menu: Menu) -> str:
+        return f"{menu.title} copied to clipboard."
 
     def _mark_current_version_seen(self) -> None:
         seen_version = str(self.settings.get("last_seen_version", "") or "").strip()
@@ -2646,17 +2744,31 @@ class SubwayBlindGame:
             if action == "back":
                 self._set_active_menu(self.howto_menu)
                 return True
-            if action == "help_topic_line":
-                self.speaker.speak(self.help_topic_menu.items[self.help_topic_menu.index].label, interrupt=True)
-                return True
+            if action == "copy_info_line":
+                return self._copy_menu_text(
+                    self.help_topic_menu.items[self.help_topic_menu.index].label,
+                    "Selected line copied to clipboard.",
+                )
+            if action == "copy_info_all":
+                return self._copy_menu_text(
+                    self._selected_info_copy_all_text(self.help_topic_menu),
+                    self._selected_info_copy_all_message(self.help_topic_menu),
+                )
 
         if self.active_menu == self.whats_new_menu:
             if action == "back":
                 self._set_active_menu(self.main_menu)
                 return True
-            if action == "info_line":
-                self.speaker.speak(self.whats_new_menu.items[self.whats_new_menu.index].label, interrupt=True)
-                return True
+            if action == "copy_info_line":
+                return self._copy_menu_text(
+                    self.whats_new_menu.items[self.whats_new_menu.index].label,
+                    "Selected line copied to clipboard.",
+                )
+            if action == "copy_info_all":
+                return self._copy_menu_text(
+                    self._selected_info_copy_all_text(self.whats_new_menu),
+                    self._selected_info_copy_all_message(self.whats_new_menu),
+                )
 
         if self.active_menu == self.pause_menu:
             if action == "resume":
@@ -3691,7 +3803,11 @@ class SubwayBlindGame:
                 self.screen.blit(line_surface, (40, notes_top + 28 + (line_index * 24)))
             hint_text = self._menu_navigation_hint()
         elif menu == self.help_topic_menu and self._selected_help_topic is not None:
-            prompt_surface = self.font.render("Use Up and Down to read each help line. Escape returns to Help.", True, (205, 205, 205))
+            prompt_surface = self.font.render("Use Up and Down to select a line. Press Enter to copy it. Copy All is at the end.", True, (205, 205, 205))
+            self.screen.blit(prompt_surface, (40, max(height - 100, y_position + 18)))
+            hint_text = self._menu_navigation_hint()
+        elif menu == self.whats_new_menu and self._selected_info_dialog is not None:
+            prompt_surface = self.font.render("Use Up and Down to select a line. Press Enter to copy it. Copy All is at the end.", True, (205, 205, 205))
             self.screen.blit(prompt_surface, (40, max(height - 100, y_position + 18)))
             hint_text = self._menu_navigation_hint()
         elif menu == self.main_menu:

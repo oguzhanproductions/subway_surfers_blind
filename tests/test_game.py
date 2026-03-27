@@ -1590,8 +1590,9 @@ class GameTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.whats_new_menu)
         self.assertEqual(game.whats_new_menu.title, "What's New   1.1.3")
-        self.assertEqual(game.whats_new_menu.items[0].action, "info_line")
+        self.assertEqual(game.whats_new_menu.items[0].action, "copy_info_line")
         self.assertEqual(game.whats_new_menu.items[0].label, "Version: 1.1.3")
+        self.assertEqual(game.whats_new_menu.items[-2].label, "Copy All")
         self.assertFalse(any("Update Summary" == message for message, _ in speaker.messages))
 
     def test_whats_new_lines_can_be_navigated_with_up_and_down(self):
@@ -1625,8 +1626,9 @@ class GameTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.help_topic_menu)
         self.assertEqual(game.help_topic_menu.title, "Movement and Actions")
-        self.assertEqual(game.help_topic_menu.items[0].action, "help_topic_line")
+        self.assertEqual(game.help_topic_menu.items[0].action, "copy_info_line")
         self.assertTrue(game.help_topic_menu.items[0].label.startswith("Controls:"))
+        self.assertEqual(game.help_topic_menu.items[-2].label, "Copy All")
         self.assertIn(game.help_topic_menu.items[0].label, speaker.messages[-1][0])
 
     def test_help_topic_back_returns_to_help_topic_list(self):
@@ -1675,6 +1677,45 @@ class GameTests(unittest.TestCase):
         self.assertEqual(content.title, "What's New   1.1.3")
         self.assertIn("Update Summary", content.lines)
         self.assertNotIn("Press Enter to repeat the selected line.", content.lines)
+
+    def test_help_topic_line_can_be_copied_to_clipboard(self):
+        game, speaker, _ = self.make_game()
+        game.active_menu = game.howto_menu
+        game._handle_menu_action("howto:movement")
+
+        with patch("subway_blind.game.copy_text_to_clipboard", return_value=True) as copy_mock:
+            result = game._handle_menu_action("copy_info_line")
+
+        self.assertTrue(result)
+        copy_mock.assert_called_once_with(game.help_topic_menu.items[game.help_topic_menu.index].label)
+        self.assertEqual(speaker.messages[-1], ("Selected line copied to clipboard.", True))
+
+    def test_help_topic_copy_all_copies_title_and_lines(self):
+        game, speaker, _ = self.make_game()
+        game.active_menu = game.howto_menu
+        game._handle_menu_action("howto:warnings")
+
+        with patch("subway_blind.game.copy_text_to_clipboard", return_value=True) as copy_mock:
+            result = game._handle_menu_action("copy_info_all")
+
+        self.assertTrue(result)
+        copied_text = copy_mock.call_args.args[0]
+        self.assertTrue(copied_text.startswith("Hazards and Warnings\n\n"))
+        self.assertIn("Listen for danger speech and warning sounds.", copied_text)
+        self.assertEqual(speaker.messages[-1], ("Hazards and Warnings copied to clipboard.", True))
+
+    def test_whats_new_copy_all_copies_title_and_lines(self):
+        game, speaker, _ = self.make_game()
+        game._handle_menu_action("whats_new")
+
+        with patch("subway_blind.game.copy_text_to_clipboard", return_value=True) as copy_mock:
+            result = game._handle_menu_action("copy_info_all")
+
+        self.assertTrue(result)
+        copied_text = copy_mock.call_args.args[0]
+        self.assertTrue(copied_text.startswith("What's New   1.1.3\n\n"))
+        self.assertIn("Version: 1.1.3", copied_text)
+        self.assertEqual(speaker.messages[-1], ("What's New   1.1.3 copied to clipboard.", True))
 
     def test_upgrade_version_marks_current_version_seen_without_auto_opening_help(self):
         settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)

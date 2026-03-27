@@ -26,6 +26,8 @@ Audio or UI Updates
 - Added optional spoken and on-screen descriptions for main menu items, with a direct toggle in Options.
 - Added an Exit Confirmation option in Options so players can choose whether the game asks before returning to desktop.
 - Added a Gameplay Announcements toggle that lets players enable or disable automatic pausing when the game window loses focus.
+- Added line-by-line clipboard copying for How to Play and What's New, plus a Copy All action at the end of each list.
+- Updated Copy All confirmations so the spoken clipboard message includes the selected section title.
 - Updated the in-game What's New and help copy to mention the new item upgrade system and the audio routing fix.
 
 ------------------------------------------------------------
