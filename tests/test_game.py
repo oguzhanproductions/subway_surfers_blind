@@ -416,6 +416,14 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded["selected_character"], config_module.DEFAULT_SETTINGS["selected_character"])
         self.assertEqual(loaded["character_progress"], config_module.DEFAULT_SETTINGS["character_progress"])
         self.assertEqual(loaded["item_upgrades"], config_module.DEFAULT_SETTINGS["item_upgrades"])
+        self.assertEqual(
+            loaded["main_menu_descriptions_enabled"],
+            config_module.DEFAULT_SETTINGS["main_menu_descriptions_enabled"],
+        )
+        self.assertEqual(
+            loaded["confirm_exit_enabled"],
+            config_module.DEFAULT_SETTINGS["confirm_exit_enabled"],
+        )
 
     def test_settings_round_trip_preserves_item_upgrades(self):
         original_base_dir = config_module.BASE_DIR
@@ -1346,45 +1354,33 @@ class GameTests(unittest.TestCase):
     def make_game(self, updater: DummyUpdater | None = None, packaged_build: bool = False):
         settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
         settings["speech_enabled"] = False
-        game = SubwayBlindGame(
-            self.screen,
-            pygame.time.Clock(),
-            settings,
-            updater=updater or DummyUpdater(),
-            packaged_build=packaged_build,
-        )
         speaker = DummySpeaker()
         speaker.apply_settings(settings)
         audio = DummyAudio(settings)
-        game.speaker = speaker
-        game.audio = audio
-        for menu in (
-            game.main_menu,
-            game.whats_new_menu,
-            game.shop_menu,
-            game.item_upgrade_menu,
-            game.item_upgrade_detail_menu,
-            game.character_menu,
-            game.character_detail_menu,
-            game.achievements_menu,
-            game.options_menu,
-            game.sapi_menu,
-            game.announcements_menu,
-            game.howto_menu,
-            game.help_topic_menu,
-            game.controls_menu,
-            game.keyboard_bindings_menu,
-            game.controller_bindings_menu,
-            game.pause_menu,
-            game.pause_confirm_menu,
-            game.loadout_menu,
-            game.revive_menu,
-            game.learn_sounds_menu,
-            game.update_menu,
-            game.game_over_menu,
+        with patch("subway_blind.game.Speaker.from_settings", return_value=speaker), patch(
+            "subway_blind.game.Audio",
+            return_value=audio,
         ):
-            menu.speaker = speaker
-            menu.audio = audio
+            game = SubwayBlindGame(
+                self.screen,
+                pygame.time.Clock(),
+                settings,
+                updater=updater or DummyUpdater(),
+                packaged_build=packaged_build,
+            )
+        speaker.messages.clear()
+        speaker.speed_factors.clear()
+        audio.played.clear()
+        audio.play_calls.clear()
+        audio.spatial_played.clear()
+        audio.spatial_updated.clear()
+        audio.stopped.clear()
+        audio.refreshed = 0
+        audio.music_started = 0
+        audio.music_stopped = 0
+        audio.music_started_tracks.clear()
+        audio.music_update_calls.clear()
+        audio.music_idle = False
         game._persist_settings = lambda: None
         game._sync_music_context()
         return game, speaker, audio
@@ -1410,6 +1406,83 @@ class GameTests(unittest.TestCase):
             ["Start Game", "What's New", "Shop", "Achievements", "Options", "How to Play", "Learn Game Sounds", "Check for Updates", "Exit"],
         )
 
+    def test_main_menu_open_announces_item_description_when_enabled(self):
+        game, speaker, _ = self.make_game()
+
+        game.main_menu.open()
+
+        self.assertEqual(
+            speaker.messages[-1][0],
+            f"Main Menu   Version: {APP_VERSION}. Start Game. Set your loadout, then launch a new run when you are ready to hit the tracks.",
+        )
+
+    def test_main_menu_navigation_omits_item_description_when_disabled(self):
+        game, speaker, _ = self.make_game()
+        game.settings["main_menu_descriptions_enabled"] = False
+
+        game.main_menu.open()
+        game.main_menu.handle_key(pygame.K_DOWN)
+
+        self.assertEqual(speaker.messages[0][0], "Main Menu   Version: 1.1.3. Start Game")
+        self.assertEqual(speaker.messages[-1][0], "What's New")
+
+    def test_main_menu_exit_action_opens_desktop_confirmation(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.main_menu
+
+        result = game._handle_menu_action("quit")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.exit_confirm_menu)
+        self.assertEqual(game.exit_confirm_menu.title, "Return to Desktop?")
+        self.assertEqual(game.exit_confirm_menu.index, 1)
+
+    def test_main_menu_escape_opens_desktop_confirmation(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.main_menu
+
+        result = game._handle_menu_action("close")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.exit_confirm_menu)
+        self.assertEqual(game.exit_confirm_menu.index, 1)
+
+    def test_exit_confirmation_no_returns_to_main_menu_exit_item(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.exit_confirm_menu
+
+        result = game._handle_menu_action("cancel_exit")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertEqual(game.main_menu.index, 8)
+
+    def test_exit_confirmation_yes_closes_game(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.exit_confirm_menu
+
+        result = game._handle_menu_action("confirm_exit")
+
+        self.assertFalse(result)
+
+    def test_main_menu_exit_action_closes_immediately_when_confirmation_disabled(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.main_menu
+        game.settings["confirm_exit_enabled"] = False
+
+        result = game._handle_menu_action("quit")
+
+        self.assertFalse(result)
+
+    def test_main_menu_escape_closes_immediately_when_confirmation_disabled(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.main_menu
+        game.settings["confirm_exit_enabled"] = False
+
+        result = game._handle_menu_action("close")
+
+        self.assertFalse(result)
+
     def test_options_menu_includes_output_device_entry(self):
         game, _, _ = self.make_game()
         labels = [item.label for item in game.options_menu.items]
@@ -1422,8 +1495,10 @@ class GameTests(unittest.TestCase):
             "Speech: Off",
             "SAPI Settings",
             "Difficulty: Normal",
+            "Main Menu Descriptions: On",
             "Gameplay Announcements",
             "Controls",
+            "Exit Confirmation: On",
             "Back",
         ]
         self.assertEqual(labels, expected)
@@ -1598,13 +1673,17 @@ class GameTests(unittest.TestCase):
         settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
         settings["speech_enabled"] = False
         settings["last_seen_version"] = "1.1.1"
-        game = SubwayBlindGame(
-            self.screen,
-            pygame.time.Clock(),
-            settings,
-            updater=DummyUpdater(),
-            packaged_build=False,
-        )
+        with patch("subway_blind.game.Speaker.from_settings", return_value=DummySpeaker()), patch(
+            "subway_blind.game.Audio",
+            return_value=DummyAudio(settings),
+        ):
+            game = SubwayBlindGame(
+                self.screen,
+                pygame.time.Clock(),
+                settings,
+                updater=DummyUpdater(),
+                packaged_build=False,
+            )
 
         self.assertIs(game.active_menu, game.main_menu)
         self.assertEqual(game.settings["last_seen_version"], APP_VERSION)
@@ -1613,13 +1692,17 @@ class GameTests(unittest.TestCase):
         settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
         settings["speech_enabled"] = False
         settings["last_seen_version"] = APP_VERSION
-        game = SubwayBlindGame(
-            self.screen,
-            pygame.time.Clock(),
-            settings,
-            updater=DummyUpdater(),
-            packaged_build=False,
-        )
+        with patch("subway_blind.game.Speaker.from_settings", return_value=DummySpeaker()), patch(
+            "subway_blind.game.Audio",
+            return_value=DummyAudio(settings),
+        ):
+            game = SubwayBlindGame(
+                self.screen,
+                pygame.time.Clock(),
+                settings,
+                updater=DummyUpdater(),
+                packaged_build=False,
+            )
 
         self.assertIs(game.active_menu, game.main_menu)
         self.assertEqual(game.settings["last_seen_version"], APP_VERSION)
@@ -2048,7 +2131,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_on_back_only_plays_edge_feedback(self):
         game, _, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 10
+        game.options_menu.index = 12
 
         game._adjust_selected_option(1)
 
@@ -2058,7 +2141,7 @@ class GameTests(unittest.TestCase):
     def test_enter_on_back_returns_to_main_menu_from_options(self):
         game, _, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 10
+        game.options_menu.index = 12
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -2104,7 +2187,7 @@ class GameTests(unittest.TestCase):
     def test_options_controls_entry_opens_controls_menu(self):
         game, _, _ = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 9
+        game.options_menu.index = 10
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -2116,7 +2199,7 @@ class GameTests(unittest.TestCase):
         game, _, _ = self.make_game()
         self.attach_controller(game, family=PLAYSTATION_FAMILY, name="Wireless Controller")
         game.active_menu = game.options_menu
-        game.options_menu.index = 9
+        game.options_menu.index = 10
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -2127,7 +2210,7 @@ class GameTests(unittest.TestCase):
     def test_options_gameplay_announcements_entry_opens_submenu(self):
         game, _, _ = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 8
+        game.options_menu.index = 9
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -2144,7 +2227,7 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.options_menu)
-        self.assertEqual(game.options_menu.index, 8)
+        self.assertEqual(game.options_menu.index, 9)
 
     def test_controls_menu_can_switch_binding_profile_like_options(self):
         game, speaker, _ = self.make_game()
@@ -2286,6 +2369,28 @@ class GameTests(unittest.TestCase):
         self.assertFalse(game.settings["menu_sound_hrtf"])
         self.assertIn(("confirm", "ui", False), audio.played)
         self.assertEqual(speaker.messages[-1][0], "Menu Sound HRTF: Off")
+
+    def test_adjust_selected_option_toggles_main_menu_descriptions_from_options(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 8
+
+        game._adjust_selected_option(-1)
+
+        self.assertFalse(game.settings["main_menu_descriptions_enabled"])
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][0], "Main Menu Descriptions: Off")
+
+    def test_adjust_selected_option_toggles_exit_confirmation_from_options(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = 11
+
+        game._adjust_selected_option(-1)
+
+        self.assertFalse(game.settings["confirm_exit_enabled"])
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][0], "Exit Confirmation: Off")
 
     def test_adjust_selected_option_sets_speech_state_from_direction(self):
         game, speaker, _ = self.make_game()
@@ -2445,7 +2550,10 @@ class GameTests(unittest.TestCase):
         game._update_menu_repeat(MENU_REPEAT_INITIAL_DELAY + (MENU_REPEAT_INTERVAL * 2.1))
 
         self.assertEqual(game.main_menu.index, 3)
-        self.assertEqual(speaker.messages[-1][0], "Achievements")
+        self.assertEqual(
+            speaker.messages[-1][0],
+            "Achievements. Review unlocked milestones and check which long-term goals still need progress.",
+        )
 
     def test_menu_repeat_adjusts_option_values_while_holding_horizontal_arrow(self):
         game, speaker, _ = self.make_game()

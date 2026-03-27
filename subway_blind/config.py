@@ -9,22 +9,13 @@ import sys
 import tempfile
 from typing import Any
 
-from subway_blind.characters import (
-    DEFAULT_SELECTED_CHARACTER_KEY,
-    default_character_progress_state,
-    ensure_character_progress_state,
-)
-from subway_blind.controls import (
-    default_controller_bindings,
-    default_keyboard_bindings,
-    ensure_controller_bindings,
-    ensure_keyboard_bindings,
-)
-from subway_blind.item_upgrades import (
-    default_item_upgrade_state,
-    ensure_item_upgrade_state,
-)
+from subway_blind.characters import DEFAULT_SELECTED_CHARACTER_KEY, default_character_progress_state
+from subway_blind.controls import default_controller_bindings, default_keyboard_bindings
+from subway_blind.item_upgrades import default_item_upgrade_state
 from subway_blind.progression import ensure_progression_state
+from subway_blind.characters import ensure_character_progress_state
+from subway_blind.controls import ensure_controller_bindings, ensure_keyboard_bindings
+from subway_blind.item_upgrades import ensure_item_upgrade_state
 from subway_blind.version import APP_NAME
 
 BUNDLED_RESOURCE_BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
@@ -62,6 +53,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "meter_announcements_enabled": False,
     "coin_counters_enabled": False,
     "quest_changes_enabled": False,
+    "main_menu_descriptions_enabled": True,
+    "confirm_exit_enabled": True,
     "bank_coins": 0,
     "keys": 3,
     "hoverboards": 3,

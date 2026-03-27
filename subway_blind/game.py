@@ -401,6 +401,15 @@ class SubwayBlindGame:
                 MenuItem("No", "cancel_to_main"),
             ],
         )
+        self.exit_confirm_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Return to Desktop?",
+            [
+                MenuItem("Yes", "confirm_exit"),
+                MenuItem("No", "cancel_exit"),
+            ],
+        )
         self.revive_menu = Menu(
             self.speaker,
             self.audio,
@@ -426,17 +435,8 @@ class SubwayBlindGame:
             self.speaker,
             self.audio,
             self._main_menu_title(),
-            [
-                MenuItem("Start Game", "start"),
-                MenuItem("What's New", "whats_new"),
-                MenuItem("Shop", "shop"),
-                MenuItem("Achievements", "achievements"),
-                MenuItem("Options", "options"),
-                MenuItem("How to Play", "howto"),
-                MenuItem("Learn Game Sounds", "learn_sounds"),
-                MenuItem("Check for Updates", "check_updates"),
-                MenuItem("Exit", "quit"),
-            ],
+            self._main_menu_items(),
+            description_enabled=self._main_menu_descriptions_enabled,
         )
         self.loadout_menu = Menu(
             self.speaker,
@@ -462,8 +462,10 @@ class SubwayBlindGame:
                 MenuItem(self._speech_option_label(), "opt_speech"),
                 MenuItem(self._sapi_menu_entry_label(), "opt_sapi_menu"),
                 MenuItem(self._difficulty_option_label(), "opt_diff"),
+                MenuItem(self._main_menu_description_option_label(), "opt_main_menu_descriptions"),
                 MenuItem("Gameplay Announcements", "opt_gameplay_announcements"),
                 MenuItem("Controls", "opt_controls"),
+                MenuItem(self._exit_confirmation_option_label(), "opt_exit_confirmation"),
                 MenuItem("Back", "back"),
             ],
         )
@@ -675,6 +677,12 @@ class SubwayBlindGame:
     def _quest_changes_option_label(self) -> str:
         return f"Quest Changes: {'On' if self._quest_changes_enabled() else 'Off'}"
 
+    def _main_menu_description_option_label(self) -> str:
+        return f"Main Menu Descriptions: {'On' if self._main_menu_descriptions_enabled() else 'Off'}"
+
+    def _exit_confirmation_option_label(self) -> str:
+        return f"Exit Confirmation: {'On' if self._exit_confirmation_enabled() else 'Off'}"
+
     def _headstart_option_label(self) -> str:
         owned = int(self.settings.get("headstarts", 0))
         return f"Headstart: {self.selected_headstarts}   Owned: {owned}"
@@ -816,8 +824,10 @@ class SubwayBlindGame:
         self.options_menu.items[5].label = self._speech_option_label()
         self.options_menu.items[6].label = self._sapi_menu_entry_label()
         self.options_menu.items[7].label = self._difficulty_option_label()
-        self.options_menu.items[8].label = "Gameplay Announcements"
-        self.options_menu.items[9].label = "Controls"
+        self.options_menu.items[8].label = self._main_menu_description_option_label()
+        self.options_menu.items[9].label = "Gameplay Announcements"
+        self.options_menu.items[10].label = "Controls"
+        self.options_menu.items[11].label = self._exit_confirmation_option_label()
 
     def _refresh_announcements_menu_labels(self) -> None:
         self.announcements_menu.items[0].label = self._meter_option_label()
@@ -1152,6 +1162,66 @@ class SubwayBlindGame:
 
     def _quest_changes_enabled(self) -> bool:
         return bool(self.settings.get("quest_changes_enabled", False))
+
+    def _main_menu_descriptions_enabled(self) -> bool:
+        return bool(self.settings.get("main_menu_descriptions_enabled", True))
+
+    def _exit_confirmation_enabled(self) -> bool:
+        return bool(self.settings.get("confirm_exit_enabled", True))
+
+    def _main_menu_items(self) -> list[MenuItem]:
+        return [
+            MenuItem(
+                "Start Game",
+                "start",
+                "Set your loadout, then launch a new run when you are ready to hit the tracks.",
+            ),
+            MenuItem(
+                "What's New",
+                "whats_new",
+                "Hear the latest update notes, balance changes, and new features in this build.",
+            ),
+            MenuItem(
+                "Shop",
+                "shop",
+                "Spend banked coins on hoverboards, upgrades, boosters, and character unlocks.",
+            ),
+            MenuItem(
+                "Achievements",
+                "achievements",
+                "Review unlocked milestones and check which long-term goals still need progress.",
+            ),
+            MenuItem(
+                "Options",
+                "options",
+                "Adjust audio, speech, controls, and accessibility settings before your next run.",
+            ),
+            MenuItem(
+                "How to Play",
+                "howto",
+                "Browse movement, hazard, reward, and progression guidance one topic at a time.",
+            ),
+            MenuItem(
+                "Learn Game Sounds",
+                "learn_sounds",
+                "Preview essential gameplay sounds so you can recognize danger, rewards, and powerups instantly.",
+            ),
+            MenuItem(
+                "Check for Updates",
+                "check_updates",
+                "Search for a newer release and install it when an update is available.",
+            ),
+            MenuItem(
+                "Exit",
+                "quit",
+                "Close the game and return to desktop.",
+            ),
+        ]
+
+    def _selected_main_menu_description(self) -> str:
+        if self.active_menu != self.main_menu or not self._main_menu_descriptions_enabled() or not self.main_menu.items:
+            return ""
+        return self.main_menu.items[self.main_menu.index].description.strip()
 
     def _refresh_update_menu(self, result: UpdateCheckResult) -> None:
         latest_version = result.latest_version or "Unknown"
@@ -2099,7 +2169,13 @@ class SubwayBlindGame:
             if self.active_menu == self.update_menu:
                 return False
             if self.active_menu == self.main_menu:
-                return False
+                if not self._exit_confirmation_enabled():
+                    return False
+                self._set_active_menu(
+                    self.exit_confirm_menu,
+                    start_index=self._menu_index_for_action(self.exit_confirm_menu, "cancel_exit"),
+                )
+                return True
             if self.active_menu == self.controls_menu:
                 self._refresh_options_menu_labels()
                 self._set_active_menu(self.options_menu, start_index=self._update_option_index("opt_controls"))
@@ -2127,6 +2203,9 @@ class SubwayBlindGame:
                 return True
             if self.active_menu == self.pause_confirm_menu:
                 self._set_active_menu(self.pause_menu, start_index=1)
+                return True
+            if self.active_menu == self.exit_confirm_menu:
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "quit"))
                 return True
             if self.active_menu == self.help_topic_menu:
                 self._set_active_menu(self.howto_menu)
@@ -2188,7 +2267,13 @@ class SubwayBlindGame:
                 self._check_for_updates(announce_result=True)
                 return True
             if action == "quit":
-                return False
+                if not self._exit_confirmation_enabled():
+                    return False
+                self._set_active_menu(
+                    self.exit_confirm_menu,
+                    start_index=self._menu_index_for_action(self.exit_confirm_menu, "cancel_exit"),
+                )
+                return True
 
         if self.active_menu == self.loadout_menu:
             if action == "back":
@@ -2543,6 +2628,13 @@ class SubwayBlindGame:
                 self._set_active_menu(self.pause_menu, start_index=1)
                 return True
 
+        if self.active_menu == self.exit_confirm_menu:
+            if action == "confirm_exit":
+                return False
+            if action == "cancel_exit":
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "quit"))
+                return True
+
         if self.active_menu == self.revive_menu:
             if action == "revive":
                 self._revive_run()
@@ -2721,6 +2813,24 @@ class SubwayBlindGame:
             self._refresh_options_menu_labels()
             self.speaker.speak(self.options_menu.items[self._update_option_index("opt_diff")].label, interrupt=True)
             return
+        if selected_action == "opt_main_menu_descriptions":
+            self.settings["main_menu_descriptions_enabled"] = direction > 0
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(
+                self.options_menu.items[self._update_option_index("opt_main_menu_descriptions")].label,
+                interrupt=True,
+            )
+            return
+        if selected_action == "opt_exit_confirmation":
+            self.settings["confirm_exit_enabled"] = direction > 0
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(
+                self.options_menu.items[self._update_option_index("opt_exit_confirmation")].label,
+                interrupt=True,
+            )
+            return
         if selected_action == "opt_meters":
             self.settings["meter_announcements_enabled"] = direction > 0
             self._play_menu_feedback("confirm")
@@ -2747,6 +2857,7 @@ class SubwayBlindGame:
                 self.announcements_menu.items[self._update_announcements_index("opt_quest_changes")].label,
                 interrupt=True,
             )
+            return
 
     def start_run(self) -> None:
         ensure_progression_state(self.settings)
@@ -3528,6 +3639,16 @@ class SubwayBlindGame:
             prompt_surface = self.font.render("Use Up and Down to read each help line. Escape returns to Help.", True, (205, 205, 205))
             self.screen.blit(prompt_surface, (40, max(height - 100, y_position + 18)))
             hint_text = self._menu_navigation_hint()
+        elif menu == self.main_menu:
+            selected_description = self._selected_main_menu_description()
+            if selected_description:
+                description_lines = textwrap.wrap(selected_description, width=62)[:3]
+                description_top = min(height - 132, y_position + 18)
+                prompt_surface = self.font.render("Selected item", True, (205, 205, 205))
+                self.screen.blit(prompt_surface, (40, description_top))
+                for line_index, line in enumerate(description_lines):
+                    line_surface = self.font.render(line, True, (180, 180, 180))
+                    self.screen.blit(line_surface, (40, description_top + 32 + (line_index * 26)))
         elif menu in {self.options_menu, self.sapi_menu, self.announcements_menu}:
             hint_text = f"{self._menu_navigation_hint()} {self._option_adjustment_hint()}"
         elif menu in {self.keyboard_bindings_menu, self.controller_bindings_menu} and self._binding_capture is not None:

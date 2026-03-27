@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 import pygame
 
@@ -10,14 +10,23 @@ import pygame
 class MenuItem:
     label: str
     action: str
+    description: str = ""
 
 
 class Menu:
-    def __init__(self, speaker, audio, title: str, items: list[MenuItem]):
+    def __init__(
+        self,
+        speaker,
+        audio,
+        title: str,
+        items: list[MenuItem],
+        description_enabled: Callable[[], bool] | None = None,
+    ):
         self.speaker = speaker
         self.audio = audio
         self.title = title
         self.items = items
+        self.description_enabled = description_enabled
         self.index = 0
         self.opened = False
 
@@ -50,12 +59,31 @@ class Menu:
     def _opening_announcement(self) -> str:
         if not self.items:
             return self.title
-        return f"{self.title}. {self.items[self.index].label}"
+        return f"{self.title}. {self._current_announcement_text()}"
+
+    def _descriptions_enabled(self) -> bool:
+        if self.description_enabled is None:
+            return False
+        try:
+            return bool(self.description_enabled())
+        except Exception:
+            return False
+
+    def _item_announcement_text(self, item: MenuItem) -> str:
+        description = item.description.strip()
+        if description and self._descriptions_enabled():
+            return f"{item.label}. {description}"
+        return item.label
+
+    def _current_announcement_text(self) -> str:
+        if not self.items:
+            return ""
+        return self._item_announcement_text(self.items[self.index])
 
     def _announce_current(self) -> None:
         if not self.items:
             return
-        self.speaker.speak(self.items[self.index].label, interrupt=True)
+        self.speaker.speak(self._current_announcement_text(), interrupt=True)
 
     def _move_to_index(self, target_index: int) -> None:
         if not self.items:

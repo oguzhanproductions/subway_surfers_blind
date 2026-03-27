@@ -6,6 +6,34 @@ Version: 1.1.3
 
 Update Summary
 - Updated the game version to 1.1.3.
+- Added an original-style Item Upgrades submenu inside the Shop for Coin Magnet, Jetpack, 2X Multiplier, and Super Sneakers.
+- Added persistent per-item upgrade levels with escalating coin costs and immediate in-menu feedback after each purchase.
+- Added a dedicated main-menu description system with English guidance for each main menu action.
+- Added a configurable desktop exit confirmation flow for the main menu Exit action and Escape shortcut.
+
+Gameplay Changes
+- Coin Magnet upgrades now extend magnet pickup duration through five persistent shop levels.
+- Jetpack upgrades now extend flight duration through five persistent shop levels.
+- 2X Multiplier upgrades now extend score multiplier pickup duration through five persistent shop levels.
+- Super Sneakers upgrades now extend jump-boost duration through five persistent shop levels.
+- Headstart, Score Booster, Hoverboard stock, Pogo Stick, Keys, and Mystery Boxes remain outside the item-upgrade ladder so the shop matches the intended original-style system more closely.
+
+Audio or UI Updates
+- Fixed collision audio so each obstacle type now triggers its intended hit sound instead of falling back to the same generic crash layer.
+- Fixed the mono audio routing bug so reward and interface sounds are no longer forced through the HRTF mono path while menu feedback cues stay mono.
+- Added an Item Upgrades shop submenu with list and detail screens, level readouts, duration readouts, max-level handling, and purchase announcements.
+- Added optional spoken and on-screen descriptions for main menu items, with a direct toggle in Options.
+- Added an Exit Confirmation option in Options so players can choose whether the game asks before returning to desktop.
+- Updated the in-game What's New and help copy to mention the new item upgrade system and the audio routing fix.
+
+------------------------------------------------------------
+
+Date: 2026-03-18
+
+Update Summary
+- Updated the game version to 1.1.2.
+- Added a persistent Achievements system with unlock tracking across runs.
+- Reworked How to Play and What's New into cleaner navigable dialog flows.
 - Added a persistent Character Upgrades section inside the Shop with unlock, active character selection, and per-character leveling.
 - Expanded the roster to the officially referenced classic crew: Jake, Tricky, Fresh, Yutani, Spike, Dino, and Boombot.
 - Moved SAPI controls into a dedicated submenu under Options and added direct SAPI volume control.
@@ -22,32 +50,6 @@ Gameplay Changes
 - Spike now adds a stronger coin banking bonus.
 - Dino now extends hoverboard protection even further.
 - Boombot now extends temporary power-up duration with a stronger late-game bonus.
-- Coin Magnet upgrades now extend magnet pickup duration through five persistent shop levels.
-- Jetpack upgrades now extend flight duration through five persistent shop levels.
-- 2X Multiplier upgrades now extend score multiplier pickup duration through five persistent shop levels.
-- Super Sneakers upgrades now extend jump-boost duration through five persistent shop levels.
-- Headstart, Score Booster, Hoverboard stock, Pogo Stick, Keys, and Mystery Boxes remain outside the item-upgrade ladder so the shop matches the intended original-style system more closely.
-
-Audio or UI Updates
-- Added accessible spoken feedback for character lock state, current level, perk summary, unlock purchases, selection changes, and max-level handling.
-- Added current active character status to the Shop and Character Upgrades menus.
-- Added a dedicated SAPI Settings submenu with On or Off, volume, voice, rate, and pitch controls.
-- Moved gameplay announcement toggles into a dedicated submenu under Options so runtime speech preferences stay grouped together.
-- Hardened settings persistence so item upgrade purchases now survive interrupted writes and recover cleanly from a corrupted primary save file.
-- Fixed the updater so packaged builds now apply extracted files into the game folder on restart and clean leftover update ZIP files.
-- Fixed collision audio so each obstacle type now triggers its intended hit sound instead of falling back to the same generic crash layer.
-- Fixed the mono audio routing bug so reward and interface sounds are no longer forced through the HRTF mono path while menu feedback cues stay mono.
-- Added an Item Upgrades shop submenu with list and detail screens, level readouts, duration readouts, max-level handling, and purchase announcements.
-- Updated the in-game What's New and help copy to mention the new item upgrade system and the audio routing fix.
-
-------------------------------------------------------------
-
-Date: 2026-03-18
-
-Update Summary
-- Updated the game version to 1.1.2.
-- Added a persistent Achievements system with unlock tracking across runs.
-- Reworked How to Play and What's New into cleaner navigable dialog flows.
 
 Gameplay Changes
 - Added badges for lifetime coins, jumps, rolls, dodges, mystery box opens, best run distance, Word Hunt streaks, and total Season Hunt tokens, with automatic progress updates during gameplay.
