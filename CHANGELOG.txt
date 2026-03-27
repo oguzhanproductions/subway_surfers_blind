@@ -10,6 +10,7 @@ Update Summary
 - Added persistent per-item upgrade levels with escalating coin costs and immediate in-menu feedback after each purchase.
 - Added a dedicated main-menu description system with English guidance for each main menu action.
 - Added a configurable desktop exit confirmation flow for the main menu Exit action and Escape shortcut.
+- Added an optional pause-on-focus-loss setting so active runs automatically pause when the game window loses focus.
 
 Gameplay Changes
 - Coin Magnet upgrades now extend magnet pickup duration through five persistent shop levels.
@@ -24,6 +25,7 @@ Audio or UI Updates
 - Added an Item Upgrades shop submenu with list and detail screens, level readouts, duration readouts, max-level handling, and purchase announcements.
 - Added optional spoken and on-screen descriptions for main menu items, with a direct toggle in Options.
 - Added an Exit Confirmation option in Options so players can choose whether the game asks before returning to desktop.
+- Added a Gameplay Announcements toggle that lets players enable or disable automatic pausing when the game window loses focus.
 - Updated the in-game What's New and help copy to mention the new item upgrade system and the audio routing fix.
 
 ------------------------------------------------------------

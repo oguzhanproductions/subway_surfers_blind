@@ -421,6 +421,10 @@ class ConfigTests(unittest.TestCase):
             config_module.DEFAULT_SETTINGS["main_menu_descriptions_enabled"],
         )
         self.assertEqual(
+            loaded["pause_on_focus_loss_enabled"],
+            config_module.DEFAULT_SETTINGS["pause_on_focus_loss_enabled"],
+        )
+        self.assertEqual(
             loaded["confirm_exit_enabled"],
             config_module.DEFAULT_SETTINGS["confirm_exit_enabled"],
         )
@@ -1506,7 +1510,10 @@ class GameTests(unittest.TestCase):
     def test_gameplay_announcements_menu_lists_runtime_announcement_toggles(self):
         game, _, _ = self.make_game()
         labels = [item.label for item in game.announcements_menu.items]
-        self.assertEqual(labels, ["Meters: Off", "Coin Counters: Off", "Quest Changes: Off", "Back"])
+        self.assertEqual(
+            labels,
+            ["Meters: Off", "Coin Counters: Off", "Quest Changes: Off", "Pause on Focus Loss: On", "Back"],
+        )
 
     def test_shop_menu_labels_include_coin_currency(self):
         game, _, _ = self.make_game()
@@ -2221,7 +2228,7 @@ class GameTests(unittest.TestCase):
     def test_gameplay_announcements_back_returns_to_options_entry(self):
         game, _, _ = self.make_game()
         game.active_menu = game.announcements_menu
-        game.announcements_menu.index = 3
+        game.announcements_menu.index = game._update_announcements_index("back")
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -3114,6 +3121,65 @@ class GameTests(unittest.TestCase):
         self.assertFalse(game.settings["meter_announcements_enabled"])
         self.assertFalse(game.settings["coin_counters_enabled"])
         self.assertFalse(game.settings["quest_changes_enabled"])
+        self.assertTrue(game.settings["pause_on_focus_loss_enabled"])
+
+    def test_focus_loss_pauses_running_game_when_enabled(self):
+        game, speaker, audio = self.make_game()
+        game.state.running = True
+        game.active_menu = None
+
+        game._handle_window_event(pygame.event.Event(pygame.WINDOWFOCUSLOST))
+
+        self.assertTrue(game.state.paused)
+        self.assertIs(game.active_menu, game.pause_menu)
+        self.assertIn(("menuclose", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1], ("Paused. Resume", True))
+
+    def test_focus_loss_does_not_pause_when_setting_disabled(self):
+        game, _, audio = self.make_game()
+        game.state.running = True
+        game.active_menu = None
+        game.settings["pause_on_focus_loss_enabled"] = False
+
+        game._handle_window_event(pygame.event.Event(pygame.WINDOWFOCUSLOST))
+
+        self.assertFalse(game.state.paused)
+        self.assertIsNone(game.active_menu)
+        self.assertNotIn(("menuclose", "ui", False), audio.played)
+
+    def test_focus_loss_toggle_updates_from_gameplay_announcements_menu(self):
+        game, speaker, _ = self.make_game()
+        game.active_menu = game.announcements_menu
+        game.announcements_menu.index = game._update_announcements_index("opt_pause_on_focus_loss")
+
+        game._adjust_selected_option(-1)
+
+        self.assertFalse(game.settings["pause_on_focus_loss_enabled"])
+        self.assertEqual(game.announcements_menu.items[3].label, "Pause on Focus Loss: Off")
+        self.assertEqual(speaker.messages[-1], ("Pause on Focus Loss: Off", True))
+
+    def test_run_loop_routes_focus_loss_events_to_pause_menu(self):
+        game, _, _ = self.make_game()
+        game.state.running = True
+        game.active_menu = None
+        focus_event_type = getattr(pygame, "WINDOWFOCUSLOST", pygame.ACTIVEEVENT)
+        if focus_event_type == pygame.ACTIVEEVENT:
+            focus_event = pygame.event.Event(
+                pygame.ACTIVEEVENT,
+                gain=0,
+                state=getattr(pygame, "APPINPUTFOCUS", 0) or getattr(pygame, "APPACTIVE", 0),
+            )
+        else:
+            focus_event = pygame.event.Event(focus_event_type)
+
+        with patch("subway_blind.game.config_module.save_settings"), patch(
+            "pygame.event.get",
+            side_effect=([focus_event, pygame.event.Event(pygame.QUIT)], []),
+        ):
+            game.run()
+
+        self.assertTrue(game.state.paused)
+        self.assertIs(game.active_menu, game.pause_menu)
 
     def test_coin_hotkey_is_silent_when_coin_counters_disabled(self):
         game, speaker, _ = self.make_game()

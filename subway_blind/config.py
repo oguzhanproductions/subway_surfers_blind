@@ -53,6 +53,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "meter_announcements_enabled": False,
     "coin_counters_enabled": False,
     "quest_changes_enabled": False,
+    "pause_on_focus_loss_enabled": True,
     "main_menu_descriptions_enabled": True,
     "confirm_exit_enabled": True,
     "bank_coins": 0,

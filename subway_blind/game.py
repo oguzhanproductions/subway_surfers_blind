@@ -490,6 +490,7 @@ class SubwayBlindGame:
                 MenuItem(self._meter_option_label(), "opt_meters"),
                 MenuItem(self._coin_counter_option_label(), "opt_coin_counters"),
                 MenuItem(self._quest_changes_option_label(), "opt_quest_changes"),
+                MenuItem(self._pause_on_focus_loss_option_label(), "opt_pause_on_focus_loss"),
                 MenuItem("Back", "back"),
             ],
         )
@@ -677,6 +678,9 @@ class SubwayBlindGame:
     def _quest_changes_option_label(self) -> str:
         return f"Quest Changes: {'On' if self._quest_changes_enabled() else 'Off'}"
 
+    def _pause_on_focus_loss_option_label(self) -> str:
+        return f"Pause on Focus Loss: {'On' if self._pause_on_focus_loss_enabled() else 'Off'}"
+
     def _main_menu_description_option_label(self) -> str:
         return f"Main Menu Descriptions: {'On' if self._main_menu_descriptions_enabled() else 'Off'}"
 
@@ -833,6 +837,7 @@ class SubwayBlindGame:
         self.announcements_menu.items[0].label = self._meter_option_label()
         self.announcements_menu.items[1].label = self._coin_counter_option_label()
         self.announcements_menu.items[2].label = self._quest_changes_option_label()
+        self.announcements_menu.items[3].label = self._pause_on_focus_loss_option_label()
 
     def _refresh_sapi_menu_labels(self) -> None:
         self.sapi_menu.items[0].label = self._sapi_speech_option_label()
@@ -1162,6 +1167,9 @@ class SubwayBlindGame:
 
     def _quest_changes_enabled(self) -> bool:
         return bool(self.settings.get("quest_changes_enabled", False))
+
+    def _pause_on_focus_loss_enabled(self) -> bool:
+        return bool(self.settings.get("pause_on_focus_loss_enabled", True))
 
     def _main_menu_descriptions_enabled(self) -> bool:
         return bool(self.settings.get("main_menu_descriptions_enabled", True))
@@ -2005,6 +2013,40 @@ class SubwayBlindGame:
             surface = pygame.display.get_surface()
             if surface is not None:
                 self.screen = surface
+            return
+        if self._is_window_focus_loss_event(event):
+            self._pause_gameplay_for_focus_loss()
+
+    def _is_window_focus_loss_event(self, event: pygame.event.Event) -> bool:
+        focus_lost_event = getattr(pygame, "WINDOWFOCUSLOST", None)
+        minimized_event = getattr(pygame, "WINDOWMINIMIZED", None)
+        if focus_lost_event is not None and event.type == focus_lost_event:
+            return True
+        if minimized_event is not None and event.type == minimized_event:
+            return True
+        if event.type != pygame.ACTIVEEVENT:
+            return False
+        gain = int(getattr(event, "gain", 1))
+        state = int(getattr(event, "state", 0))
+        focus_mask = (
+            int(getattr(pygame, "APPINPUTFOCUS", 0))
+            | int(getattr(pygame, "APPMOUSEFOCUS", 0))
+            | int(getattr(pygame, "APPACTIVE", 0))
+        )
+        return gain == 0 and bool(state & focus_mask)
+
+    def _pause_active_run(self) -> bool:
+        if not self.state.running or self.state.paused or self.active_menu is not None:
+            return False
+        self.state.paused = True
+        self._set_active_menu(self.pause_menu)
+        self.audio.play("menuclose", channel="ui")
+        return True
+
+    def _pause_gameplay_for_focus_loss(self) -> None:
+        if not self._pause_on_focus_loss_enabled():
+            return
+        self._pause_active_run()
 
     def _handle_controller_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.CONTROLLERDEVICEADDED:
@@ -2057,7 +2099,13 @@ class SubwayBlindGame:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self._request_exit()
-                elif event.type in (pygame.VIDEORESIZE, pygame.WINDOWSIZECHANGED):
+                elif event.type in (
+                    pygame.VIDEORESIZE,
+                    pygame.WINDOWSIZECHANGED,
+                    getattr(pygame, "WINDOWFOCUSLOST", -1),
+                    getattr(pygame, "WINDOWMINIMIZED", -1),
+                    pygame.ACTIVEEVENT,
+                ):
                     self._handle_window_event(event)
                 elif event.type in (pygame.KEYDOWN, pygame.KEYUP):
                     self._handle_keyboard_event(event)
@@ -2858,6 +2906,15 @@ class SubwayBlindGame:
                 interrupt=True,
             )
             return
+        if selected_action == "opt_pause_on_focus_loss":
+            self.settings["pause_on_focus_loss_enabled"] = direction > 0
+            self._play_menu_feedback("confirm")
+            self._refresh_announcements_menu_labels()
+            self.speaker.speak(
+                self.announcements_menu.items[self._update_announcements_index("opt_pause_on_focus_loss")].label,
+                interrupt=True,
+            )
+            return
 
     def start_run(self) -> None:
         ensure_progression_state(self.settings)
@@ -2930,9 +2987,7 @@ class SubwayBlindGame:
 
     def _handle_game_key(self, key: int) -> None:
         if key == pygame.K_ESCAPE:
-            self.state.paused = True
-            self._set_active_menu(self.pause_menu)
-            self.audio.play("menuclose", channel="ui")
+            self._pause_active_run()
             return
         if key == pygame.K_r:
             if self._coin_counters_enabled():
