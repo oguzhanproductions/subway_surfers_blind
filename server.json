@@ -1,0 +1,9 @@
+{
+  "host": "127.0.0.1",
+  "port": 27888,
+  "server_public_key": "",
+  "server_public_key_path": "server/runtime/server_public_key.b64",
+  "connect_timeout_ms": 1800,
+  "request_timeout_ms": 4000,
+  "page_size": 100
+}

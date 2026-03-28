@@ -2,6 +2,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 import copy
 import io
@@ -38,6 +39,7 @@ from subway_blind.game import (
     HEADSTART_SHAKE_CHANNEL,
     HEADSTART_SPRAY_CHANNEL,
     HOW_TO_TOPICS,
+    LEADERBOARD_CACHE_TTL_SECONDS,
     LEARN_SOUND_LOOP_PREVIEW_DURATION,
     LEARN_SOUND_PREVIEW_CHANNEL,
     MENU_REPEAT_INITIAL_DELAY,
@@ -451,6 +453,20 @@ class ConfigTests(unittest.TestCase):
                 "sneakers": 0,
             },
         )
+
+    def test_settings_round_trip_preserves_leaderboard_session_token(self):
+        original_base_dir = config_module.BASE_DIR
+        with tempfile.TemporaryDirectory() as temp_directory:
+            config_module.BASE_DIR = Path(temp_directory)
+            settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
+            settings["leaderboard_username"] = "runner01"
+            settings["leaderboard_session_token"] = "session-token-123"
+            config_module.save_settings(settings)
+            loaded = config_module.load_settings()
+        config_module.BASE_DIR = original_base_dir
+
+        self.assertEqual(loaded["leaderboard_username"], "runner01")
+        self.assertEqual(loaded["leaderboard_session_token"], "session-token-123")
 
     def test_item_upgrade_state_normalizes_invalid_values(self):
         settings = {"item_upgrades": {"magnet": "2", "jetpack": "bad", "mult2x": -9, "sneakers": 999}}
@@ -1407,7 +1423,18 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.main_menu.title, f"Main Menu   Version: {APP_VERSION}")
         self.assertEqual(
             [item.label for item in game.main_menu.items],
-            ["Start Game", "What's New", "Shop", "Achievements", "Options", "How to Play", "Learn Game Sounds", "Check for Updates", "Exit"],
+            [
+                "Start Game",
+                "What's New",
+                "Shop",
+                "Achievements",
+                "Leaderboard",
+                "Options",
+                "How to Play",
+                "Learn Game Sounds",
+                "Check for Updates",
+                "Exit",
+            ],
         )
 
     def test_main_menu_open_announces_item_description_when_enabled(self):
@@ -1419,6 +1446,133 @@ class GameTests(unittest.TestCase):
             speaker.messages[-1][0],
             f"Main Menu   Version: {APP_VERSION}. Start Game. Set your loadout, then launch a new run when you are ready to hit the tracks.",
         )
+
+    def test_leaderboard_requires_login_before_opening(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.main_menu
+
+        result = game._handle_menu_action("leaderboard")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertIn(("menuedge", "ui", False), audio.played)
+        self.assertEqual(
+            speaker.messages[-1][0],
+            "Sign in from Options, Set User Name, before opening the leaderboard.",
+        )
+
+    def test_game_over_opens_publish_prompt_for_authenticated_player(self):
+        game, speaker, _ = self.make_game()
+        game.leaderboard_client.auth_token = "token"
+        game.leaderboard_client.principal_username = "runner01"
+        game.state.score = 120
+        game.state.coins = 8
+
+        game._open_game_over_dialog("Hit train")
+
+        self.assertIs(game.active_menu, game.publish_confirm_menu)
+        self.assertEqual(speaker.messages[-1], ("Game Over.", True))
+
+    def test_publish_prompt_delayed_announcement_includes_title(self):
+        game, speaker, _ = self.make_game()
+        game.leaderboard_client.auth_token = "token"
+        game.leaderboard_client.principal_username = "runner01"
+        game.state.score = 120
+        game.state.coins = 8
+
+        game._open_game_over_dialog("Hit train")
+        game._update_pending_menu_announcement(0.5)
+
+        self.assertEqual(speaker.messages[-1], ("Publish to Leaderboard?. Yes", True))
+
+    def test_options_menu_shows_logout_when_leaderboard_session_exists(self):
+        game, _, _ = self.make_game()
+        game.leaderboard_client.auth_token = "token"
+        game.leaderboard_client.principal_username = "runner01"
+
+        game._refresh_options_menu_labels()
+
+        labels = [item.label for item in game.options_menu.items]
+        self.assertIn("Set User Name", labels[9])
+        self.assertIn("Log Out", labels[10])
+        self.assertEqual(game.options_menu.items[10].action, "opt_leaderboard_logout")
+
+    def test_confirming_leaderboard_logout_clears_local_session(self):
+        game, speaker, audio = self.make_game()
+        game.leaderboard_client.auth_token = "token"
+        game.leaderboard_client.principal_username = "runner01"
+        game._leaderboard_username = "runner01"
+        game._refresh_options_menu_labels()
+        game.active_menu = game.options_menu
+        game.options_menu.index = game._update_option_index("opt_leaderboard_logout")
+
+        result = game._handle_menu_action("opt_leaderboard_logout")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.leaderboard_logout_confirm_menu)
+        self.assertEqual(game.leaderboard_logout_confirm_menu.index, 1)
+
+        def fake_logout():
+            game.leaderboard_client.auth_token = ""
+            game.leaderboard_client.principal_username = ""
+
+        with patch.object(game.leaderboard_client, "logout", side_effect=fake_logout):
+            result = game._handle_menu_action("confirm_leaderboard_logout")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.options_menu)
+        self.assertFalse(game.leaderboard_client.auth_token)
+        self.assertEqual(game.settings["leaderboard_session_token"], "")
+        self.assertEqual(game.settings["leaderboard_username"], "")
+        self.assertEqual(game.options_menu.items[game._update_option_index("opt_leaderboard_account")].label, "Set User Name")
+        self.assertEqual(speaker.messages[-1][0], "Leaderboard account signed out.")
+        self.assertIn(("confirm", "ui", False), audio.played)
+
+    def test_leaderboard_cached_results_open_immediately(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.main_menu
+        game.leaderboard_client.auth_token = "token"
+        game._leaderboard_entries = [
+            {
+                "rank": 1,
+                "username": "runner01",
+                "score": 900,
+                "coins": 12,
+                "play_time_seconds": 85,
+            }
+        ]
+        game._leaderboard_total_players = 1
+        game._leaderboard_cache_loaded_at = time.monotonic()
+
+        with patch.object(game, "_start_leaderboard_operation", return_value=True) as start_operation:
+            game._open_leaderboard()
+
+        self.assertIs(game.active_menu, game.leaderboard_menu)
+        start_operation.assert_not_called()
+
+    def test_leaderboard_uses_stale_cache_while_refreshing_in_background(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.main_menu
+        game.leaderboard_client.auth_token = "token"
+        game._leaderboard_entries = [
+            {
+                "rank": 1,
+                "username": "runner01",
+                "score": 900,
+                "coins": 12,
+                "play_time_seconds": 85,
+            }
+        ]
+        game._leaderboard_total_players = 1
+        game._leaderboard_cache_loaded_at = time.monotonic() - (LEADERBOARD_CACHE_TTL_SECONDS + 1.0)
+
+        with patch.object(game, "_start_leaderboard_operation", return_value=True) as start_operation:
+            game._open_leaderboard()
+
+        self.assertIs(game.active_menu, game.leaderboard_menu)
+        start_operation.assert_called_once()
+        self.assertEqual(start_operation.call_args.args[0], "leaderboard_refresh")
+        self.assertFalse(start_operation.call_args.kwargs["show_status"])
 
     def test_main_menu_navigation_omits_item_description_when_disabled(self):
         game, speaker, _ = self.make_game()
@@ -1459,7 +1613,7 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.main_menu)
-        self.assertEqual(game.main_menu.index, 8)
+        self.assertEqual(game.main_menu.index, 9)
 
     def test_exit_confirmation_yes_closes_game(self):
         game, _, _ = self.make_game()
@@ -1500,6 +1654,7 @@ class GameTests(unittest.TestCase):
             "SAPI Settings",
             "Difficulty: Normal",
             "Main Menu Descriptions: On",
+            "Set User Name",
             "Gameplay Announcements",
             "Controls",
             "Exit Confirmation: On",
@@ -2179,7 +2334,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_on_back_only_plays_edge_feedback(self):
         game, _, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 12
+        game.options_menu.index = 13
 
         game._adjust_selected_option(1)
 
@@ -2189,7 +2344,7 @@ class GameTests(unittest.TestCase):
     def test_enter_on_back_returns_to_main_menu_from_options(self):
         game, _, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 12
+        game.options_menu.index = 13
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -2235,7 +2390,7 @@ class GameTests(unittest.TestCase):
     def test_options_controls_entry_opens_controls_menu(self):
         game, _, _ = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 10
+        game.options_menu.index = 11
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -2247,7 +2402,7 @@ class GameTests(unittest.TestCase):
         game, _, _ = self.make_game()
         self.attach_controller(game, family=PLAYSTATION_FAMILY, name="Wireless Controller")
         game.active_menu = game.options_menu
-        game.options_menu.index = 10
+        game.options_menu.index = 11
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -2258,13 +2413,28 @@ class GameTests(unittest.TestCase):
     def test_options_gameplay_announcements_entry_opens_submenu(self):
         game, _, _ = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 9
+        game.options_menu.index = 10
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.announcements_menu)
         self.assertEqual(game.announcements_menu.items[0].label, "Meters: Off")
+
+    def test_options_logout_entry_opens_confirmation_on_enter(self):
+        game, _, _ = self.make_game()
+        game.leaderboard_client.auth_token = "token"
+        game.leaderboard_client.principal_username = "runner01"
+        game._leaderboard_username = "runner01"
+        game._refresh_options_menu_labels()
+        game.active_menu = game.options_menu
+        game.options_menu.index = game._update_option_index("opt_leaderboard_logout")
+
+        result = game._handle_active_menu_key(pygame.K_RETURN)
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.leaderboard_logout_confirm_menu)
+        self.assertEqual(game.leaderboard_logout_confirm_menu.index, 1)
 
     def test_gameplay_announcements_back_returns_to_options_entry(self):
         game, _, _ = self.make_game()
@@ -2275,7 +2445,7 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.options_menu)
-        self.assertEqual(game.options_menu.index, 9)
+        self.assertEqual(game.options_menu.index, 10)
 
     def test_controls_menu_can_switch_binding_profile_like_options(self):
         game, speaker, _ = self.make_game()
@@ -2432,7 +2602,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_toggles_exit_confirmation_from_options(self):
         game, speaker, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 11
+        game.options_menu.index = 12
 
         game._adjust_selected_option(-1)
 
@@ -2659,6 +2829,51 @@ class GameTests(unittest.TestCase):
         self.assertIs(game.active_menu, game.main_menu)
         self.assertEqual(audio.music_started_tracks[-1], "menu")
 
+    def test_pause_confirmation_yes_opens_publish_prompt_when_run_has_progress(self):
+        game, speaker, _ = self.make_game()
+        game.leaderboard_client.auth_token = "token"
+        game.leaderboard_client.principal_username = "runner01"
+        game.state.running = True
+        game.state.paused = True
+        game.state.score = 120
+        game.state.coins = 8
+        game.state.time = 42
+        game.active_menu = game.pause_confirm_menu
+
+        game._handle_menu_action("confirm_to_main")
+        game._update_pending_menu_announcement(0.5)
+
+        self.assertIs(game.active_menu, game.publish_confirm_menu)
+        self.assertEqual(game._game_over_summary["score"], 120)
+        self.assertEqual(game._game_over_summary["coins"], 8)
+        self.assertEqual(speaker.messages[-1], ("Publish to Leaderboard?. Yes", True))
+
+    def test_publish_prompt_no_from_pause_return_goes_to_main_menu(self):
+        game, _, _ = self.make_game()
+        game._publish_confirm_return_menu = game.main_menu
+        game._publish_confirm_return_index = 0
+        game.active_menu = game.publish_confirm_menu
+
+        game._handle_menu_action("publish_confirm_no")
+
+        self.assertIs(game.active_menu, game.main_menu)
+
+    def test_publish_success_after_pause_return_goes_to_main_menu(self):
+        game, _, _ = self.make_game()
+        game._publish_confirm_return_menu = game.main_menu
+        game._publish_confirm_return_index = 0
+
+        game._handle_leaderboard_success(
+            "leaderboard_publish",
+            {
+                "just_connected": False,
+                "username": "runner01",
+                "high_score": False,
+            },
+        )
+
+        self.assertIs(game.active_menu, game.main_menu)
+
     def test_shop_purchase_spends_bank_coins_and_grants_hoverboard(self):
         game, speaker, _ = self.make_game()
         game.settings["bank_coins"] = SHOP_PRICES["hoverboard"]
@@ -2754,6 +2969,20 @@ class GameTests(unittest.TestCase):
 
         self.assertEqual(loaded["bank_coins"], 0)
         self.assertEqual(loaded["item_upgrades"]["magnet"], 1)
+
+    def test_persist_settings_writes_leaderboard_identity_without_recursion(self):
+        game, _, _ = self.make_game()
+        game._persist_settings = SubwayBlindGame._persist_settings.__get__(game, SubwayBlindGame)
+        game.leaderboard_client.principal_username = "runner01"
+        game.leaderboard_client.auth_token = "session-token-123"
+
+        with patch("subway_blind.game.config_module.save_settings") as save_settings_mock:
+            game._persist_settings()
+
+        save_settings_mock.assert_called_once()
+        saved_settings = save_settings_mock.call_args.args[0]
+        self.assertEqual(saved_settings["leaderboard_username"], "runner01")
+        self.assertEqual(saved_settings["leaderboard_session_token"], "session-token-123")
 
     def test_item_upgrade_max_level_blocks_purchase(self):
         game, speaker, _ = self.make_game()
@@ -2929,7 +3158,14 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.settings["bank_coins"], 8)
         self.assertEqual(
             [item.label for item in game.game_over_menu.items],
-            ["Score: 120", "Coins: 8", "Death reason: Hit train", "Run again", "Main menu"],
+            [
+                "Score: 120",
+                "Coins: 8",
+                "Play Time: 00:00",
+                "Death reason: Hit train",
+                "Run again",
+                "Main menu",
+            ],
         )
         self.assertIn(("Run over. Score 120. Hit train.", True), speaker.messages)
         self.assertEqual(game.game_over_menu.index, 0)
@@ -2957,7 +3193,7 @@ class GameTests(unittest.TestCase):
         game._on_hit("bush")
 
         self.assertIs(game.active_menu, game.game_over_menu)
-        self.assertEqual(game.game_over_menu.items[2].label, "Death reason: Hit bush")
+        self.assertEqual(game.game_over_menu.items[3].label, "Death reason: Hit bush")
 
     def test_revive_consumes_key_and_restores_run(self):
         game, _, _ = self.make_game()
@@ -3324,7 +3560,7 @@ class GameTests(unittest.TestCase):
         game, _, audio = self.make_game()
         game.state.score = 80
         game.state.coins = 6
-        game._game_over_summary = {"score": 80, "coins": 6, "death_reason": "Hit train"}
+        game._game_over_summary = {"score": 80, "coins": 6, "play_time_seconds": 42, "death_reason": "Hit train"}
         game._refresh_game_over_menu()
         game.active_menu = game.game_over_menu
 
@@ -3336,7 +3572,7 @@ class GameTests(unittest.TestCase):
 
     def test_game_over_menu_main_menu_returns_to_main_menu(self):
         game, _, _ = self.make_game()
-        game._game_over_summary = {"score": 80, "coins": 6, "death_reason": "Hit train"}
+        game._game_over_summary = {"score": 80, "coins": 6, "play_time_seconds": 42, "death_reason": "Hit train"}
         game._refresh_game_over_menu()
         game.active_menu = game.game_over_menu
 
@@ -3346,7 +3582,7 @@ class GameTests(unittest.TestCase):
 
     def test_game_over_detail_rows_are_read_only(self):
         game, speaker, _ = self.make_game()
-        game._game_over_summary = {"score": 80, "coins": 6, "death_reason": "Hit train"}
+        game._game_over_summary = {"score": 80, "coins": 6, "play_time_seconds": 42, "death_reason": "Hit train"}
         game._refresh_game_over_menu()
         game.active_menu = game.game_over_menu
         game.game_over_menu.index = 0
@@ -3366,7 +3602,7 @@ class GameTests(unittest.TestCase):
         game._handle_menu_action("end_run")
 
         self.assertIs(game.active_menu, game.game_over_menu)
-        self.assertEqual(game.game_over_menu.items[2].label, "Death reason: Run ended after crash")
+        self.assertEqual(game.game_over_menu.items[3].label, "Death reason: Run ended after crash")
         self.assertIn(("Run over. Score 55. Run ended after crash.", True), speaker.messages)
 
     def test_draw_menu_keeps_hint_on_small_screens(self):

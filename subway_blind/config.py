@@ -56,6 +56,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "pause_on_focus_loss_enabled": True,
     "main_menu_descriptions_enabled": True,
     "confirm_exit_enabled": True,
+    "leaderboard_username": "",
+    "leaderboard_session_token": "",
     "bank_coins": 0,
     "keys": 3,
     "hoverboards": 3,

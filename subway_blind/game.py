@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import queue
 import sys
 import textwrap
 from dataclasses import dataclass
@@ -51,6 +52,7 @@ from subway_blind.controls import (
     family_label,
     keyboard_key_label,
 )
+from subway_blind.leaderboard_client import LeaderboardClient, LeaderboardClientError
 from subway_blind.item_upgrades import (
     DEFAULT_ITEM_UPGRADE_KEY,
     ensure_item_upgrade_state,
@@ -75,6 +77,11 @@ from subway_blind.features import (
 )
 from subway_blind.menu import Menu, MenuItem
 from subway_blind.models import LANES, Obstacle, Player, RunState, lane_name, lane_to_pan, normalize_lane
+from subway_blind.native_windows_credentials import (
+    CredentialPromptCancelled,
+    NativeCredentialPromptError,
+    prompt_for_credentials,
+)
 from subway_blind.progression import (
     achievement_definitions,
     achievement_progress,
@@ -150,6 +157,17 @@ class HelpTopic:
 class InfoDialogContent:
     title: str
     lines: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class LeaderboardOperationResult:
+    token: int
+    operation: str
+    success: bool
+    payload: object
+
+
+LEADERBOARD_CACHE_TTL_SECONDS = 45.0
 
 
 LEARN_SOUND_DETAILS: dict[str, LearnSoundEntry] = {
@@ -276,6 +294,15 @@ def step_int(value: int, direction: int, minimum: int, maximum: int) -> int:
 def format_duration_seconds(duration: float) -> str:
     formatted = f"{float(duration):.1f}".rstrip("0").rstrip(".")
     return f"{formatted}s"
+
+
+def format_play_time(total_seconds: float) -> str:
+    total = max(0, int(round(float(total_seconds))))
+    hours, remainder = divmod(total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
 
 
 def help_topic_segments(topic: HelpTopic, controls_summary: str) -> tuple[str, ...]:
@@ -445,9 +472,25 @@ class SubwayBlindGame:
         self.controls = ControllerSupport(settings)
         self._binding_capture: BindingCaptureRequest | None = None
         self._selected_binding_device = "controller" if self.controls.active_controller() is not None else "keyboard"
-        self._game_over_summary = {"score": 0, "coins": 0, "death_reason": "Run ended."}
+        self.leaderboard_client = LeaderboardClient()
+        self._leaderboard_username = str(self.settings.get("leaderboard_username", "") or "").strip()
+        self._restore_persisted_leaderboard_session()
+        self._leaderboard_entries: list[dict[str, object]] = []
+        self._leaderboard_total_players = 0
+        self._leaderboard_profile: dict[str, object] | None = None
+        self._leaderboard_selected_run: dict[str, object] | None = None
+        self._leaderboard_profile_history_count = 0
+        self._leaderboard_cache_loaded_at = 0.0
+        self._leaderboard_operation_queue: queue.Queue[LeaderboardOperationResult] = queue.Queue()
+        self._leaderboard_operation_token = 0
+        self._leaderboard_active_operation: str | None = None
+        self._leaderboard_return_menu: Menu | None = None
+        self._publish_confirm_return_menu: Menu | None = None
+        self._publish_confirm_return_index = 0
+        self._game_over_publish_state = "idle"
+        self._game_over_summary = {"score": 0, "coins": 0, "play_time_seconds": 0, "death_reason": "Run ended."}
         self._last_death_reason = "Run ended."
-        self._pending_menu_announcement: Optional[tuple[Menu, float]] = None
+        self._pending_menu_announcement: Optional[tuple[Menu, float, bool]] = None
         self._magnet_loop_active = False
         self._jetpack_loop_active = False
 
@@ -469,6 +512,15 @@ class SubwayBlindGame:
                 MenuItem("No", "cancel_to_main"),
             ],
         )
+        self.leaderboard_logout_confirm_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Log Out of Leaderboard?",
+            [
+                MenuItem("Yes", "confirm_leaderboard_logout"),
+                MenuItem("No", "cancel_leaderboard_logout"),
+            ],
+        )
         self.exit_confirm_menu = Menu(
             self.speaker,
             self.audio,
@@ -487,6 +539,15 @@ class SubwayBlindGame:
                 MenuItem("End Run", "end_run"),
             ],
         )
+        self.publish_confirm_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Publish to Leaderboard?",
+            [
+                MenuItem("Yes", "publish_confirm_yes"),
+                MenuItem("No", "publish_confirm_no"),
+            ],
+        )
         self.game_over_menu = Menu(
             self.speaker,
             self.audio,
@@ -494,6 +555,7 @@ class SubwayBlindGame:
             [
                 MenuItem("Score: 0", "game_over_info_score"),
                 MenuItem("Coins: 0", "game_over_info_coins"),
+                MenuItem("Play Time: 00:00", "game_over_info_time"),
                 MenuItem("Death reason: Run ended.", "game_over_info_reason"),
                 MenuItem("Run again", "game_over_retry"),
                 MenuItem("Main menu", "game_over_main_menu"),
@@ -521,21 +583,7 @@ class SubwayBlindGame:
             self.speaker,
             self.audio,
             "Options",
-            [
-                MenuItem(self._sfx_option_label(), "opt_sfx"),
-                MenuItem(self._music_option_label(), "opt_music"),
-                MenuItem(self._updates_option_label(), "opt_updates"),
-                MenuItem(self._audio_output_option_label(), "opt_output"),
-                MenuItem(self._menu_sound_hrtf_option_label(), "opt_menu_hrtf"),
-                MenuItem(self._speech_option_label(), "opt_speech"),
-                MenuItem(self._sapi_menu_entry_label(), "opt_sapi_menu"),
-                MenuItem(self._difficulty_option_label(), "opt_diff"),
-                MenuItem(self._main_menu_description_option_label(), "opt_main_menu_descriptions"),
-                MenuItem("Gameplay Announcements", "opt_gameplay_announcements"),
-                MenuItem("Controls", "opt_controls"),
-                MenuItem(self._exit_confirmation_option_label(), "opt_exit_confirmation"),
-                MenuItem("Back", "back"),
-            ],
+            self._build_options_menu_items(),
         )
         self.sapi_menu = Menu(
             self.speaker,
@@ -567,6 +615,37 @@ class SubwayBlindGame:
             self.audio,
             "Controls",
             [],
+        )
+        self.server_status_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Server",
+            [
+                MenuItem("Connecting to server...", "server_status_info"),
+                MenuItem("Back", "back"),
+            ],
+        )
+        self.leaderboard_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Leaderboard",
+            [
+                MenuItem("Connect to the server to load leaderboard entries.", "leaderboard_info"),
+                MenuItem("Refresh", "leaderboard_refresh"),
+                MenuItem("Back", "back"),
+            ],
+        )
+        self.leaderboard_profile_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Player",
+            [MenuItem("Back", "back")],
+        )
+        self.leaderboard_run_detail_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Published Run",
+            [MenuItem("Back", "back")],
         )
         self.keyboard_bindings_menu = Menu(
             self.speaker,
@@ -752,6 +831,19 @@ class SubwayBlindGame:
     def _main_menu_description_option_label(self) -> str:
         return f"Main Menu Descriptions: {'On' if self._main_menu_descriptions_enabled() else 'Off'}"
 
+    def _leaderboard_account_option_label(self) -> str:
+        if self._leaderboard_username:
+            return f"Set User Name: {self._leaderboard_username}"
+        return "Set User Name"
+
+    def _leaderboard_logout_option_label(self) -> str:
+        if self._leaderboard_username:
+            return f"Log Out: {self._leaderboard_username}"
+        return "Log Out"
+
+    def _leaderboard_is_authenticated(self) -> bool:
+        return self.leaderboard_client.is_authenticated()
+
     def _exit_confirmation_option_label(self) -> str:
         return f"Exit Confirmation: {'On' if self._exit_confirmation_enabled() else 'Off'}"
 
@@ -888,18 +980,37 @@ class SubwayBlindGame:
         return f"Upgrade to Level {next_level}   Cost: {next_cost} Coins"
 
     def _refresh_options_menu_labels(self) -> None:
-        self.options_menu.items[0].label = self._sfx_option_label()
-        self.options_menu.items[1].label = self._music_option_label()
-        self.options_menu.items[2].label = self._updates_option_label()
-        self.options_menu.items[3].label = self._audio_output_option_label()
-        self.options_menu.items[4].label = self._menu_sound_hrtf_option_label()
-        self.options_menu.items[5].label = self._speech_option_label()
-        self.options_menu.items[6].label = self._sapi_menu_entry_label()
-        self.options_menu.items[7].label = self._difficulty_option_label()
-        self.options_menu.items[8].label = self._main_menu_description_option_label()
-        self.options_menu.items[9].label = "Gameplay Announcements"
-        self.options_menu.items[10].label = "Controls"
-        self.options_menu.items[11].label = self._exit_confirmation_option_label()
+        selected_action = ""
+        if self.options_menu.items:
+            selected_action = self.options_menu.items[min(self.options_menu.index, len(self.options_menu.items) - 1)].action
+        self.options_menu.items = self._build_options_menu_items()
+        if selected_action:
+            self.options_menu.index = self._update_option_index(selected_action)
+
+    def _build_options_menu_items(self) -> list[MenuItem]:
+        items = [
+            MenuItem(self._sfx_option_label(), "opt_sfx"),
+            MenuItem(self._music_option_label(), "opt_music"),
+            MenuItem(self._updates_option_label(), "opt_updates"),
+            MenuItem(self._audio_output_option_label(), "opt_output"),
+            MenuItem(self._menu_sound_hrtf_option_label(), "opt_menu_hrtf"),
+            MenuItem(self._speech_option_label(), "opt_speech"),
+            MenuItem(self._sapi_menu_entry_label(), "opt_sapi_menu"),
+            MenuItem(self._difficulty_option_label(), "opt_diff"),
+            MenuItem(self._main_menu_description_option_label(), "opt_main_menu_descriptions"),
+            MenuItem(self._leaderboard_account_option_label(), "opt_leaderboard_account"),
+        ]
+        if self._leaderboard_is_authenticated():
+            items.append(MenuItem(self._leaderboard_logout_option_label(), "opt_leaderboard_logout"))
+        items.extend(
+            [
+                MenuItem("Gameplay Announcements", "opt_gameplay_announcements"),
+                MenuItem("Controls", "opt_controls"),
+                MenuItem(self._exit_confirmation_option_label(), "opt_exit_confirmation"),
+                MenuItem("Back", "back"),
+            ]
+        )
+        return items
 
     def _refresh_announcements_menu_labels(self) -> None:
         self.announcements_menu.items[0].label = self._meter_option_label()
@@ -925,9 +1036,10 @@ class SubwayBlindGame:
         summary = self._game_over_summary
         self.game_over_menu.items[0].label = f"Score: {int(summary['score'])}"
         self.game_over_menu.items[1].label = f"Coins: {int(summary['coins'])}"
-        self.game_over_menu.items[2].label = f"Death reason: {summary['death_reason']}"
-        self.game_over_menu.items[3].label = "Run again"
-        self.game_over_menu.items[4].label = "Main menu"
+        self.game_over_menu.items[2].label = f"Play Time: {format_play_time(summary['play_time_seconds'])}"
+        self.game_over_menu.items[3].label = f"Death reason: {summary['death_reason']}"
+        self.game_over_menu.items[4].label = "Run again"
+        self.game_over_menu.items[5].label = "Main menu"
 
     def _refresh_shop_menu_labels(self) -> None:
         self.shop_menu.title = self._shop_title()
@@ -1298,6 +1410,11 @@ class SubwayBlindGame:
                 "Review unlocked milestones and check which long-term goals still need progress.",
             ),
             MenuItem(
+                "Leaderboard",
+                "leaderboard",
+                "Connect to the online leaderboard, browse top players, and inspect published run history.",
+            ),
+            MenuItem(
                 "Options",
                 "options",
                 "Adjust audio, speech, controls, and accessibility settings before your next run.",
@@ -1544,6 +1661,8 @@ class SubwayBlindGame:
         if self._exit_requested:
             return
         self._exit_requested = True
+        self._persist_settings()
+        self.leaderboard_client.close()
         self.audio.music_stop()
 
     @staticmethod
@@ -1557,18 +1676,40 @@ class SubwayBlindGame:
 
     def _open_game_over_dialog(self, death_reason: Optional[str] = None) -> None:
         summary_reason = death_reason or self._last_death_reason or "Run ended after crash"
+        self._game_over_publish_state = "idle"
+        self._update_game_over_summary(summary_reason)
+        self._refresh_game_over_menu()
+        if self._leaderboard_is_authenticated():
+            self._open_publish_confirmation(return_menu=self.game_over_menu, start_index=0)
+        else:
+            self.active_menu = self.game_over_menu
+            self.game_over_menu.opened = True
+            self.game_over_menu.index = 0
+            self._pending_menu_announcement = (self.game_over_menu, 0.45, False)
+        self._sync_music_context()
+        self.speaker.speak("Game Over.", interrupt=True)
+
+    def _update_game_over_summary(self, reason: str) -> None:
         self._game_over_summary = {
             "score": int(self.state.score),
             "coins": int(self.state.coins),
-            "death_reason": summary_reason,
+            "play_time_seconds": int(self.state.time),
+            "death_reason": str(reason or "Run ended."),
         }
-        self._refresh_game_over_menu()
-        self.active_menu = self.game_over_menu
-        self.game_over_menu.opened = True
-        self.game_over_menu.index = 0
-        self._pending_menu_announcement = (self.game_over_menu, 0.45)
-        self._sync_music_context()
-        self.speaker.speak("Game Over.", interrupt=True)
+
+    def _should_offer_publish_prompt(self) -> bool:
+        if not self._leaderboard_is_authenticated():
+            return False
+        summary = self._game_over_summary
+        return int(summary.get("score", 0) or 0) > 0 or int(summary.get("coins", 0) or 0) > 0
+
+    def _open_publish_confirmation(self, return_menu: Menu, start_index: int = 0) -> None:
+        self._publish_confirm_return_menu = return_menu
+        self._publish_confirm_return_index = max(0, int(start_index))
+        self.active_menu = self.publish_confirm_menu
+        self.publish_confirm_menu.opened = True
+        self.publish_confirm_menu.index = 0
+        self._pending_menu_announcement = (self.publish_confirm_menu, 0.45, True)
 
     def _mission_goals(self):
         return mission_goals_for_set(int(self.settings.get("mission_set", 1)))
@@ -1775,7 +1916,20 @@ class SubwayBlindGame:
         return True
 
     def _persist_settings(self) -> None:
+        self._sync_leaderboard_settings_from_client()
         config_module.save_settings(self.settings)
+
+    def _sync_leaderboard_settings_from_client(self) -> None:
+        self._leaderboard_username = str(self.leaderboard_client.principal_username or self._leaderboard_username or "").strip()
+        self.settings["leaderboard_username"] = self._leaderboard_username
+        self.settings["leaderboard_session_token"] = str(self.leaderboard_client.auth_token or "").strip()
+
+    def _restore_persisted_leaderboard_session(self) -> None:
+        persisted_username = str(self.settings.get("leaderboard_username", "") or "").strip()
+        persisted_token = str(self.settings.get("leaderboard_session_token", "") or "").strip()
+        self._leaderboard_username = persisted_username
+        self.leaderboard_client.principal_username = persisted_username
+        self.leaderboard_client.auth_token = persisted_token
 
     def _sync_character_progress(self) -> None:
         ensure_character_progress_state(self.settings)
@@ -1961,12 +2115,12 @@ class SubwayBlindGame:
         self._menu_repeat_key = None
         self._menu_repeat_delay_remaining = 0.0
 
-    def _set_active_menu(self, menu: Optional[Menu], start_index: int = 0) -> None:
+    def _set_active_menu(self, menu: Optional[Menu], start_index: int = 0, play_sound: bool = True) -> None:
         self._clear_menu_repeat()
         self._stop_learn_sound_preview()
         self.active_menu = menu
         if menu is not None:
-            menu.open(start_index=start_index)
+            menu.open(start_index=start_index, play_sound=play_sound)
             if menu == self.learn_sounds_menu:
                 self._refresh_learn_sound_description()
         self._sync_music_context()
@@ -2185,15 +2339,7 @@ class SubwayBlindGame:
         running = True
         while running:
             delta_time = self.clock.tick(60) / 1000.0
-            if self._pending_menu_announcement is not None:
-                menu, remaining = self._pending_menu_announcement
-                remaining = max(0.0, remaining - delta_time)
-                if remaining <= 0:
-                    self._pending_menu_announcement = None
-                    if self.active_menu is menu:
-                        menu._announce_current()
-                else:
-                    self._pending_menu_announcement = (menu, remaining)
+            self._update_pending_menu_announcement(delta_time)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self._request_exit()
@@ -2221,6 +2367,8 @@ class SubwayBlindGame:
                 self._update_menu_repeat(delta_time)
                 self._update_learn_sound_preview(delta_time)
                 self._update_update_install_state()
+            if not self._exit_requested:
+                self._update_leaderboard_operation_state()
 
             if not self._exit_requested and self.active_menu is None:
                 if not self.state.paused:
@@ -2238,6 +2386,22 @@ class SubwayBlindGame:
 
         config_module.save_settings(self.settings)
 
+    def _update_pending_menu_announcement(self, delta_time: float) -> None:
+        if self._pending_menu_announcement is None:
+            return
+        menu, remaining, announce_opening = self._pending_menu_announcement
+        remaining = max(0.0, remaining - float(delta_time))
+        if remaining > 0:
+            self._pending_menu_announcement = (menu, remaining, announce_opening)
+            return
+        self._pending_menu_announcement = None
+        if self.active_menu is not menu:
+            return
+        if announce_opening:
+            self.speaker.speak(menu._opening_announcement(), interrupt=True)
+            return
+        menu._announce_current()
+
     def _handle_active_menu_key(self, key: int) -> bool:
         if self.active_menu is None:
             return True
@@ -2253,7 +2417,14 @@ class SubwayBlindGame:
                 return True
             if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 selected_action = self.options_menu.items[self.options_menu.index].action
-                if selected_action in {"back", "opt_controls", "opt_sapi_menu", "opt_gameplay_announcements"}:
+                if selected_action in {
+                    "back",
+                    "opt_controls",
+                    "opt_sapi_menu",
+                    "opt_gameplay_announcements",
+                    "opt_leaderboard_account",
+                    "opt_leaderboard_logout",
+                }:
                     return self._handle_menu_action(selected_action)
                 return True
         if self.active_menu == self.sapi_menu:
@@ -2350,11 +2521,37 @@ class SubwayBlindGame:
             if self.active_menu == self.pause_confirm_menu:
                 self._set_active_menu(self.pause_menu, start_index=1)
                 return True
+            if self.active_menu == self.leaderboard_logout_confirm_menu:
+                self._refresh_options_menu_labels()
+                self._set_active_menu(
+                    self.options_menu,
+                    start_index=self._update_option_index("opt_leaderboard_logout"),
+                )
+                return True
+            if self.active_menu == self.publish_confirm_menu:
+                self._set_active_menu(self.game_over_menu)
+                return True
             if self.active_menu == self.exit_confirm_menu:
                 self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "quit"))
                 return True
             if self.active_menu == self.help_topic_menu:
                 self._set_active_menu(self.howto_menu)
+                return True
+            if self.active_menu == self.server_status_menu:
+                self._cancel_leaderboard_operation()
+                if self._leaderboard_return_menu is not None:
+                    self._set_active_menu(self._leaderboard_return_menu)
+                else:
+                    self._set_active_menu(self.main_menu)
+                return True
+            if self.active_menu == self.leaderboard_menu:
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "leaderboard"))
+                return True
+            if self.active_menu == self.leaderboard_profile_menu:
+                self._set_active_menu(self.leaderboard_menu)
+                return True
+            if self.active_menu == self.leaderboard_run_detail_menu:
+                self._set_active_menu(self.leaderboard_profile_menu)
                 return True
             if self.active_menu == self.item_upgrade_detail_menu:
                 self._refresh_item_upgrade_menu_labels()
@@ -2396,6 +2593,9 @@ class SubwayBlindGame:
             if action == "achievements":
                 self._refresh_achievements_menu_labels()
                 self._set_active_menu(self.achievements_menu)
+                return True
+            if action == "leaderboard":
+                self._open_leaderboard()
                 return True
             if action == "options":
                 self._refresh_options_menu_labels()
@@ -2452,6 +2652,18 @@ class SubwayBlindGame:
                 return True
 
         if self.active_menu == self.options_menu:
+            if action == "opt_leaderboard_account":
+                self._prompt_and_authenticate_leaderboard_account()
+                return True
+            if action == "opt_leaderboard_logout":
+                self._set_active_menu(
+                    self.leaderboard_logout_confirm_menu,
+                    start_index=self._menu_index_for_action(
+                        self.leaderboard_logout_confirm_menu,
+                        "cancel_leaderboard_logout",
+                    ),
+                )
+                return True
             if action == "opt_sapi_menu":
                 self._refresh_sapi_menu_labels()
                 self._set_active_menu(self.sapi_menu)
@@ -2593,6 +2805,48 @@ class SubwayBlindGame:
                 return True
             if action == "quit":
                 return False
+
+        if self.active_menu == self.server_status_menu:
+            if action == "back":
+                self._cancel_leaderboard_operation()
+                if self._leaderboard_return_menu is not None:
+                    self._set_active_menu(self._leaderboard_return_menu)
+                else:
+                    self._set_active_menu(self.main_menu)
+                return True
+            self.speaker.speak(self.server_status_menu.items[0].label, interrupt=True)
+            return True
+
+        if self.active_menu == self.leaderboard_menu:
+            if action == "back":
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "leaderboard"))
+                return True
+            if action == "leaderboard_refresh":
+                self._open_leaderboard(force_refresh=True)
+                return True
+            if action.startswith("leaderboard_player:"):
+                self._open_leaderboard_profile(action.split(":", 1)[1])
+                return True
+            if action == "leaderboard_info":
+                self.speaker.speak(self.leaderboard_menu.items[self.leaderboard_menu.index].label, interrupt=True)
+                return True
+
+        if self.active_menu == self.leaderboard_profile_menu:
+            if action == "back":
+                self._set_active_menu(self.leaderboard_menu)
+                return True
+            if action.startswith("leaderboard_run:"):
+                self._open_leaderboard_run_detail(action.split(":", 1)[1])
+                return True
+            self.speaker.speak(self.leaderboard_profile_menu.items[self.leaderboard_profile_menu.index].label, interrupt=True)
+            return True
+
+        if self.active_menu == self.leaderboard_run_detail_menu:
+            if action == "back":
+                self._set_active_menu(self.leaderboard_profile_menu)
+                return True
+            self.speaker.speak(self.leaderboard_run_detail_menu.items[self.leaderboard_run_detail_menu.index].label, interrupt=True)
+            return True
 
         if self.active_menu == self.shop_menu:
             if action == "back":
@@ -2754,6 +3008,7 @@ class SubwayBlindGame:
                     self._selected_info_copy_all_text(self.help_topic_menu),
                     self._selected_info_copy_all_message(self.help_topic_menu),
                 )
+            return True
 
         if self.active_menu == self.whats_new_menu:
             if action == "back":
@@ -2769,6 +3024,7 @@ class SubwayBlindGame:
                     self._selected_info_copy_all_text(self.whats_new_menu),
                     self._selected_info_copy_all_message(self.whats_new_menu),
                 )
+                return True
 
         if self.active_menu == self.pause_menu:
             if action == "resume":
@@ -2786,6 +3042,27 @@ class SubwayBlindGame:
                 return True
             if action == "cancel_to_main":
                 self._set_active_menu(self.pause_menu, start_index=1)
+                return True
+
+        if self.active_menu == self.leaderboard_logout_confirm_menu:
+            if action == "confirm_leaderboard_logout":
+                self._logout_leaderboard_account()
+                return True
+            if action == "cancel_leaderboard_logout":
+                self._refresh_options_menu_labels()
+                self._set_active_menu(
+                    self.options_menu,
+                    start_index=self._update_option_index("opt_leaderboard_logout"),
+                )
+                return True
+
+        if self.active_menu == self.publish_confirm_menu:
+            if action == "publish_confirm_yes":
+                self._publish_latest_game_over_run()
+                return True
+            if action == "publish_confirm_no":
+                target_menu = self._publish_confirm_return_menu or self.game_over_menu
+                self._set_active_menu(target_menu, start_index=self._publish_confirm_return_index)
                 return True
 
         if self.active_menu == self.exit_confirm_menu:
@@ -2817,6 +3094,384 @@ class SubwayBlindGame:
                 return True
 
         return True
+
+    def _set_server_status(self, title: str, message: str) -> None:
+        self.server_status_menu.title = title
+        self.server_status_menu.items[0].label = message
+
+    def _cancel_leaderboard_operation(self) -> None:
+        self._leaderboard_active_operation = None
+        self._leaderboard_operation_token += 1
+
+    def _start_leaderboard_operation(
+        self,
+        operation: str,
+        title: str,
+        message: str,
+        worker,
+        *,
+        return_menu: Menu | None = None,
+        show_status: bool = True,
+        reject_message: bool = True,
+    ) -> bool:
+        if self._leaderboard_active_operation is not None:
+            if reject_message:
+                self.audio.play("menuedge", channel="ui")
+                self.speaker.speak("Please wait for the current server request to finish.", interrupt=True)
+            return False
+        self._leaderboard_active_operation = operation
+        self._leaderboard_operation_token += 1
+        token = self._leaderboard_operation_token
+        self._leaderboard_return_menu = return_menu or self.active_menu
+        if show_status:
+            self._set_server_status(title, message)
+            self._set_active_menu(self.server_status_menu, play_sound=False)
+
+        def runner() -> None:
+            try:
+                result = worker()
+            except Exception as exc:
+                self._leaderboard_operation_queue.put(
+                    LeaderboardOperationResult(token=token, operation=operation, success=False, payload=exc)
+                )
+                return
+            self._leaderboard_operation_queue.put(
+                LeaderboardOperationResult(token=token, operation=operation, success=True, payload=result)
+            )
+
+        threading.Thread(target=runner, name=f"leaderboard-{operation}", daemon=True).start()
+        return True
+
+    def _update_leaderboard_operation_state(self) -> None:
+        while True:
+            try:
+                result = self._leaderboard_operation_queue.get_nowait()
+            except queue.Empty:
+                return
+            if result.token != self._leaderboard_operation_token:
+                continue
+            self._leaderboard_active_operation = None
+            if not result.success:
+                self._handle_leaderboard_error(result.operation, result.payload)
+                continue
+            self._handle_leaderboard_success(result.operation, result.payload)
+
+    def _handle_leaderboard_success(self, operation: str, payload: object) -> None:
+        if operation in {"leaderboard_connect", "leaderboard_refresh"}:
+            data = dict(payload or {})
+            if bool(data.get("just_connected")):
+                self.audio.play("connect", channel="ui")
+            selected_action = None
+            if self.active_menu == self.leaderboard_menu and self.leaderboard_menu.items:
+                selected_action = self.leaderboard_menu.items[self.leaderboard_menu.index].action
+            self._leaderboard_entries = list(data.get("entries") or [])
+            self._leaderboard_total_players = int(data.get("total_players", len(self._leaderboard_entries)) or 0)
+            self._leaderboard_cache_loaded_at = time.monotonic()
+            self._refresh_leaderboard_menu()
+            if selected_action:
+                self.leaderboard_menu.index = self._menu_index_for_action(self.leaderboard_menu, selected_action)
+            if operation == "leaderboard_connect":
+                self._set_active_menu(self.leaderboard_menu, play_sound=False)
+                self.speaker.speak("Leaderboard loaded.", interrupt=True)
+            return
+        if operation == "leaderboard_profile":
+            data = dict(payload or {})
+            self._leaderboard_profile = data
+            self._leaderboard_profile_history_count = int(data.get("history_total", 0) or 0)
+            self._refresh_leaderboard_profile_menu()
+            self._set_active_menu(self.leaderboard_profile_menu, play_sound=False)
+            self.speaker.speak(f"{data.get('username', 'Player')} profile loaded.", interrupt=True)
+            return
+        if operation == "leaderboard_auth":
+            data = dict(payload or {})
+            if bool(data.get("just_connected")):
+                self.audio.play("connect", channel="ui")
+            self._leaderboard_username = str(data.get("username") or self._leaderboard_username or "").strip()
+            self.settings["leaderboard_username"] = self._leaderboard_username
+            self._refresh_options_menu_labels()
+            self._persist_settings()
+            self.speaker.speak(
+                "Account created." if str(data.get("status")) == "created" else "Signed in.",
+                interrupt=True,
+            )
+            if self._leaderboard_return_menu is not None:
+                self._set_active_menu(self._leaderboard_return_menu, play_sound=False)
+            return
+        if operation == "leaderboard_publish":
+            data = dict(payload or {})
+            if bool(data.get("just_connected")):
+                self.audio.play("connect", channel="ui")
+            publish_username = str(data.get("username") or self._leaderboard_username or "").strip()
+            if publish_username:
+                self._leaderboard_username = publish_username
+                self.settings["leaderboard_username"] = publish_username
+                self._refresh_options_menu_labels()
+                self._persist_settings()
+            self._game_over_publish_state = "published"
+            self._leaderboard_cache_loaded_at = 0.0
+            self._refresh_game_over_menu()
+            target_menu = self._publish_confirm_return_menu or self.game_over_menu
+            self._set_active_menu(target_menu, start_index=self._publish_confirm_return_index, play_sound=False)
+            if target_menu == self.game_over_menu:
+                self.game_over_menu.index = 4
+            if bool(data.get("high_score")):
+                rank = data.get("board_rank")
+                self.audio.play("high", channel="ui")
+                if rank is not None:
+                    self.speaker.speak(f"New personal best. Leaderboard rank {rank}.", interrupt=True)
+                else:
+                    self.speaker.speak("New personal best.", interrupt=True)
+            return
+
+    def _handle_leaderboard_error(self, operation: str, error: object) -> None:
+        if isinstance(error, LeaderboardClientError) and error.code == "reauth_required":
+            self._leaderboard_username = ""
+            self.settings["leaderboard_username"] = ""
+            self.leaderboard_client.principal_username = ""
+            self.leaderboard_client.auth_token = ""
+            self._refresh_options_menu_labels()
+            self._persist_settings()
+        message = str(error)
+        if operation == "leaderboard_refresh" and self._leaderboard_entries:
+            self.audio.play("menuedge", channel="ui")
+            self._refresh_leaderboard_menu()
+            if self.active_menu != self.leaderboard_menu:
+                self._set_active_menu(self.leaderboard_menu, play_sound=False)
+            self.speaker.speak(f"{message} Showing the last downloaded leaderboard.", interrupt=True)
+            return
+        self.audio.play("menuedge", channel="ui")
+        if self._leaderboard_return_menu is not None:
+            self._set_active_menu(self._leaderboard_return_menu, play_sound=False)
+        else:
+            self._set_active_menu(self.main_menu, play_sound=False)
+        self.speaker.speak(message, interrupt=True)
+
+    def _open_leaderboard(self, force_refresh: bool = False) -> None:
+        if not self._leaderboard_is_authenticated():
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("Sign in from Options, Set User Name, before opening the leaderboard.", interrupt=True)
+            return
+
+        if self._leaderboard_entries and not force_refresh:
+            self._refresh_leaderboard_menu()
+            self._set_active_menu(self.leaderboard_menu)
+            if not self._leaderboard_cache_is_fresh():
+                self._request_leaderboard_refresh(
+                    operation="leaderboard_refresh",
+                    return_menu=self.leaderboard_menu,
+                    show_status=False,
+                )
+            return
+        self._request_leaderboard_refresh(
+            operation="leaderboard_connect",
+            return_menu=self.main_menu,
+            show_status=not self._leaderboard_entries,
+        )
+
+    def _refresh_leaderboard_menu(self) -> None:
+        total = max(self._leaderboard_total_players, len(self._leaderboard_entries))
+        self.leaderboard_menu.title = f"Leaderboard   {len(self._leaderboard_entries)}/{total}"
+        items = [
+            MenuItem(self._leaderboard_entry_label(entry), f"leaderboard_player:{entry['username']}")
+            for entry in self._leaderboard_entries
+        ]
+        if not items:
+            items.append(MenuItem("No published runs were found.", "leaderboard_info"))
+        items.append(MenuItem("Refresh", "leaderboard_refresh"))
+        items.append(MenuItem("Back", "back"))
+        self.leaderboard_menu.items = items
+
+    def _leaderboard_entry_label(self, entry: dict[str, object]) -> str:
+        return (
+            f"{int(entry.get('rank', 0) or 0)}. {entry.get('username', 'Player')}   "
+            f"Score {int(entry.get('score', 0) or 0)}   "
+            f"Coins {int(entry.get('coins', 0) or 0)}   "
+            f"Time {format_play_time(entry.get('play_time_seconds', 0) or 0)}"
+        )
+
+    def _open_leaderboard_profile(self, username: str) -> None:
+        def worker() -> dict[str, object]:
+            self.leaderboard_client.connect()
+            return self.leaderboard_client.fetch_profile(username=username, history_limit=50)
+
+        self._start_leaderboard_operation(
+            "leaderboard_profile",
+            "Leaderboard",
+            f"Loading {username}...",
+            worker,
+            return_menu=self.leaderboard_menu,
+        )
+
+    def _request_leaderboard_refresh(self, operation: str, return_menu: Menu, show_status: bool) -> bool:
+        def worker() -> dict[str, object]:
+            just_connected = self.leaderboard_client.connect()
+            board = self.leaderboard_client.fetch_leaderboard(limit=100)
+            board["just_connected"] = just_connected
+            return board
+
+        return self._start_leaderboard_operation(
+            operation,
+            "Leaderboard",
+            "Connecting to server...",
+            worker,
+            return_menu=return_menu,
+            show_status=show_status,
+            reject_message=show_status,
+        )
+
+    def _leaderboard_cache_is_fresh(self) -> bool:
+        if not self._leaderboard_entries or self._leaderboard_cache_loaded_at <= 0:
+            return False
+        return (time.monotonic() - self._leaderboard_cache_loaded_at) <= LEADERBOARD_CACHE_TTL_SECONDS
+
+    def _refresh_leaderboard_profile_menu(self) -> None:
+        profile = self._leaderboard_profile or {}
+        latest_run = dict(profile.get("latest_run") or {})
+        best_run = dict(profile.get("best_run") or {})
+        history = list(profile.get("history") or [])
+        self.leaderboard_profile_menu.title = str(profile.get("username") or "Player")
+        items = [
+            MenuItem(
+                f"Leaderboard Rank: {profile.get('board_rank') if profile.get('board_rank') is not None else 'Unranked'}",
+                "leaderboard_profile_info",
+            ),
+            MenuItem(f"Latest Score: {int(latest_run.get('score', 0) or 0)}", "leaderboard_profile_info"),
+            MenuItem(f"Latest Coins: {int(latest_run.get('coins', 0) or 0)}", "leaderboard_profile_info"),
+            MenuItem(f"Latest Play Time: {format_play_time(latest_run.get('play_time_seconds', 0) or 0)}", "leaderboard_profile_info"),
+            MenuItem(f"Best Score: {int(best_run.get('score', 0) or 0)}", "leaderboard_profile_info"),
+            MenuItem(f"Best Coins: {int(best_run.get('coins', 0) or 0)}", "leaderboard_profile_info"),
+            MenuItem(f"Best Play Time: {format_play_time(best_run.get('play_time_seconds', 0) or 0)}", "leaderboard_profile_info"),
+        ]
+        for history_entry in history:
+            items.append(
+                MenuItem(
+                    self._leaderboard_history_label(history_entry),
+                    f"leaderboard_run:{history_entry['submission_id']}",
+                )
+            )
+        items.append(MenuItem("Back", "back"))
+        self.leaderboard_profile_menu.items = items
+
+    def _leaderboard_history_label(self, history_entry: dict[str, object]) -> str:
+        published_at = str(history_entry.get("published_at") or "").replace("T", " ")[:19]
+        return (
+            f"{published_at}   Score {int(history_entry.get('score', 0) or 0)}   "
+            f"Coins {int(history_entry.get('coins', 0) or 0)}   "
+            f"Time {format_play_time(history_entry.get('play_time_seconds', 0) or 0)}"
+        )
+
+    def _open_leaderboard_run_detail(self, submission_id: str) -> None:
+        profile = self._leaderboard_profile or {}
+        for history_entry in list(profile.get("history") or []):
+            if str(history_entry.get("submission_id") or "") != str(submission_id):
+                continue
+            self._leaderboard_selected_run = dict(history_entry)
+            self._refresh_leaderboard_run_detail_menu()
+            self._set_active_menu(self.leaderboard_run_detail_menu)
+            return
+        self.audio.play("menuedge", channel="ui")
+        self.speaker.speak("Unable to open the selected run.", interrupt=True)
+
+    def _refresh_leaderboard_run_detail_menu(self) -> None:
+        run_data = self._leaderboard_selected_run or {}
+        published_at = str(run_data.get("published_at") or "").replace("T", " ")[:19]
+        self.leaderboard_run_detail_menu.title = "Published Run"
+        self.leaderboard_run_detail_menu.items = [
+            MenuItem(f"Score: {int(run_data.get('score', 0) or 0)}", "leaderboard_run_info"),
+            MenuItem(f"Coins: {int(run_data.get('coins', 0) or 0)}", "leaderboard_run_info"),
+            MenuItem(f"Play Time: {format_play_time(run_data.get('play_time_seconds', 0) or 0)}", "leaderboard_run_info"),
+            MenuItem(f"Published At: {published_at}", "leaderboard_run_info"),
+            MenuItem("Back", "back"),
+        ]
+
+    def _prompt_for_leaderboard_credentials(self) -> tuple[str, str] | None:
+        try:
+            result = prompt_for_credentials(
+                caption="Subway Surfers Blind Leaderboard",
+                message="Enter your user name and password. If the account does not exist yet, it will be created.",
+                username_hint=self._leaderboard_username,
+            )
+        except CredentialPromptCancelled:
+            return None
+        except NativeCredentialPromptError as exc:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(str(exc), interrupt=True)
+            return None
+        username = result.username.strip()
+        password = result.password
+        if not username or not password:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("User name and password are required.", interrupt=True)
+            return None
+        return username, password
+
+    def _prompt_and_authenticate_leaderboard_account(self) -> None:
+        credentials = self._prompt_for_leaderboard_credentials()
+        if credentials is None:
+            return
+        username, password = credentials
+
+        def worker() -> dict[str, object]:
+            just_connected = self.leaderboard_client.connect()
+            result = self.leaderboard_client.login(username=username, password=password)
+            result["just_connected"] = just_connected
+            return result
+
+        self._start_leaderboard_operation(
+            "leaderboard_auth",
+            "Leaderboard",
+            "Connecting to server...",
+            worker,
+            return_menu=self.options_menu,
+        )
+
+    def _logout_leaderboard_account(self) -> None:
+        self.leaderboard_client.logout()
+        self._leaderboard_username = ""
+        self.settings["leaderboard_username"] = ""
+        self._leaderboard_entries = []
+        self._leaderboard_total_players = 0
+        self._leaderboard_profile = None
+        self._leaderboard_selected_run = None
+        self._leaderboard_profile_history_count = 0
+        self._leaderboard_cache_loaded_at = 0.0
+        self._refresh_options_menu_labels()
+        self._persist_settings()
+        self._set_active_menu(
+            self.options_menu,
+            start_index=self._update_option_index("opt_leaderboard_account"),
+            play_sound=False,
+        )
+        self.audio.play("confirm", channel="ui")
+        self.speaker.speak("Leaderboard account signed out.", interrupt=True)
+
+    def _publish_latest_game_over_run(self) -> None:
+        if not self._leaderboard_is_authenticated():
+            self._set_active_menu(self.game_over_menu)
+            return
+        if self._game_over_publish_state in {"publishing", "published"}:
+            return
+        summary = dict(self._game_over_summary)
+        self._game_over_publish_state = "publishing"
+
+        def worker() -> dict[str, object]:
+            just_connected = self.leaderboard_client.connect()
+            result = self.leaderboard_client.submit_score(
+                score=int(summary.get("score", 0) or 0),
+                coins=int(summary.get("coins", 0) or 0),
+                play_time_seconds=int(summary.get("play_time_seconds", 0) or 0),
+            )
+            result["just_connected"] = just_connected
+            result["username"] = self.leaderboard_client.principal_username
+            return result
+
+        self._start_leaderboard_operation(
+            "leaderboard_publish",
+            "Leaderboard",
+            "Publishing your score...",
+            worker,
+            return_menu=self.game_over_menu,
+        )
 
     def _cycle_output_device_in_options(self, direction: int) -> None:
         devices = self.audio.output_device_choices()
@@ -3049,7 +3704,8 @@ class SubwayBlindGame:
         self._near_miss_signatures.clear()
         self._guard_loop_timer = 0.0
         self._last_death_reason = "Run ended."
-        self._game_over_summary = {"score": 0, "coins": 0, "death_reason": "Run ended."}
+        self._game_over_publish_state = "idle"
+        self._game_over_summary = {"score": 0, "coins": 0, "play_time_seconds": 0, "death_reason": "Run ended."}
         self._magnet_loop_active = False
         self._jetpack_loop_active = False
         active_character = selected_character_definition(self.settings)
@@ -3095,7 +3751,15 @@ class SubwayBlindGame:
         self.audio.stop("loop_jetpack")
         self._stop_spatial_audio()
         self.spatial_audio.reset()
-        self._set_active_menu(self.main_menu if to_menu else None)
+        if to_menu:
+            self._update_game_over_summary("Returned to main menu")
+            if self._should_offer_publish_prompt():
+                self._open_publish_confirmation(return_menu=self.main_menu, start_index=0)
+                self._sync_music_context()
+                return
+            self._set_active_menu(self.main_menu)
+            return
+        self._set_active_menu(None)
 
     def _handle_game_key(self, key: int) -> None:
         if key == pygame.K_ESCAPE:

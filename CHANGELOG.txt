@@ -6,6 +6,7 @@ Version: 1.1.3
 
 Update Summary
 - Updated the game version to 1.1.3.
+- Added a secure online leaderboard system with account sign-in, score publishing, player profiles, and persistent session support.
 - Added an original-style Item Upgrades submenu inside the Shop for Coin Magnet, Jetpack, 2X Multiplier, and Super Sneakers.
 - Added persistent per-item upgrade levels with escalating coin costs and immediate in-menu feedback after each purchase.
 - Added a dedicated main-menu description system with English guidance for each main menu action.
@@ -20,6 +21,7 @@ Gameplay Changes
 - Headstart, Score Booster, Hoverboard stock, Pogo Stick, Keys, and Mystery Boxes remain outside the item-upgrade ladder so the shop matches the intended original-style system more closely.
 
 Audio or UI Updates
+- Added leaderboard prompts and publishing flows for game over and run exit back-to-menu transitions.
 - Fixed collision audio so each obstacle type now triggers its intended hit sound instead of falling back to the same generic crash layer.
 - Fixed the mono audio routing bug so reward and interface sounds are no longer forced through the HRTF mono path while menu feedback cues stay mono.
 - Added an Item Upgrades shop submenu with list and detail screens, level readouts, duration readouts, max-level handling, and purchase announcements.
@@ -27,7 +29,6 @@ Audio or UI Updates
 - Added an Exit Confirmation option in Options so players can choose whether the game asks before returning to desktop.
 - Added a Gameplay Announcements toggle that lets players enable or disable automatic pausing when the game window loses focus.
 - Added line-by-line clipboard copying for How to Play and What's New, plus a Copy All action at the end of each list.
-- Updated Copy All confirmations so the spoken clipboard message includes the selected section title.
 - Updated the in-game What's New and help copy to mention the new item upgrade system and the audio routing fix.
 
 ------------------------------------------------------------
