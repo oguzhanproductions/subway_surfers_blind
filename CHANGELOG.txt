@@ -10,6 +10,13 @@ Update Summary
 - Expanded the leaderboard with all-time, daily, weekly, and monthly ranking windows plus difficulty-specific filtering for Easy, Normal, and Hard runs.
 - Added richer published run records with surfaced game version data, distance, death reason, clean escapes, revive usage, power-up usage, and leaderboard verification status.
 - Added profile-level performance summaries including recent run averages, best score improvement, total published runs, and active-day tracking.
+- Added an original-style Events hub with Daily High Score, Coin Meter, Mini Mystery Box, Daily Login Calendar, and surfaced Word Hunt and Season Hunt status.
+- Added a separate Missions hub that now splits mission sets, quests, and achievements into dedicated menu flows.
+- Added a Me hub with direct access to Characters, Boards, Item Upgrades, and Collections.
+- Added persistent Boards with active board selection and original-style board powers including Double Jump, Super Jump, Super Speed, Smooth Drift, Zap Sideways, and Stay Low.
+- Added persistent Collections with completion tracking and passive reward bonuses tied to character and board sets.
+- Added a separate Quests system with daily and seasonal quest generation, sneaker rewards, and a sneaker meter reward track.
+- Added daily event scheduling inspired by the original game with Super Mysterizer, Mega Jackpot, Character Bonus, Super Mystery Box Mania, and Wordy Weekend rotations.
 - Added an original-style Item Upgrades submenu inside the Shop for Coin Magnet, Jetpack, 2X Multiplier, and Super Sneakers.
 - Added persistent per-item upgrade levels with escalating coin costs and immediate in-menu feedback after each purchase.
 - Added a dedicated main-menu description system with English guidance for each main menu action.
@@ -19,6 +26,13 @@ Update Summary
 Gameplay Changes
 - Leaderboard submissions now retain richer run telemetry so competitive comparisons can include more than raw score and coins.
 - Added basic run verification heuristics that flag suspicious leaderboard entries when submitted run data is internally inconsistent.
+- Daily events now affect active gameplay, including featured-character multiplier bonuses, boosted Super Mystery Box appearances, jackpot-biased mystery rewards, and stronger weekend Word Hunt behavior.
+- Word Hunt now supports event-driven target words so Wordy Weekend can use the selected character name instead of the standard daily word rotation.
+- Daily High Score now tracks the best run of the day and unlocks tiered rewards through the Events hub.
+- Coin Meter now tracks daily coin collection toward separate reward tiers.
+- Daily quests and seasonal quests now progress from run actions, support claims, and grant sneakers for the new quest meter.
+- Hoverboard activation now uses the selected board and applies board-specific powers during the run.
+- Collections now grant passive gameplay bonuses such as stronger end-of-run banking, longer hoverboard duration, longer temporary power-up duration, and a higher starting multiplier.
 - Coin Magnet upgrades now extend magnet pickup duration through five persistent shop levels.
 - Jetpack upgrades now extend flight duration through five persistent shop levels.
 - 2X Multiplier upgrades now extend score multiplier pickup duration through five persistent shop levels.
@@ -29,6 +43,11 @@ Audio or UI Updates
 - Added leaderboard prompts and publishing flows for game over and run exit back-to-menu transitions.
 - Added in-menu leaderboard filter controls for ranking period and difficulty without leaving the leaderboard screen.
 - Expanded profile and run-detail views to announce game version, difficulty, verification state, review notes, and richer run statistics.
+- Reworked the main menu surface to add dedicated Events, Missions, and Me destinations instead of keeping every progression system flat on the front page.
+- Added dedicated Boards and Collections menus with spoken summaries, active-state announcements, and detailed status rows.
+- Added dedicated Events and Quests menu screens with reward claim actions and live progress readouts.
+- Added a free daily gift entry inside the Shop so the mini mystery box flow is reachable from the original economy surface.
+- Improved the run intro by using intro_start, intro_shake, and intro_spray as a fuller chase-style opening instead of limiting those sounds to headstart behavior.
 - Fixed collision audio so each obstacle type now triggers its intended hit sound instead of falling back to the same generic crash layer.
 - Fixed the mono audio routing bug so reward and interface sounds are no longer forced through the HRTF mono path while menu feedback cues stay mono.
 - Added an Item Upgrades shop submenu with list and detail screens, level readouts, duration readouts, max-level handling, and purchase announcements.

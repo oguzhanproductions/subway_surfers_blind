@@ -42,6 +42,7 @@ class Player:
     headstart: float = 0.0
     mult2x: float = 0.0
     pogo_active: float = 0.0
+    board_extra_jump_available: bool = False
 
 
 @dataclass

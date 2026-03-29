@@ -5,6 +5,7 @@ import queue
 import sys
 import textwrap
 from dataclasses import dataclass
+from datetime import date
 import random
 import re
 import threading
@@ -27,6 +28,13 @@ from subway_blind.audio import (
     SYSTEM_DEFAULT_OUTPUT_LABEL,
 )
 from subway_blind.balance import SpeedProfile, speed_profile_for_difficulty
+from subway_blind.boards import (
+    board_definition,
+    board_definitions,
+    board_unlocked,
+    ensure_board_state,
+    selected_board_definition,
+)
 from subway_blind.characters import (
     CharacterRuntimeBonuses,
     character_definition,
@@ -40,6 +48,14 @@ from subway_blind.characters import (
     selected_character_definition,
 )
 from subway_blind.config import resource_path
+from subway_blind.collections import (
+    collection_bonus_summary,
+    collection_definitions,
+    collection_progress,
+    collection_runtime_bonuses,
+    completed_collection_keys,
+    ensure_collection_state,
+)
 from subway_blind.controls import (
     ACTION_DEFINITIONS_BY_KEY,
     CONTROLLER_ACTION_ORDER,
@@ -51,6 +67,26 @@ from subway_blind.controls import (
     controller_binding_label,
     family_label,
     keyboard_key_label,
+)
+from subway_blind.events import (
+    can_claim_coin_meter_reward,
+    can_claim_daily_high_score_reward,
+    claim_coin_meter_reward,
+    claim_daily_gift,
+    claim_daily_high_score_reward,
+    claim_login_calendar_reward,
+    current_daily_event,
+    daily_gift_available,
+    ensure_event_state,
+    event_runtime_profile,
+    featured_character_key,
+    login_calendar_available,
+    login_calendar_next_day,
+    next_coin_meter_threshold,
+    next_daily_high_score_threshold,
+    record_coin_meter_coins,
+    record_daily_score,
+    tomorrow_daily_event,
 )
 from subway_blind.leaderboard_client import LeaderboardClient, LeaderboardClientError
 from subway_blind.item_upgrades import (
@@ -85,10 +121,10 @@ from subway_blind.native_windows_credentials import (
 from subway_blind.progression import (
     achievement_definitions,
     achievement_progress,
+    active_word_for_settings,
     can_claim_season_reward,
     claim_season_reward,
     completed_mission_metrics,
-    daily_word_for,
     ensure_progression_state,
     mission_goals_for_set,
     newly_unlocked_achievements,
@@ -101,6 +137,20 @@ from subway_blind.progression import (
     set_achievement_progress_max,
     update_word_hunt_streak,
     word_hunt_reward_for_streak,
+)
+from subway_blind.quests import (
+    can_claim_meter_reward,
+    claim_meter_reward,
+    claim_quest,
+    daily_quests,
+    ensure_quest_state,
+    next_meter_threshold,
+    quest_claimed,
+    quest_completed,
+    quest_progress,
+    quest_sneakers,
+    record_quest_metric,
+    seasonal_quests,
 )
 from subway_blind.spawn import RoutePattern, SpawnDirector
 from subway_blind.spatial_audio import SpatialThreatAudio
@@ -477,7 +527,11 @@ class SubwayBlindGame:
         self.big = pygame.font.SysFont("segoeui", 38, bold=True)
         ensure_progression_state(self.settings)
         ensure_character_progress_state(self.settings)
+        ensure_board_state(self.settings)
         ensure_item_upgrade_state(self.settings)
+        ensure_collection_state(self.settings)
+        ensure_quest_state(self.settings)
+        ensure_event_state(self.settings)
 
         self.state = RunState()
         self.player = Player()
@@ -514,7 +568,10 @@ class SubwayBlindGame:
         self._update_ready_announced = False
         self._showing_upgrade_help = False
         self._active_character_bonuses = CharacterRuntimeBonuses()
+        self._collection_bonuses = collection_runtime_bonuses(self.settings)
+        self._active_event_profile = event_runtime_profile(self.settings)
         self._character_detail_key = selected_character_definition(self.settings).key
+        self._board_detail_key = selected_board_definition(self.settings).key
         self._item_upgrade_detail_key = DEFAULT_ITEM_UPGRADE_KEY
         self.controls = ControllerSupport(settings)
         self._binding_capture: BindingCaptureRequest | None = None
@@ -534,6 +591,7 @@ class SubwayBlindGame:
         self._leaderboard_operation_token = 0
         self._leaderboard_active_operation: str | None = None
         self._leaderboard_return_menu: Menu | None = None
+        self._meta_return_menu: Menu | None = None
         self._publish_confirm_return_menu: Menu | None = None
         self._publish_confirm_return_index = 0
         self._game_over_publish_state = "idle"
@@ -623,11 +681,42 @@ class SubwayBlindGame:
             self.audio,
             "Run Setup",
             [
+                MenuItem(self._loadout_board_label(), "loadout_board_info"),
                 MenuItem(self._headstart_option_label(), "toggle_headstart"),
                 MenuItem(self._score_booster_option_label(), "toggle_score_booster"),
                 MenuItem("Begin Run", "begin_run"),
                 MenuItem("Back", "back"),
             ],
+        )
+        self.events_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Events",
+            [],
+        )
+        self.missions_hub_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Missions",
+            [],
+        )
+        self.mission_set_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Mission Set",
+            [],
+        )
+        self.quests_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Quests",
+            [],
+        )
+        self.me_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Me",
+            [],
         )
         self.options_menu = Menu(
             self.speaker,
@@ -718,6 +807,7 @@ class SubwayBlindGame:
                 MenuItem(self._shop_box_label(), "buy_box"),
                 MenuItem(self._shop_headstart_label(), "buy_headstart"),
                 MenuItem(self._shop_score_booster_label(), "buy_score_booster"),
+                MenuItem(self._shop_daily_gift_label(), "claim_daily_gift"),
                 MenuItem(self._shop_item_upgrade_label(), "open_item_upgrades"),
                 MenuItem(self._shop_character_upgrade_label(), "open_character_upgrades"),
                 MenuItem("Back", "back"),
@@ -745,6 +835,24 @@ class SubwayBlindGame:
             self.speaker,
             self.audio,
             selected_character_definition(self.settings).name,
+            [],
+        )
+        self.board_menu = Menu(
+            self.speaker,
+            self.audio,
+            self._board_menu_title(),
+            [],
+        )
+        self.board_detail_menu = Menu(
+            self.speaker,
+            self.audio,
+            selected_board_definition(self.settings).name,
+            [],
+        )
+        self.collection_menu = Menu(
+            self.speaker,
+            self.audio,
+            self._collection_menu_title(),
             [],
         )
         self.learn_sounds_menu = Menu(
@@ -794,6 +902,14 @@ class SubwayBlindGame:
         self._refresh_item_upgrade_detail_menu_labels(self._item_upgrade_detail_key)
         self._refresh_character_menu_labels()
         self._refresh_character_detail_menu_labels(self._character_detail_key)
+        self._refresh_board_menu_labels()
+        self._refresh_board_detail_menu_labels(self._board_detail_key)
+        self._refresh_collection_menu_labels()
+        self._refresh_events_menu_labels()
+        self._refresh_missions_hub_menu_labels()
+        self._refresh_mission_set_menu_labels()
+        self._refresh_quest_menu_labels()
+        self._refresh_me_menu_labels()
         self._refresh_control_menus()
 
         self.active_menu: Optional[Menu] = self.main_menu
@@ -943,6 +1059,156 @@ class SubwayBlindGame:
         active_character = selected_character_definition(self.settings)
         return f"Character Upgrades   Active: {active_character.name}"
 
+    def _shop_daily_gift_label(self) -> str:
+        return "Free Daily Gift   Available" if daily_gift_available(self.settings) else "Free Daily Gift   Claimed Today"
+
+    def _loadout_board_label(self) -> str:
+        board = selected_board_definition(self.settings)
+        return f"Board: {board.name}   Power: {board.power_label}"
+
+    def _events_menu_title(self) -> str:
+        event = current_daily_event()
+        event_coins = int(self.settings.get("event_state", {}).get("event_coins", 0) or 0)
+        return f"Events   {event.label}   Event Coins: {event_coins}"
+
+    def _daily_event_info_label(self) -> str:
+        event = current_daily_event()
+        tomorrow = tomorrow_daily_event()
+        featured_key = featured_character_key()
+        if event.key == "featured_character_bonus":
+            featured_name = character_definition(featured_key).name
+            return f"Today: {event.label}   Featured Runner: {featured_name}   Tomorrow: {tomorrow.label}"
+        return f"Today: {event.label}   Tomorrow: {tomorrow.label}"
+
+    def _daily_high_score_status_label(self) -> str:
+        total = int(self.settings.get("event_state", {}).get("daily_high_score_total", 0) or 0)
+        next_threshold = next_daily_high_score_threshold(self.settings)
+        if next_threshold is None:
+            return f"Daily High Score: {total}   All rewards claimed"
+        return f"Daily High Score: {total} of {next_threshold}"
+
+    def _daily_high_score_action_label(self) -> str:
+        if can_claim_daily_high_score_reward(self.settings):
+            return "Claim Daily High Score Reward"
+        next_threshold = next_daily_high_score_threshold(self.settings)
+        if next_threshold is None:
+            return "Daily High Score Rewards Complete"
+        return f"Next Daily High Score Reward at {next_threshold}"
+
+    def _coin_meter_status_label(self) -> str:
+        coins = int(self.settings.get("event_state", {}).get("coin_meter_coins", 0) or 0)
+        next_threshold = next_coin_meter_threshold(self.settings)
+        if next_threshold is None:
+            return f"Coin Meter: {coins}   All chests opened"
+        return f"Coin Meter: {coins} of {next_threshold}"
+
+    def _coin_meter_action_label(self) -> str:
+        if can_claim_coin_meter_reward(self.settings):
+            return "Open Coin Meter Chest"
+        next_threshold = next_coin_meter_threshold(self.settings)
+        if next_threshold is None:
+            return "Coin Meter Complete"
+        return f"Next Coin Meter Chest at {next_threshold}"
+
+    def _login_calendar_status_label(self) -> str:
+        next_day = login_calendar_next_day(self.settings)
+        availability = "Available" if login_calendar_available(self.settings) else "Already claimed today"
+        return f"Daily Login Calendar: Day {next_day} of 7   {availability}"
+
+    def _login_calendar_action_label(self) -> str:
+        if login_calendar_available(self.settings):
+            return f"Claim Login Reward   Day {login_calendar_next_day(self.settings)}"
+        return "Login Reward Claimed Today"
+
+    def _word_hunt_status_label(self) -> str:
+        active_word = active_word_for_settings(self.settings)
+        collected = len(active_word) - len(self._remaining_word_letters())
+        return f"Word Hunt: {active_word}   {collected}/{len(active_word)} letters"
+
+    def _season_hunt_status_label(self) -> str:
+        total = int(self.settings.get("season_tokens", 0) or 0)
+        next_threshold = next_season_reward_threshold(self.settings)
+        if next_threshold is None:
+            return f"Season Hunt: {total} tokens   Track complete"
+        return f"Season Hunt: {total} of {next_threshold} tokens"
+
+    def _missions_hub_title(self) -> str:
+        completed = len(completed_mission_metrics(self.settings))
+        return f"Missions   Set {int(self.settings.get('mission_set', 1))}   {completed}/3"
+
+    def _mission_set_menu_title(self) -> str:
+        return f"Mission Set {int(self.settings.get('mission_set', 1))}"
+
+    def _me_menu_title(self) -> str:
+        return f"Me   {selected_character_definition(self.settings).name}   {selected_board_definition(self.settings).name}"
+
+    def _board_menu_title(self) -> str:
+        active_board = selected_board_definition(self.settings)
+        return f"Boards   Active: {active_board.name}"
+
+    def _board_list_item_label(self, key: str) -> str:
+        definition = board_definition(key)
+        if not board_unlocked(self.settings, definition.key):
+            return f"{definition.name}   Locked   Unlock: {definition.unlock_cost} Coins"
+        status = "Active" if selected_board_definition(self.settings).key == definition.key else "Unlocked"
+        return f"{definition.name}   {status}   {definition.power_label}"
+
+    def _board_status_label(self, key: str) -> str:
+        definition = board_definition(key)
+        if not board_unlocked(self.settings, definition.key):
+            return f"Status: Locked   Unlock cost: {definition.unlock_cost} Coins"
+        status = "Active" if selected_board_definition(self.settings).key == definition.key else "Unlocked"
+        return f"Status: {status}"
+
+    def _board_power_label(self, key: str) -> str:
+        definition = board_definition(key)
+        return f"Power: {definition.power_label}   {definition.description}"
+
+    def _board_action_label(self, key: str) -> str:
+        definition = board_definition(key)
+        if not board_unlocked(self.settings, definition.key):
+            return f"Unlock Board   Cost: {definition.unlock_cost} Coins"
+        if selected_board_definition(self.settings).key == definition.key:
+            return "Board Active"
+        return "Set as Active Board"
+
+    def _collection_menu_title(self) -> str:
+        completed = len(completed_collection_keys(self.settings))
+        total = len(collection_definitions())
+        return f"Collections   {completed}/{total}"
+
+    def _collection_item_label(self, key: str) -> str:
+        definition = next(item for item in collection_definitions() if item.key == key)
+        owned, total = collection_progress(self.settings, definition)
+        status = "Complete" if key in completed_collection_keys(self.settings) else "In Progress"
+        return f"{definition.name}   {status}   {owned}/{total}   {collection_bonus_summary(definition)}"
+
+    def _quest_menu_title(self) -> str:
+        return f"Quests   Sneakers: {quest_sneakers(self.settings)}"
+
+    def _quest_item_label(self, quest_key: str) -> str:
+        quest = next(
+            item for item in daily_quests() + seasonal_quests() if item.key == quest_key
+        )
+        progress = min(quest_progress(self.settings, quest), quest.target)
+        status = "Claimed" if quest_claimed(self.settings, quest) else ("Ready" if quest_completed(self.settings, quest) else "Active")
+        scope_label = "Daily" if quest.scope == "daily" else "Seasonal"
+        return f"{scope_label}: {quest.label}   {progress}/{quest.target}   {status}   Sneakers {quest.sneaker_reward}"
+
+    def _quest_meter_label(self) -> str:
+        next_threshold = next_meter_threshold(self.settings)
+        if next_threshold is None:
+            return f"Sneaker Meter: {quest_sneakers(self.settings)}   Complete"
+        return f"Sneaker Meter: {quest_sneakers(self.settings)} of {next_threshold}"
+
+    def _quest_meter_action_label(self) -> str:
+        if can_claim_meter_reward(self.settings):
+            return "Claim Sneaker Meter Reward"
+        next_threshold = next_meter_threshold(self.settings)
+        if next_threshold is None:
+            return "Sneaker Meter Complete"
+        return f"Next Sneaker Meter Reward at {next_threshold}"
+
     def _item_upgrade_menu_title(self) -> str:
         maxed = sum(
             1
@@ -1076,8 +1342,9 @@ class SubwayBlindGame:
         self.sapi_menu.items[4].label = self._sapi_pitch_option_label()
 
     def _refresh_loadout_menu_labels(self) -> None:
-        self.loadout_menu.items[0].label = self._headstart_option_label()
-        self.loadout_menu.items[1].label = self._score_booster_option_label()
+        self.loadout_menu.items[0].label = self._loadout_board_label()
+        self.loadout_menu.items[1].label = self._headstart_option_label()
+        self.loadout_menu.items[2].label = self._score_booster_option_label()
 
     def _refresh_revive_menu_label(self) -> None:
         self.revive_menu.items[0].label = self._revive_option_label()
@@ -1122,6 +1389,9 @@ class SubwayBlindGame:
             return
         current_value = int(self._active_run_stats.get(metric, 0) or 0)
         self._active_run_stats[metric] = current_value + int(amount)
+        for quest in record_quest_metric(self.settings, metric, amount):
+            self.audio.play("mission_reward", channel="ui")
+            self.speaker.speak(f"Quest ready: {quest.label}.", interrupt=False)
 
     def _record_run_powerup(self, powerup_key: str, amount: int = 1) -> None:
         if amount <= 0:
@@ -1159,8 +1429,9 @@ class SubwayBlindGame:
         self.shop_menu.items[1].label = self._shop_box_label()
         self.shop_menu.items[2].label = self._shop_headstart_label()
         self.shop_menu.items[3].label = self._shop_score_booster_label()
-        self.shop_menu.items[4].label = self._shop_item_upgrade_label()
-        self.shop_menu.items[5].label = self._shop_character_upgrade_label()
+        self.shop_menu.items[4].label = self._shop_daily_gift_label()
+        self.shop_menu.items[5].label = self._shop_item_upgrade_label()
+        self.shop_menu.items[6].label = self._shop_character_upgrade_label()
 
     def _refresh_item_upgrade_menu_labels(self) -> None:
         self.item_upgrade_menu.title = self._item_upgrade_menu_title()
@@ -1215,6 +1486,109 @@ class SubwayBlindGame:
             MenuItem(self._character_perk_label(definition.key), f"character_perk_info:{definition.key}"),
             MenuItem(self._character_primary_action_label(definition.key), primary_action),
             MenuItem(self._character_upgrade_action_label(definition.key), upgrade_action),
+            MenuItem("Back", "back"),
+        ]
+
+    def _refresh_board_menu_labels(self) -> None:
+        self.board_menu.title = self._board_menu_title()
+        self.board_menu.items = [
+            MenuItem(self._board_list_item_label(definition.key), f"board_open:{definition.key}")
+            for definition in board_definitions()
+        ] + [MenuItem("Back", "back")]
+
+    def _refresh_board_detail_menu_labels(self, key: str) -> None:
+        definition = board_definition(key)
+        self._board_detail_key = definition.key
+        self.board_detail_menu.title = definition.name
+        if not board_unlocked(self.settings, definition.key):
+            primary_action = f"board_unlock:{definition.key}"
+        elif selected_board_definition(self.settings).key == definition.key:
+            primary_action = f"board_active_info:{definition.key}"
+        else:
+            primary_action = f"board_select:{definition.key}"
+        self.board_detail_menu.items = [
+            MenuItem(self._board_status_label(definition.key), f"board_status_info:{definition.key}"),
+            MenuItem(self._board_power_label(definition.key), f"board_power_info:{definition.key}"),
+            MenuItem(self._board_action_label(definition.key), primary_action),
+            MenuItem("Back", "back"),
+        ]
+
+    def _refresh_collection_menu_labels(self) -> None:
+        self.collection_menu.title = self._collection_menu_title()
+        self.collection_menu.items = [
+            MenuItem(self._collection_item_label(definition.key), f"collection_info:{definition.key}")
+            for definition in collection_definitions()
+        ] + [MenuItem("Back", "back")]
+
+    def _refresh_events_menu_labels(self) -> None:
+        ensure_event_state(self.settings)
+        self.events_menu.title = self._events_menu_title()
+        self.events_menu.items = [
+            MenuItem(self._daily_event_info_label(), "event_info"),
+            MenuItem(self._daily_high_score_status_label(), "event_info"),
+            MenuItem(self._daily_high_score_action_label(), "claim_daily_high_score"),
+            MenuItem(self._coin_meter_status_label(), "event_info"),
+            MenuItem(self._coin_meter_action_label(), "claim_coin_meter"),
+            MenuItem(f"Mini Mystery Box: {'Ready' if daily_gift_available(self.settings) else 'Claimed Today'}", "event_info"),
+            MenuItem(self._shop_daily_gift_label(), "claim_daily_gift"),
+            MenuItem(self._login_calendar_status_label(), "event_info"),
+            MenuItem(self._login_calendar_action_label(), "claim_login_reward"),
+            MenuItem(self._word_hunt_status_label(), "event_info"),
+            MenuItem(self._season_hunt_status_label(), "event_info"),
+            MenuItem("Back", "back"),
+        ]
+
+    def _refresh_missions_hub_menu_labels(self) -> None:
+        ensure_quest_state(self.settings)
+        self.missions_hub_menu.title = self._missions_hub_title()
+        self.missions_hub_menu.items = [
+            MenuItem(self._quest_menu_title(), "open_quests"),
+            MenuItem(self._mission_status_text(), "open_mission_set"),
+            MenuItem(self._achievements_menu_title(), "open_achievements"),
+            MenuItem("Back", "back"),
+        ]
+
+    def _refresh_mission_set_menu_labels(self) -> None:
+        ensure_progression_state(self.settings)
+        self.mission_set_menu.title = self._mission_set_menu_title()
+        items = [
+            MenuItem(
+                f"{goal.label}   {int(self.settings.get('mission_metrics', {}).get(goal.metric, 0) or 0)}/{goal.target}",
+                "mission_info",
+            )
+            for goal in self._mission_goals()
+        ]
+        items.append(MenuItem(f"Permanent Multiplier: x{1 + int(self.settings.get('mission_multiplier_bonus', 0))}", "mission_info"))
+        items.append(MenuItem("Back", "back"))
+        self.mission_set_menu.items = items
+
+    def _refresh_quest_menu_labels(self) -> None:
+        ensure_quest_state(self.settings)
+        self.quests_menu.title = self._quest_menu_title()
+        items = [
+            MenuItem(self._quest_meter_label(), "quest_info"),
+            MenuItem(self._quest_meter_action_label(), "claim_quest_meter"),
+        ]
+        for quest in daily_quests():
+            action = f"claim_quest:{quest.key}" if quest_completed(self.settings, quest) and not quest_claimed(self.settings, quest) else "quest_info"
+            items.append(MenuItem(self._quest_item_label(quest.key), action))
+        for quest in seasonal_quests():
+            action = f"claim_quest:{quest.key}" if quest_completed(self.settings, quest) and not quest_claimed(self.settings, quest) else "quest_info"
+            items.append(MenuItem(self._quest_item_label(quest.key), action))
+        items.append(MenuItem("Back", "back"))
+        self.quests_menu.items = items
+
+    def _refresh_me_menu_labels(self) -> None:
+        ensure_board_state(self.settings)
+        ensure_collection_state(self.settings)
+        self.me_menu.title = self._me_menu_title()
+        completed = len(completed_collection_keys(self.settings))
+        total = len(collection_definitions())
+        self.me_menu.items = [
+            MenuItem(self._character_menu_title(), "open_characters"),
+            MenuItem(self._board_menu_title(), "open_boards"),
+            MenuItem(self._item_upgrade_menu_title(), "open_item_upgrades"),
+            MenuItem(f"Collections   {completed}/{total}", "open_collections"),
             MenuItem("Back", "back"),
         ]
 
@@ -1341,6 +1715,24 @@ class SubwayBlindGame:
     def _record_achievement_max(self, metric: str, value: int) -> None:
         set_achievement_progress_max(self.settings, metric, value)
         self._announce_achievement_unlocks()
+
+    def _announce_collection_unlocks(self, previous_completed: tuple[str, ...]) -> None:
+        current_completed = completed_collection_keys(self.settings)
+        new_keys = [key for key in current_completed if key not in previous_completed]
+        if not new_keys:
+            return
+        self.settings["collections_completed"] = list(current_completed)
+        self.audio.play("unlock", channel="ui")
+        self.audio.play("mission_reward", channel="ui2")
+        for key in new_keys:
+            definition = next(item for item in collection_definitions() if item.key == key)
+            self.speaker.speak(
+                f"Collection complete: {definition.name}. {collection_bonus_summary(definition)}.",
+                interrupt=False,
+            )
+        self._sync_character_progress()
+        self._refresh_collection_menu_labels()
+        self._refresh_me_menu_labels()
 
     def _build_controls_menu(self) -> None:
         self._sync_selected_binding_device()
@@ -1507,24 +1899,34 @@ class SubwayBlindGame:
                 "Set your loadout, then launch a new run when you are ready to hit the tracks.",
             ),
             MenuItem(
-                "What's New",
-                "whats_new",
-                "Hear the latest update notes, balance changes, and new features in this build.",
+                "Events",
+                "events",
+                "Open the live event hub for Daily High Score, Coin Meter, the login calendar, and daily rewards.",
+            ),
+            MenuItem(
+                "Missions",
+                "missions_hub",
+                "Review mission sets, quests, and achievement progress from a single progression hub.",
+            ),
+            MenuItem(
+                "Me",
+                "me",
+                "Manage your active runner, hoverboard, upgrades, and collection bonuses.",
             ),
             MenuItem(
                 "Shop",
                 "shop",
-                "Spend banked coins on hoverboards, upgrades, boosters, and character unlocks.",
-            ),
-            MenuItem(
-                "Achievements",
-                "achievements",
-                "Review unlocked milestones and check which long-term goals still need progress.",
+                "Spend banked coins on hoverboards, boosters, boxes, and your free daily gift.",
             ),
             MenuItem(
                 "Leaderboard",
                 "leaderboard",
                 "Connect to the online leaderboard, browse top players, and inspect published run history.",
+            ),
+            MenuItem(
+                "What's New",
+                "whats_new",
+                "Hear the latest update notes, balance changes, and new features in this build.",
             ),
             MenuItem(
                 "Options",
@@ -1838,7 +2240,7 @@ class SubwayBlindGame:
         return f"Missions {completed}/3"
 
     def _current_word(self) -> str:
-        return daily_word_for()
+        return active_word_for_settings(self.settings)
 
     def _remaining_word_letters(self) -> str:
         return remaining_word_letters(self.settings)
@@ -1848,8 +2250,9 @@ class SubwayBlindGame:
         return remaining_letters[:1]
 
     def _choose_support_spawn_kind(self) -> str:
+        profile = self._active_event_profile
         kinds = ["power", "box", "key"]
-        weights = [0.58, 0.18, 0.08]
+        weights = [0.58, 0.18 + float(profile.get("box_bonus", 0.0) or 0.0), 0.08]
         active_word = any(obstacle.kind == "word" and obstacle.z > 0 for obstacle in self.obstacles)
         active_token = any(obstacle.kind == "season_token" and obstacle.z > 0 for obstacle in self.obstacles)
         active_multiplier = self.player.mult2x > 0 or any(
@@ -1862,14 +2265,14 @@ class SubwayBlindGame:
             weights.append(0.09)
         if not active_super_box:
             kinds.append("super_box")
-            weights.append(0.06)
+            weights.append(0.06 + float(profile.get("super_box_bonus", 0.0) or 0.0))
         if not active_pogo:
             kinds.append("pogo")
             weights.append(0.09)
-        if self._quest_changes_enabled() and self._remaining_word_letters() and not active_word:
+        if self._remaining_word_letters() and not active_word:
             kinds.append("word")
-            weights.append(0.08)
-        if self._quest_changes_enabled() and next_season_reward_threshold(self.settings) is not None and not active_token:
+            weights.append(0.08 + float(profile.get("word_bonus", 0.0) or 0.0))
+        if next_season_reward_threshold(self.settings) is not None and not active_token:
             kinds.append("season_token")
             weights.append(0.05)
         return random.choices(kinds, weights=weights, k=1)[0]
@@ -2054,7 +2457,19 @@ class SubwayBlindGame:
 
     def _sync_character_progress(self) -> None:
         ensure_character_progress_state(self.settings)
-        self._active_character_bonuses = character_runtime_bonuses(self.settings)
+        ensure_board_state(self.settings)
+        ensure_collection_state(self.settings)
+        ensure_quest_state(self.settings)
+        ensure_event_state(self.settings)
+        self._collection_bonuses = collection_runtime_bonuses(self.settings)
+        character_bonuses = character_runtime_bonuses(self.settings)
+        self._active_character_bonuses = CharacterRuntimeBonuses(
+            banked_coin_bonus_ratio=character_bonuses.banked_coin_bonus_ratio + self._collection_bonuses.banked_coin_bonus_ratio,
+            hoverboard_duration_bonus=character_bonuses.hoverboard_duration_bonus + self._collection_bonuses.hoverboard_duration_bonus,
+            power_duration_multiplier=character_bonuses.power_duration_multiplier * self._collection_bonuses.power_duration_multiplier,
+            starting_multiplier_bonus=character_bonuses.starting_multiplier_bonus + self._collection_bonuses.starting_multiplier_bonus,
+        )
+        self._active_event_profile = event_runtime_profile(self.settings)
 
     def _powerup_duration(self, key: str) -> float:
         return self._character_adjusted_power_duration(item_upgrade_duration(self.settings, key))
@@ -2067,15 +2482,19 @@ class SubwayBlindGame:
             return
         if not self._spend_bank_coins(definition.unlock_cost):
             return
+        previous_completed = completed_collection_keys(self.settings)
         self.settings["character_progress"][definition.key]["unlocked"] = True
         self._sync_character_progress()
         self._refresh_shop_menu_labels()
         self._refresh_character_menu_labels()
         self._refresh_character_detail_menu_labels(definition.key)
+        self._refresh_collection_menu_labels()
+        self._refresh_me_menu_labels()
         self._persist_settings()
         self.audio.play("unlock", channel="ui3")
         self.speaker.speak(f"{definition.name} unlocked.", interrupt=True)
         self.speaker.speak(self._shop_coins_label(), interrupt=False)
+        self._announce_collection_unlocks(previous_completed)
 
     def _select_character(self, key: str) -> None:
         definition = character_definition(key)
@@ -2092,6 +2511,8 @@ class SubwayBlindGame:
         self._refresh_shop_menu_labels()
         self._refresh_character_menu_labels()
         self._refresh_character_detail_menu_labels(definition.key)
+        self._refresh_events_menu_labels()
+        self._refresh_me_menu_labels()
         self._persist_settings()
         self.audio.play("confirm", channel="ui")
         self.speaker.speak(f"{definition.name} selected.", interrupt=True)
@@ -2136,6 +2557,7 @@ class SubwayBlindGame:
         self._refresh_shop_menu_labels()
         self._refresh_item_upgrade_menu_labels()
         self._refresh_item_upgrade_detail_menu_labels(definition.key)
+        self._refresh_me_menu_labels()
         self._persist_settings()
         upgraded_level = item_upgrade_level(self.settings, definition.key)
         upgraded_duration = item_upgrade_duration(self.settings, definition.key)
@@ -2145,6 +2567,92 @@ class SubwayBlindGame:
             interrupt=True,
         )
         self.speaker.speak(self._shop_coins_label(), interrupt=False)
+
+    def _unlock_board(self, key: str) -> None:
+        definition = board_definition(key)
+        if board_unlocked(self.settings, definition.key):
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(f"{definition.name} is already unlocked.", interrupt=True)
+            return
+        if not self._spend_bank_coins(definition.unlock_cost):
+            return
+        previous_completed = completed_collection_keys(self.settings)
+        self.settings["board_progress"][definition.key]["unlocked"] = True
+        self._sync_character_progress()
+        self._refresh_board_menu_labels()
+        self._refresh_board_detail_menu_labels(definition.key)
+        self._refresh_collection_menu_labels()
+        self._refresh_me_menu_labels()
+        self._persist_settings()
+        self.audio.play("unlock", channel="ui3")
+        self.speaker.speak(f"{definition.name} unlocked.", interrupt=True)
+        self.speaker.speak(self._shop_coins_label(), interrupt=False)
+        self._announce_collection_unlocks(previous_completed)
+
+    def _select_board(self, key: str) -> None:
+        definition = board_definition(key)
+        if not board_unlocked(self.settings, definition.key):
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(f"{definition.name} is still locked.", interrupt=True)
+            return
+        if selected_board_definition(self.settings).key == definition.key:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(f"{definition.name} is already active.", interrupt=True)
+            return
+        self.settings["selected_board"] = definition.key
+        self._sync_character_progress()
+        self._refresh_board_menu_labels()
+        self._refresh_board_detail_menu_labels(definition.key)
+        self._refresh_me_menu_labels()
+        self._refresh_loadout_menu_labels()
+        self._persist_settings()
+        self.audio.play("confirm", channel="ui")
+        self.speaker.speak(f"{definition.name} selected.", interrupt=True)
+
+    def _apply_meta_reward(self, reward: dict[str, object] | None, source: str) -> bool:
+        if reward is None:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(f"{source} is not ready yet.", interrupt=True)
+            return False
+        kind = str(reward.get("kind") or "").strip().lower()
+        amount = max(1, int(reward.get("amount", 1) or 1))
+        if kind == "coins":
+            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + amount
+            self.audio.play("gui_cash", channel="ui3")
+            self.speaker.speak(f"{source}. {amount} coins saved.", interrupt=True)
+            return True
+        if kind == "key":
+            self.settings["keys"] = int(self.settings.get("keys", 0)) + amount
+            self.audio.play("unlock", channel="ui3")
+            self.speaker.speak(f"{source}. {amount} key{'s' if amount != 1 else ''}.", interrupt=True)
+            return True
+        if kind == "headstart":
+            self.settings["headstarts"] = int(self.settings.get("headstarts", 0)) + amount
+            self.audio.play("unlock", channel="ui3")
+            self.speaker.speak(f"{source}. {amount} headstart{'s' if amount != 1 else ''}.", interrupt=True)
+            return True
+        if kind == "score_booster":
+            self.settings["score_boosters"] = int(self.settings.get("score_boosters", 0)) + amount
+            self.audio.play("unlock", channel="ui3")
+            self.speaker.speak(f"{source}. {amount} score booster{'s' if amount != 1 else ''}.", interrupt=True)
+            return True
+        if kind == "hoverboard":
+            self.settings["hoverboards"] = int(self.settings.get("hoverboards", 0)) + amount
+            self.audio.play("unlock", channel="ui3")
+            self.speaker.speak(f"{source}. {amount} hoverboard{'s' if amount != 1 else ''}.", interrupt=True)
+            return True
+        if kind == "event_coins":
+            self.settings["event_state"]["event_coins"] = int(self.settings["event_state"].get("event_coins", 0)) + amount
+            self.audio.play("mission_reward", channel="ui3")
+            self.speaker.speak(f"{source}. {amount} event coins.", interrupt=True)
+            return True
+        if kind == "super_box":
+            self.speaker.speak(f"{source}. Super Mystery Box.", interrupt=True)
+            self._open_super_mystery_box(source)
+            return True
+        self.audio.play("menuedge", channel="ui")
+        self.speaker.speak(f"{source} reward is unavailable.", interrupt=True)
+        return False
 
     def _purchase_shop_item(self, item: str) -> None:
         if item == "hoverboard":
@@ -2156,7 +2664,15 @@ class SubwayBlindGame:
         elif item == "mystery_box":
             if not self._spend_bank_coins(SHOP_PRICES["mystery_box"]):
                 return
-            self._grant_shop_box_reward(pick_shop_mystery_box_reward())
+            if self._active_event_profile.get("jackpot_bonus"):
+                reward = random.choices(
+                    ["coins", "hover", "key", "headstart", "score_booster", "jackpot", "nothing"],
+                    weights=[45, 12, 12, 10, 8, 12, 1],
+                    k=1,
+                )[0]
+            else:
+                reward = pick_shop_mystery_box_reward()
+            self._grant_shop_box_reward(reward)
         elif item == "headstart":
             if not self._spend_bank_coins(SHOP_PRICES["headstart"]):
                 return
@@ -2230,6 +2746,22 @@ class SubwayBlindGame:
         if character_bonus > 0:
             active_character = selected_character_definition(self.settings)
             self.speaker.speak(f"{active_character.name} bonus saved {character_bonus} extra coins.", interrupt=False)
+        record_daily_score(self.settings, int(self.state.score))
+        record_coin_meter_coins(self.settings, saved_coins)
+        hoverboards_used = int(self._compact_powerup_usage(self._active_run_stats.get("powerup_usage")).get("hoverboard", 0) or 0)
+        for quest in record_quest_metric(self.settings, "distance_meters", int(self.state.distance)):
+            self.audio.play("mission_reward", channel="ui3")
+            self.speaker.speak(f"Quest ready: {quest.label}.", interrupt=False)
+        for quest in record_quest_metric(self.settings, "runs_completed", 1):
+            self.audio.play("mission_reward", channel="ui3")
+            self.speaker.speak(f"Quest ready: {quest.label}.", interrupt=False)
+        if hoverboards_used > 0:
+            for quest in record_quest_metric(self.settings, "hoverboards_used", hoverboards_used):
+                self.audio.play("mission_reward", channel="ui3")
+                self.speaker.speak(f"Quest ready: {quest.label}.", interrupt=False)
+        self._refresh_events_menu_labels()
+        self._refresh_quest_menu_labels()
+        self._refresh_missions_hub_menu_labels()
         self._persist_settings()
 
     def _clear_menu_repeat(self) -> None:
@@ -2658,6 +3190,19 @@ class SubwayBlindGame:
             if self.active_menu == self.help_topic_menu:
                 self._set_active_menu(self.howto_menu)
                 return True
+            if self.active_menu == self.events_menu:
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "events"))
+                return True
+            if self.active_menu == self.missions_hub_menu:
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "missions_hub"))
+                return True
+            if self.active_menu in {self.mission_set_menu, self.quests_menu, self.achievements_menu}:
+                self._refresh_missions_hub_menu_labels()
+                self._set_active_menu(self.missions_hub_menu)
+                return True
+            if self.active_menu == self.me_menu:
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "me"))
+                return True
             if self.active_menu == self.server_status_menu:
                 self._cancel_leaderboard_operation()
                 if self._leaderboard_return_menu is not None:
@@ -2679,16 +3224,38 @@ class SubwayBlindGame:
                 self._set_active_menu(self.item_upgrade_menu)
                 return True
             if self.active_menu == self.item_upgrade_menu:
-                self._refresh_shop_menu_labels()
-                self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_item_upgrades"))
+                return_menu = self._meta_return_menu or self.shop_menu
+                if return_menu == self.shop_menu:
+                    self._refresh_shop_menu_labels()
+                    self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_item_upgrades"))
+                    return True
+                self._refresh_me_menu_labels()
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_item_upgrades"))
                 return True
             if self.active_menu == self.character_detail_menu:
                 self._refresh_character_menu_labels()
                 self._set_active_menu(self.character_menu)
                 return True
             if self.active_menu == self.character_menu:
-                self._refresh_shop_menu_labels()
-                self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_character_upgrades"))
+                return_menu = self._meta_return_menu or self.shop_menu
+                if return_menu == self.shop_menu:
+                    self._refresh_shop_menu_labels()
+                    self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_character_upgrades"))
+                    return True
+                self._refresh_me_menu_labels()
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_characters"))
+                return True
+            if self.active_menu == self.board_detail_menu:
+                self._refresh_board_menu_labels()
+                self._set_active_menu(self.board_menu)
+                return True
+            if self.active_menu == self.board_menu:
+                self._refresh_me_menu_labels()
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_boards"))
+                return True
+            if self.active_menu == self.collection_menu:
+                self._refresh_me_menu_labels()
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_collections"))
                 return True
             if self.active_menu == self.whats_new_menu:
                 self._set_active_menu(self.main_menu)
@@ -2703,6 +3270,19 @@ class SubwayBlindGame:
                 self._refresh_loadout_menu_labels()
                 self._set_active_menu(self.loadout_menu)
                 return True
+            if action == "events":
+                self._refresh_events_menu_labels()
+                self._set_active_menu(self.events_menu)
+                return True
+            if action == "missions_hub":
+                self._refresh_missions_hub_menu_labels()
+                self._set_active_menu(self.missions_hub_menu)
+                return True
+            if action == "me":
+                self._refresh_me_menu_labels()
+                self._set_active_menu(self.me_menu)
+                self.speaker.speak(self._shop_coins_label(), interrupt=False)
+                return True
             if action == "whats_new":
                 self._open_info_dialog(load_whats_new_content(), self.whats_new_menu)
                 return True
@@ -2710,10 +3290,6 @@ class SubwayBlindGame:
                 self._refresh_shop_menu_labels()
                 self._set_active_menu(self.shop_menu)
                 self.speaker.speak(self._shop_coins_label(), interrupt=False)
-                return True
-            if action == "achievements":
-                self._refresh_achievements_menu_labels()
-                self._set_active_menu(self.achievements_menu)
                 return True
             if action == "leaderboard":
                 self._open_leaderboard()
@@ -2746,6 +3322,9 @@ class SubwayBlindGame:
             if action == "back":
                 self._set_active_menu(self.main_menu)
                 return True
+            if action == "loadout_board_info":
+                self.speaker.speak(self._loadout_board_label(), interrupt=True)
+                return True
             if action == "toggle_headstart":
                 owned = int(self.settings.get("headstarts", 0))
                 if owned <= 0:
@@ -2755,7 +3334,7 @@ class SubwayBlindGame:
                 self.selected_headstarts = (self.selected_headstarts + 1) % (clamp_headstart_uses(owned) + 1)
                 self.audio.play("confirm", channel="ui")
                 self._refresh_loadout_menu_labels()
-                self.speaker.speak(self.loadout_menu.items[0].label, interrupt=True)
+                self.speaker.speak(self.loadout_menu.items[1].label, interrupt=True)
                 return True
             if action == "toggle_score_booster":
                 owned = int(self.settings.get("score_boosters", 0))
@@ -2766,11 +3345,121 @@ class SubwayBlindGame:
                 self.selected_score_boosters = (self.selected_score_boosters + 1) % (min(3, owned) + 1)
                 self.audio.play("confirm", channel="ui")
                 self._refresh_loadout_menu_labels()
-                self.speaker.speak(self.loadout_menu.items[1].label, interrupt=True)
+                self.speaker.speak(self.loadout_menu.items[2].label, interrupt=True)
                 return True
             if action == "begin_run":
                 self.start_run()
                 return True
+
+        if self.active_menu == self.events_menu:
+            if action == "claim_daily_high_score":
+                if self._apply_meta_reward(claim_daily_high_score_reward(self.settings), "Daily High Score reward"):
+                    self.audio.play("mission_reward", channel="ui")
+                    self._refresh_events_menu_labels()
+                    self._persist_settings()
+                return True
+            if action == "claim_coin_meter":
+                if self._apply_meta_reward(claim_coin_meter_reward(self.settings), "Coin Meter chest"):
+                    self.audio.play("mission_reward", channel="ui")
+                    self._refresh_events_menu_labels()
+                    self._persist_settings()
+                return True
+            if action == "claim_daily_gift":
+                reward = claim_daily_gift(self.settings)
+                if reward is not None:
+                    self.audio.play("mystery_box_open", channel="ui")
+                if self._apply_meta_reward(reward, "Free Daily Gift"):
+                    self._refresh_events_menu_labels()
+                    self._refresh_shop_menu_labels()
+                    self._persist_settings()
+                return True
+            if action == "claim_login_reward":
+                if self._apply_meta_reward(claim_login_calendar_reward(self.settings), "Daily Login reward"):
+                    self.audio.play("mission_reward", channel="ui")
+                    self._refresh_events_menu_labels()
+                    self._persist_settings()
+                return True
+            if action == "back":
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "events"))
+                return True
+            return True
+
+        if self.active_menu == self.missions_hub_menu:
+            if action == "open_quests":
+                self._refresh_quest_menu_labels()
+                self._set_active_menu(self.quests_menu)
+                return True
+            if action == "open_mission_set":
+                self._refresh_mission_set_menu_labels()
+                self._set_active_menu(self.mission_set_menu)
+                return True
+            if action == "open_achievements":
+                self._refresh_achievements_menu_labels()
+                self._set_active_menu(self.achievements_menu)
+                return True
+            if action == "back":
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "missions_hub"))
+                return True
+            return True
+
+        if self.active_menu == self.mission_set_menu:
+            if action == "back":
+                self._refresh_missions_hub_menu_labels()
+                self._set_active_menu(self.missions_hub_menu, start_index=self._menu_index_for_action(self.missions_hub_menu, "open_mission_set"))
+                return True
+            return True
+
+        if self.active_menu == self.quests_menu:
+            if action == "claim_quest_meter":
+                if self._apply_meta_reward(claim_meter_reward(self.settings), "Sneaker Meter reward"):
+                    self.audio.play("mission_reward", channel="ui")
+                    self._refresh_quest_menu_labels()
+                    self._persist_settings()
+                return True
+            if action.startswith("claim_quest:"):
+                quest_key = action.split(":", 1)[1]
+                quest = claim_quest(self.settings, quest_key)
+                if quest is None:
+                    self.audio.play("menuedge", channel="ui")
+                    self.speaker.speak("That quest is not ready yet.", interrupt=True)
+                    return True
+                self.audio.play("mission_reward", channel="ui")
+                self.audio.play("unlock", channel="ui2")
+                self.speaker.speak(f"{quest.label}. {quest.sneaker_reward} sneakers added.", interrupt=True)
+                self._refresh_quest_menu_labels()
+                self._refresh_missions_hub_menu_labels()
+                self._persist_settings()
+                return True
+            if action == "back":
+                self._refresh_missions_hub_menu_labels()
+                self._set_active_menu(self.missions_hub_menu, start_index=self._menu_index_for_action(self.missions_hub_menu, "open_quests"))
+                return True
+            return True
+
+        if self.active_menu == self.me_menu:
+            if action == "open_characters":
+                self._meta_return_menu = self.me_menu
+                self._refresh_character_menu_labels()
+                self._set_active_menu(self.character_menu)
+                return True
+            if action == "open_boards":
+                self._meta_return_menu = self.me_menu
+                self._refresh_board_menu_labels()
+                self._set_active_menu(self.board_menu)
+                return True
+            if action == "open_item_upgrades":
+                self._meta_return_menu = self.me_menu
+                self._refresh_item_upgrade_menu_labels()
+                self._set_active_menu(self.item_upgrade_menu)
+                return True
+            if action == "open_collections":
+                self._refresh_collection_menu_labels()
+                self._set_active_menu(self.collection_menu)
+                return True
+            if action == "back":
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "me"))
+                return True
+            return True
 
         if self.active_menu == self.options_menu:
             if action == "opt_leaderboard_account":
@@ -2991,12 +3680,23 @@ class SubwayBlindGame:
             if action == "buy_score_booster":
                 self._purchase_shop_item("score_booster")
                 return True
+            if action == "claim_daily_gift":
+                reward = claim_daily_gift(self.settings)
+                if reward is not None:
+                    self.audio.play("mystery_box_open", channel="ui")
+                if self._apply_meta_reward(reward, "Free Daily Gift"):
+                    self._refresh_shop_menu_labels()
+                    self._refresh_events_menu_labels()
+                    self._persist_settings()
+                return True
             if action == "open_item_upgrades":
+                self._meta_return_menu = self.shop_menu
                 self._refresh_item_upgrade_menu_labels()
                 self._set_active_menu(self.item_upgrade_menu)
                 self.speaker.speak(self._shop_coins_label(), interrupt=False)
                 return True
             if action == "open_character_upgrades":
+                self._meta_return_menu = self.shop_menu
                 self._refresh_character_menu_labels()
                 self._set_active_menu(self.character_menu)
                 self.speaker.speak(self._shop_coins_label(), interrupt=False)
@@ -3004,8 +3704,12 @@ class SubwayBlindGame:
 
         if self.active_menu == self.item_upgrade_menu:
             if action == "back":
-                self._refresh_shop_menu_labels()
-                self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_item_upgrades"))
+                if self._meta_return_menu in {None, self.shop_menu}:
+                    self._refresh_shop_menu_labels()
+                    self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_item_upgrades"))
+                    return True
+                self._refresh_me_menu_labels()
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_item_upgrades"))
                 return True
             if action.startswith("item_upgrade_open:"):
                 self._refresh_item_upgrade_detail_menu_labels(action.split(":", 1)[1])
@@ -3040,8 +3744,12 @@ class SubwayBlindGame:
 
         if self.active_menu == self.character_menu:
             if action == "back":
-                self._refresh_shop_menu_labels()
-                self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_character_upgrades"))
+                if self._meta_return_menu in {None, self.shop_menu}:
+                    self._refresh_shop_menu_labels()
+                    self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_character_upgrades"))
+                    return True
+                self._refresh_me_menu_labels()
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_characters"))
                 return True
             if action.startswith("character_open:"):
                 self._refresh_character_detail_menu_labels(action.split(":", 1)[1])
@@ -3081,6 +3789,61 @@ class SubwayBlindGame:
             if action.startswith("character_upgrade:"):
                 self._upgrade_character(action.split(":", 1)[1])
                 return True
+
+        if self.active_menu == self.board_menu:
+            if action == "back":
+                self._refresh_me_menu_labels()
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_boards"))
+                return True
+            if action.startswith("board_open:"):
+                self._refresh_board_detail_menu_labels(action.split(":", 1)[1])
+                self._set_active_menu(self.board_detail_menu)
+                return True
+
+        if self.active_menu == self.board_detail_menu:
+            if action == "back":
+                self._refresh_board_menu_labels()
+                board_keys = [definition.key for definition in board_definitions()]
+                try:
+                    start_index = board_keys.index(self._board_detail_key)
+                except ValueError:
+                    start_index = 0
+                self._set_active_menu(self.board_menu, start_index=start_index)
+                return True
+            if action.startswith("board_status_info:"):
+                definition = board_definition(action.split(":", 1)[1])
+                self.speaker.speak(f"{definition.name}. {self._board_status_label(definition.key)}.", interrupt=True)
+                return True
+            if action.startswith("board_power_info:"):
+                definition = board_definition(action.split(":", 1)[1])
+                self.speaker.speak(f"{definition.name}. {self._board_power_label(definition.key)}.", interrupt=True)
+                return True
+            if action.startswith("board_unlock:"):
+                self._unlock_board(action.split(":", 1)[1])
+                return True
+            if action.startswith("board_select:"):
+                self._select_board(action.split(":", 1)[1])
+                return True
+            if action.startswith("board_active_info:"):
+                definition = board_definition(action.split(":", 1)[1])
+                self.speaker.speak(f"{definition.name} is already the active board.", interrupt=True)
+                return True
+
+        if self.active_menu == self.collection_menu:
+            if action == "back":
+                self._refresh_me_menu_labels()
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_collections"))
+                return True
+            if action.startswith("collection_info:"):
+                key = action.split(":", 1)[1]
+                definition = next(item for item in collection_definitions() if item.key == key)
+                owned, total = collection_progress(self.settings, definition)
+                status = "complete" if key in completed_collection_keys(self.settings) else "in progress"
+                self.speaker.speak(
+                    f"{definition.name}. {definition.description} {owned} of {total}. Bonus: {collection_bonus_summary(definition)}. Status: {status}.",
+                    interrupt=True,
+                )
+                return True
             if action.startswith("character_active_info:"):
                 definition = character_definition(action.split(":", 1)[1])
                 self.speaker.speak(f"{definition.name} is already your active character.", interrupt=True)
@@ -3096,7 +3859,8 @@ class SubwayBlindGame:
 
         if self.active_menu == self.achievements_menu:
             if action == "back":
-                self._set_active_menu(self.main_menu)
+                self._refresh_missions_hub_menu_labels()
+                self._set_active_menu(self.missions_hub_menu, start_index=self._menu_index_for_action(self.missions_hub_menu, "open_achievements"))
                 return True
             if action.startswith("achievement:"):
                 achievement_key = action.split(":", 1)[1]
@@ -3927,7 +4691,7 @@ class SubwayBlindGame:
         self.spawn_director.reset()
         self.state.multiplier = 1 + int(self.settings.get("mission_multiplier_bonus", 0)) + score_booster_bonus(
             self.selected_score_boosters
-        ) + self._active_character_bonuses.starting_multiplier_bonus
+        ) + self._active_character_bonuses.starting_multiplier_bonus + int(self._active_event_profile.get("featured_multiplier_bonus", 0) or 0)
         self.state.speed = self.speed_profile.base_speed
         self._active_run_stats = self._empty_run_stats()
         self._footstep_timer = 0.0
@@ -3940,7 +4704,9 @@ class SubwayBlindGame:
         self._game_over_summary = self._empty_game_over_summary()
         self._magnet_loop_active = False
         self._jetpack_loop_active = False
+        self.player.board_extra_jump_available = False
         active_character = selected_character_definition(self.settings)
+        active_board = selected_board_definition(self.settings)
 
         if self.selected_headstarts > 0:
             self.settings["headstarts"] = max(0, int(self.settings.get("headstarts", 0)) - self.selected_headstarts)
@@ -3961,14 +4727,27 @@ class SubwayBlindGame:
 
         self.audio.play("slide_letters", channel="intro_ui")
         self.audio.play("intro_start", channel="ui")
+        self.audio.play("intro_shake", channel="intro_chase")
+        self.audio.play("intro_spray", channel="intro_spray_once")
         self.audio.music_start("gameplay")
+        event = self._active_event_profile.get("event")
+        event_message = ""
+        if event is not None:
+            event_label = str(getattr(event, "label", "") or "").strip()
+            if self._active_event_profile.get("featured_character_active"):
+                event_message = f" {event_label} active with bonus multiplier."
+            elif event_label:
+                event_message = f" {event_label} active."
         if self.selected_headstarts > 0:
             self.speaker.speak(
-                f"Run started. {active_character.name} active. Headstart active for {self.selected_headstarts} charge{'s' if self.selected_headstarts != 1 else ''}.",
+                f"Run started. {active_character.name} active. {active_board.name} board selected.{event_message} Headstart active for {self.selected_headstarts} charge{'s' if self.selected_headstarts != 1 else ''}.",
                 interrupt=True,
             )
         else:
-            self.speaker.speak(f"Run started. {active_character.name} active. Center lane.", interrupt=True)
+            self.speaker.speak(
+                f"Run started. {active_character.name} active. {active_board.name} board selected.{event_message} Center lane.",
+                interrupt=True,
+            )
 
         self.selected_headstarts = 0
         self.selected_score_boosters = 0
@@ -4007,18 +4786,24 @@ class SubwayBlindGame:
 
         self.player.lane = normalize_lane(self.player.lane)
         if key == pygame.K_LEFT:
-            if self.player.lane > LANES[0]:
-                self.player.lane = normalize_lane(self.player.lane - 1)
-                self._record_mission_event("dodges")
+            lane_step = 2 if self.player.hover_active > 0 and selected_board_definition(self.settings).power_key == "zap_sideways" else 1
+            target_lane = normalize_lane(self.player.lane - lane_step)
+            if target_lane != self.player.lane:
+                move_count = abs(target_lane - self.player.lane)
+                self.player.lane = target_lane
+                self._record_mission_event("dodges", move_count)
                 self.audio.play("dodge", pan=lane_to_pan(self.player.lane), channel="move")
                 if self.settings.get("announce_lane", True):
                     self.speaker.speak(lane_name(self.player.lane), interrupt=False)
             else:
                 self.audio.play("menuedge", channel="ui")
         elif key == pygame.K_RIGHT:
-            if self.player.lane < LANES[-1]:
-                self.player.lane = normalize_lane(self.player.lane + 1)
-                self._record_mission_event("dodges")
+            lane_step = 2 if self.player.hover_active > 0 and selected_board_definition(self.settings).power_key == "zap_sideways" else 1
+            target_lane = normalize_lane(self.player.lane + lane_step)
+            if target_lane != self.player.lane:
+                move_count = abs(target_lane - self.player.lane)
+                self.player.lane = target_lane
+                self._record_mission_event("dodges", move_count)
                 self.audio.play("dodge", pan=lane_to_pan(self.player.lane), channel="move")
                 if self.settings.get("announce_lane", True):
                     self.speaker.speak(lane_name(self.player.lane), interrupt=False)
@@ -4040,17 +4825,40 @@ class SubwayBlindGame:
                 self._apply_speaker_settings()
 
     def _try_jump(self) -> None:
-        if self.player.y > 0.01 or self.player.rolling > 0:
+        board = selected_board_definition(self.settings)
+        hover_power = board.power_key if self.player.hover_active > 0 else "standard"
+        can_double_jump = (
+            self.player.hover_active > 0
+            and hover_power == "double_jump"
+            and self.player.y > 0.01
+            and self.player.board_extra_jump_available
+            and self.player.jetpack <= 0
+            and self.player.headstart <= 0
+        )
+        if self.player.rolling > 0:
             return
-        self.player.vy = 13.0 if self.player.super_sneakers > 0 else 10.5
+        if self.player.y > 0.01 and not can_double_jump:
+            return
+        base_jump = 13.0 if self.player.super_sneakers > 0 else 10.5
+        if hover_power == "super_jump":
+            base_jump += 2.4
+        elif hover_power == "smooth_drift":
+            base_jump += 1.1
+        self.player.vy = base_jump
         self._record_mission_event("jumps")
+        if self.player.hover_active > 0 and hover_power == "double_jump":
+            if self.player.y <= 0.01:
+                self.player.board_extra_jump_available = True
+            else:
+                self.player.board_extra_jump_available = False
         sound_key = "sneakers_jump" if self.player.super_sneakers > 0 else "jump"
         self.audio.play(sound_key, pan=lane_to_pan(self.player.lane), channel="act")
 
     def _try_roll(self) -> None:
         if self.player.y > 0.01:
             return
-        self.player.rolling = 0.7
+        board = selected_board_definition(self.settings)
+        self.player.rolling = 1.05 if self.player.hover_active > 0 and board.power_key == "stay_low" else 0.7
         self._record_mission_event("rolls")
         self.audio.play("roll", pan=lane_to_pan(self.player.lane), channel="act")
 
@@ -4064,15 +4872,23 @@ class SubwayBlindGame:
         self.player.hoverboards -= 1
         self.settings["hoverboards"] = max(0, int(self.settings.get("hoverboards", 0)) - 1)
         self.player.hover_active = HOVERBOARD_DURATION + self._active_character_bonuses.hoverboard_duration_bonus
+        self.player.board_extra_jump_available = False
         self._record_run_powerup("hoverboard")
         self.audio.play("powerup", channel="act")
-        self.speaker.speak("Hoverboard active.", interrupt=False)
+        board = selected_board_definition(self.settings)
+        if board.power_key == "standard":
+            self.speaker.speak(f"{board.name} hoverboard active.", interrupt=False)
+        else:
+            self.speaker.speak(f"{board.name} hoverboard active. {board.power_label}.", interrupt=False)
 
     def _update_game(self, delta_time: float) -> None:
         self.player.lane = normalize_lane(self.player.lane)
         self.state.time += delta_time
         base_speed = self.speed_profile.speed_for_elapsed(self.state.time)
         self.state.speed = base_speed + HEADSTART_SPEED_BONUS if self.player.headstart > 0 else base_speed
+        active_board = selected_board_definition(self.settings)
+        if self.player.hover_active > 0 and active_board.power_key == "super_speed":
+            self.state.speed += 3.0
         speed_factor = self.speed_profile.progress(self.state.time)
         self.speaker.set_speed_factor(speed_factor)
         self.state.distance += self.state.speed * delta_time
@@ -4093,7 +4909,8 @@ class SubwayBlindGame:
             self._footstep_timer = 0.0
 
         if self.player.jetpack <= 0 and self.player.headstart <= 0 and (self.player.y > 0 or self.player.vy != 0):
-            self.player.vy -= 25.0 * delta_time
+            gravity = 18.0 if self.player.hover_active > 0 and active_board.power_key == "smooth_drift" else 25.0
+            self.player.vy -= gravity * delta_time
             self.player.y = max(0.0, self.player.y + self.player.vy * delta_time)
             if self.player.y <= 0.0 and self.player.vy < 0:
                 self.player.y = 0.0
@@ -4153,6 +4970,8 @@ class SubwayBlindGame:
 
         if self.player.headstart <= 0 and self.player.jetpack <= 0:
             decay("hover_active")
+        if self.player.hover_active <= 0:
+            self.player.board_extra_jump_available = False
         if self.player.jetpack <= 0 and self.player.headstart <= 0:
             decay("super_sneakers")
 
@@ -4408,10 +5227,19 @@ class SubwayBlindGame:
         self._launch_pogo_bounce()
         self.speaker.speak("Pogo stick.", interrupt=False)
 
+    def _pick_track_box_reward(self) -> str:
+        if self._active_event_profile.get("jackpot_bonus"):
+            return random.choices(
+                ["coins", "hover", "mult", "key", "headstart", "score_booster", "nothing"],
+                weights=[52, 16, 12, 8, 6, 4, 2],
+                k=1,
+            )[0]
+        return pick_mystery_box_reward()
+
     def _collect_box(self) -> None:
         self._record_mission_event("boxes")
         self._record_achievement_metric("total_boxes_opened", 1)
-        reward = pick_mystery_box_reward()
+        reward = self._pick_track_box_reward()
         self.speaker.speak("Opening Mystery Box.", interrupt=True)
         self.audio.play("mystery_box_open", channel="act")
         if reward == "coins":
@@ -4647,7 +5475,17 @@ class SubwayBlindGame:
         start_index = max(0, min(menu.index - (visible_rows // 2), max_start_index))
         visible_items = menu.items[start_index : start_index + visible_rows]
         y_position = list_top
-        if menu in {self.shop_menu, self.character_menu, self.character_detail_menu}:
+        if menu in {
+            self.shop_menu,
+            self.me_menu,
+            self.character_menu,
+            self.character_detail_menu,
+            self.board_menu,
+            self.board_detail_menu,
+            self.item_upgrade_menu,
+            self.item_upgrade_detail_menu,
+            self.collection_menu,
+        }:
             coins_surface = self.font.render(self._shop_coins_label(), True, (220, 220, 220))
             self.screen.blit(coins_surface, (70, y_position))
             y_position += 40

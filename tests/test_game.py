@@ -1425,10 +1425,12 @@ class GameTests(unittest.TestCase):
             [item.label for item in game.main_menu.items],
             [
                 "Start Game",
-                "What's New",
+                "Events",
+                "Missions",
+                "Me",
                 "Shop",
-                "Achievements",
                 "Leaderboard",
+                "What's New",
                 "Options",
                 "How to Play",
                 "Learn Game Sounds",
@@ -1681,7 +1683,7 @@ class GameTests(unittest.TestCase):
         game.main_menu.handle_key(pygame.K_DOWN)
 
         self.assertEqual(speaker.messages[0][0], "Main Menu   Version: 1.1.3. Start Game")
-        self.assertEqual(speaker.messages[-1][0], "What's New")
+        self.assertEqual(speaker.messages[-1][0], "Events")
 
     def test_main_menu_exit_action_opens_desktop_confirmation(self):
         game, _, _ = self.make_game()
@@ -1712,7 +1714,7 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.main_menu)
-        self.assertEqual(game.main_menu.index, 9)
+        self.assertEqual(game.main_menu.index, 11)
 
     def test_exit_confirmation_yes_closes_game(self):
         game, _, _ = self.make_game()
@@ -1778,11 +1780,23 @@ class GameTests(unittest.TestCase):
                 f"Open Mystery Box   Cost: {SHOP_PRICES['mystery_box']} Coins",
                 f"Buy Headstart   Cost: {SHOP_PRICES['headstart']} Coins   Owned: 2",
                 f"Buy Score Booster   Cost: {SHOP_PRICES['score_booster']} Coins   Owned: 3",
+                "Free Daily Gift   Available",
                 "Item Upgrades   Maxed: 0/4",
                 "Character Upgrades   Active: Jake",
                 "Back",
             ],
         )
+
+    def test_claim_daily_gift_updates_shop_and_events_labels(self):
+        game, _, audio = self.make_game()
+        game.active_menu = game.shop_menu
+
+        result = game._handle_menu_action("claim_daily_gift")
+
+        self.assertTrue(result)
+        self.assertIn(("mystery_box_open", "ui", False), audio.played)
+        self.assertEqual(game.shop_menu.items[4].label, "Free Daily Gift   Claimed Today")
+        self.assertIn("Claimed Today", game.events_menu.items[6].label)
 
     def test_character_menu_lists_officially_added_characters(self):
         game, _, _ = self.make_game()
@@ -2869,7 +2883,7 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.main_menu.index, 3)
         self.assertEqual(
             speaker.messages[-1][0],
-            "Achievements. Review unlocked milestones and check which long-term goals still need progress.",
+            "Me. Manage your active runner, hoverboard, upgrades, and collection bonuses.",
         )
 
     def test_menu_repeat_adjusts_option_values_while_holding_horizontal_arrow(self):
@@ -3013,8 +3027,19 @@ class GameTests(unittest.TestCase):
         game._select_character("tricky")
 
         self.assertEqual(game.settings["selected_character"], "tricky")
-        self.assertEqual(game.shop_menu.items[5].label, "Character Upgrades   Active: Tricky")
+        self.assertEqual(game.shop_menu.items[6].label, "Character Upgrades   Active: Tricky")
         self.assertIn(("Tricky selected.", True), speaker.messages)
+
+    def test_select_board_updates_active_board_and_loadout_label(self):
+        game, speaker, _ = self.make_game()
+        game.settings["board_progress"]["bouncer"]["unlocked"] = True
+        game._sync_character_progress()
+
+        game._select_board("bouncer")
+
+        self.assertEqual(game.settings["selected_board"], "bouncer")
+        self.assertEqual(game.loadout_menu.items[0].label, "Board: Bouncer   Power: Double Jump")
+        self.assertIn(("Bouncer selected.", True), speaker.messages)
 
     def test_upgrade_character_increases_level_and_updates_perk_summary(self):
         game, speaker, _ = self.make_game()
@@ -3050,7 +3075,7 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.settings["bank_coins"], 0)
         self.assertEqual(game.settings["item_upgrades"]["magnet"], 1)
         self.assertIn(("Coin Magnet upgraded to level 1. Pickup duration 10s.", True), speaker.messages)
-        self.assertEqual(game.shop_menu.items[4].label, "Item Upgrades   Maxed: 0/4")
+        self.assertEqual(game.shop_menu.items[5].label, "Item Upgrades   Maxed: 0/4")
 
     def test_purchase_item_upgrade_persists_after_reload(self):
         original_base_dir = config_module.BASE_DIR
@@ -3099,7 +3124,7 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.shop_menu)
-        self.assertEqual(game.shop_menu.index, 4)
+        self.assertEqual(game.shop_menu.index, 5)
 
     def test_item_upgrade_extends_magnet_power_duration(self):
         game, _, _ = self.make_game()

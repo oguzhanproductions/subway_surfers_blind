@@ -129,7 +129,7 @@ def ensure_progression_state(settings: dict, today: date | None = None) -> None:
     current_letters = settings.get("word_hunt_letters", "")
     if not isinstance(current_letters, str):
         current_letters = ""
-    active_word = daily_word_for(current_day)
+    active_word = active_word_for_settings(settings, current_day)
     if not active_word.startswith(current_letters):
         current_letters = ""
     settings["word_hunt_letters"] = current_letters
@@ -186,12 +186,19 @@ def daily_word_for(today: date | None = None) -> str:
     return WORD_HUNT_WORDS[current_day.toordinal() % len(WORD_HUNT_WORDS)]
 
 
+def active_word_for_settings(settings: dict, today: date | None = None) -> str:
+    configured_word = str(settings.get("word_hunt_active_word", "") or "").strip().upper()
+    if configured_word:
+        return configured_word
+    return daily_word_for(today)
+
+
 def remaining_word_letters(settings: dict, today: date | None = None) -> str:
     current_day = today or date.today()
     if settings.get("word_hunt_day") != current_day.isoformat():
-        return daily_word_for(current_day)
+        return active_word_for_settings(settings, current_day)
     collected = str(settings.get("word_hunt_letters", ""))
-    word = daily_word_for(current_day)
+    word = active_word_for_settings(settings, current_day)
     if not word.startswith(collected):
         return word
     return word[len(collected) :]
@@ -200,7 +207,7 @@ def remaining_word_letters(settings: dict, today: date | None = None) -> str:
 def register_word_letter(settings: dict, today: date | None = None) -> tuple[str, bool]:
     current_day = today or date.today()
     ensure_progression_state(settings, current_day)
-    word = daily_word_for(current_day)
+    word = active_word_for_settings(settings, current_day)
     collected = str(settings.get("word_hunt_letters", ""))
     next_letter = word[len(collected) : len(collected) + 1]
     if not next_letter:

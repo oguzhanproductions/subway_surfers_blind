@@ -9,10 +9,14 @@ import sys
 import tempfile
 from typing import Any
 
+from subway_blind.boards import DEFAULT_SELECTED_BOARD_KEY, default_board_progress_state, ensure_board_state
 from subway_blind.characters import DEFAULT_SELECTED_CHARACTER_KEY, default_character_progress_state
+from subway_blind.collections import ensure_collection_state
 from subway_blind.controls import default_controller_bindings, default_keyboard_bindings
+from subway_blind.events import default_event_state, ensure_event_state
 from subway_blind.item_upgrades import default_item_upgrade_state
 from subway_blind.progression import ensure_progression_state
+from subway_blind.quests import default_quest_state, ensure_quest_state
 from subway_blind.characters import ensure_character_progress_state
 from subway_blind.controls import ensure_controller_bindings, ensure_keyboard_bindings
 from subway_blind.item_upgrades import ensure_item_upgrade_state
@@ -66,6 +70,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "item_upgrades": default_item_upgrade_state(),
     "selected_character": DEFAULT_SELECTED_CHARACTER_KEY,
     "character_progress": default_character_progress_state(),
+    "selected_board": DEFAULT_SELECTED_BOARD_KEY,
+    "board_progress": default_board_progress_state(),
     "mission_set": 1,
     "mission_multiplier_bonus": 0,
     "mission_metrics": {
@@ -94,6 +100,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "total_season_tokens": 0,
     },
     "achievements_unlocked": [],
+    "collections_completed": [],
+    "quest_state": default_quest_state(),
+    "event_state": default_event_state(),
+    "word_hunt_active_word": "",
     "keyboard_bindings": default_keyboard_bindings(),
     "controller_bindings": default_controller_bindings(),
 }
@@ -217,7 +227,11 @@ def _normalized_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
             merged[key] = copy.deepcopy(settings.get(key, default_value))
     ensure_progression_state(merged)
     ensure_character_progress_state(merged)
+    ensure_board_state(merged)
     ensure_item_upgrade_state(merged)
+    ensure_collection_state(merged)
+    ensure_quest_state(merged)
+    ensure_event_state(merged)
     merged["keyboard_bindings"] = ensure_keyboard_bindings(merged.get("keyboard_bindings"))
     merged["controller_bindings"] = ensure_controller_bindings(merged.get("controller_bindings"))
     return merged
