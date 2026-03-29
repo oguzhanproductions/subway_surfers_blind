@@ -339,11 +339,51 @@ LEARN_SOUND_LIBRARY: tuple[LearnSoundEntry, ...] = tuple(
     LEARN_SOUND_DETAILS[key] for key in ACTIVE_GAMEPLAY_SOUND_KEYS
 )
 HOW_TO_TOPICS: tuple[HelpTopic, ...] = (
-    HelpTopic("movement", "Movement and Actions", "Move left and right to change lanes. Jump over low barriers and bushes. Roll under high barriers. Press Space to activate a hoverboard."),
-    HelpTopic("warnings", "Hazards and Warnings", "Listen for danger speech and warning sounds. The callout focuses on the action needed for your current lane, such as jump, roll, turn left, or turn right."),
-    HelpTopic("powerups", "Power Ups", "Collect magnets, jetpacks, score boosts, super sneakers, and pogo sticks to survive longer and build bigger scores."),
-    HelpTopic("rewards", "Coins and Rewards", "Collect coins during the run, then bank them when the run ends. Keys can revive you after a crash. Mystery boxes can grant extra items and bonuses."),
-    HelpTopic("progression", "Progress and Shop", "Missions raise your permanent multiplier. Word Hunt letters and Season Hunt tokens appear during runs. Spend saved coins in the shop on hoverboards, headstarts, score boosters, boxes, item upgrades, and character upgrades with unique passive bonuses."),
+    HelpTopic(
+        "movement",
+        "Movement and Actions",
+        "Move left and right to change lanes. Jump over low barriers and bushes. Roll under high barriers. Press Space to activate your selected hoverboard. Open Start Game to review your active board, headstarts, and score boosters before a run.",
+    ),
+    HelpTopic(
+        "warnings",
+        "Hazards and Warnings",
+        "Listen for danger speech and warning sounds. The callout focuses on the action needed for your current lane, such as jump, roll, turn left, or turn right. Near misses, collisions, hoverboard breaks, and guard pressure all have distinct audio layers.",
+    ),
+    HelpTopic(
+        "powerups",
+        "Power Ups and Boards",
+        "Collect magnets, jetpacks, double score, super sneakers, and pogo sticks to survive longer and build bigger scores. Your selected board also changes hoverboard behavior. Different boards can add double jump, super jump, super speed, smooth drift, sideways zaps, or longer low rolls.",
+    ),
+    HelpTopic(
+        "events",
+        "Events and Daily Rewards",
+        "Open Events from the main menu to review the current daily event, Daily High Score, Coin Meter, the mini mystery box daily gift, and the Daily Login Calendar. Daily events rotate through Super Mysterizer, Mega Jackpot, featured character bonuses, Super Mystery Box Mania, and Wordy Weekend.",
+    ),
+    HelpTopic(
+        "quests",
+        "Missions and Quests",
+        "Open Missions from the main menu to review mission sets, quests, and achievements. Mission sets raise your permanent multiplier. Daily and seasonal quests award sneakers, and sneakers fill the quest meter for extra rewards. Word Hunt letters and Season Hunt tokens still appear during runs and remain part of progression.",
+    ),
+    HelpTopic(
+        "collections",
+        "Boards and Collections",
+        "Open Me from the main menu to manage characters, boards, item upgrades, and collections. Collections complete when you unlock specific character or board sets. Finished collections grant passive bonuses such as stronger coin banking, longer hoverboards, longer power-up duration, or a higher starting multiplier.",
+    ),
+    HelpTopic(
+        "economy",
+        "Coins, Keys, and Shop",
+        "Collect coins during runs and bank them when the run ends. Keys can revive you after a crash. Spend saved coins in Shop on hoverboards, headstarts, score boosters, mystery boxes, and upgrades. Shop also includes the free daily gift when it is available.",
+    ),
+    HelpTopic(
+        "leaderboard",
+        "Leaderboard and Publishing",
+        "Open Leaderboard from the main menu after signing in through Options. You can browse all-time, daily, weekly, and monthly boards with difficulty filters, inspect player profiles, and publish finished runs with extended run details and verification status.",
+    ),
+    HelpTopic(
+        "navigation",
+        "Menu Navigation",
+        "The main menu is organized into Start Game, Events, Missions, Me, Shop, Leaderboard, Options, How to Play, Learn Game Sounds, Check for Updates, and Exit. Use Up and Down to move, Enter to confirm, Escape to go back, and Left or Right when adjusting options.",
+    ),
 )
 UPGRADE_HELP_TOPICS: dict[str, tuple[HelpTopic, ...]] = {
     "1.1.3": (

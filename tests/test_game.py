@@ -1849,6 +1849,17 @@ class GameTests(unittest.TestCase):
             speaker.messages,
         )
 
+    def test_how_to_play_includes_new_meta_system_categories(self):
+        game, _, _ = self.make_game()
+
+        game._refresh_howto_menu_labels()
+
+        labels = [item.label for item in game.howto_menu.items]
+        self.assertIn("Events and Daily Rewards", labels)
+        self.assertIn("Missions and Quests", labels)
+        self.assertIn("Boards and Collections", labels)
+        self.assertIn("Leaderboard and Publishing", labels)
+
     def test_whats_new_opens_line_by_line_dialog(self):
         game, speaker, _ = self.make_game()
         game.active_menu = game.main_menu
