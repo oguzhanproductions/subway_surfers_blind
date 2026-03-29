@@ -143,6 +143,30 @@ class LeaderboardClientTests(unittest.TestCase):
 
 
 class ServerConfigTests(unittest.TestCase):
+    def test_load_server_config_uses_inline_server_connection_values(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            temp_root = Path(temp_directory)
+            config_path = temp_root / "user-data" / "server.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "host": "tt5server.com.tr",
+                        "port": 5363,
+                        "server_public_key": "inline-public-key",
+                        "server_public_key_path": "",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(server_config_module, "default_server_config_path", return_value=config_path):
+                config = server_config_module.load_server_config()
+
+            self.assertEqual(config.host, "tt5server.com.tr")
+            self.assertEqual(config.port, 5363)
+            self.assertEqual(config.server_public_key, "inline-public-key")
+
     def test_load_server_config_resolves_relative_key_from_resource_dirs(self):
         with tempfile.TemporaryDirectory() as temp_directory:
             temp_root = Path(temp_directory)

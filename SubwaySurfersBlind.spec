@@ -12,7 +12,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=binaries,
-    datas=[('assets', 'assets')],
+    datas=[('assets', 'assets'), ('server.json', '.')],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
