@@ -2215,6 +2215,17 @@ class GameTests(unittest.TestCase):
         self.assertIn(("intro_spray", HEADSTART_SPRAY_CHANNEL, True), audio.played)
         self.assertGreater(game.player.headstart, 0.0)
 
+    def test_start_run_without_headstart_does_not_play_headstart_intro_layers(self):
+        game, _, audio = self.make_game()
+
+        game.start_run()
+
+        self.assertNotIn(("intro_shake", "intro_chase", False), audio.played)
+        self.assertNotIn(("intro_spray", "intro_spray_once", False), audio.played)
+        self.assertNotIn(("intro_shake", HEADSTART_SHAKE_CHANNEL, True), audio.played)
+        self.assertNotIn(("intro_spray", HEADSTART_SPRAY_CHANNEL, True), audio.played)
+        self.assertEqual(game.player.headstart, 0.0)
+
     def test_headstart_audio_stops_when_effect_expires(self):
         game, _, audio = self.make_game()
         game.settings["headstarts"] = 1
@@ -3526,6 +3537,24 @@ class GameTests(unittest.TestCase):
         game._handle_keyboard_event(event)
 
         self.assertIn(("Coins collected: 23.", False), speaker.messages)
+
+    def test_play_time_hotkey_announces_elapsed_run_time(self):
+        game, speaker, _ = self.make_game()
+        game.state.time = 65.0
+
+        game._handle_game_key(pygame.K_t)
+
+        self.assertIn(("Play time: 01:05.", False), speaker.messages)
+
+    def test_play_time_hotkey_works_through_keyboard_translation(self):
+        game, speaker, _ = self.make_game()
+        game.state.time = 3661.0
+        game.active_menu = None
+
+        event = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_t)
+        game._handle_keyboard_event(event)
+
+        self.assertIn(("Play time: 01:01:01.", False), speaker.messages)
 
     def test_tracking_toggles_default_to_disabled(self):
         game, _, _ = self.make_game()

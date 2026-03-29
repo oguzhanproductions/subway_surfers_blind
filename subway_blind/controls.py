@@ -428,7 +428,7 @@ class ControllerSupport:
                 continue
             if self.settings["keyboard_bindings"].get(action_key) == key:
                 return definition.target_key
-        if context == GAME_CONTEXT and key == pygame.K_r:
+        if context == GAME_CONTEXT and key in (pygame.K_r, pygame.K_t):
             return key
         if context == MENU_CONTEXT and key in (pygame.K_HOME, pygame.K_END):
             return key

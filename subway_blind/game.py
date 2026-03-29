@@ -2075,7 +2075,8 @@ class SubwayBlindGame:
         return (
             f"Use {move_left} and {move_right} to change lanes. "
             f"Press {jump} to jump, {roll} to roll, {hoverboard} to activate a hoverboard, "
-            f"{pause} to pause, and {speech} to toggle speech."
+            f"{pause} to pause, and {speech} to toggle speech. "
+            f"On keyboard, press R to hear coins and T to hear play time."
         )
 
     def _open_mandatory_update_menu(self, result: UpdateCheckResult) -> None:
@@ -4767,8 +4768,9 @@ class SubwayBlindGame:
 
         self.audio.play("slide_letters", channel="intro_ui")
         self.audio.play("intro_start", channel="ui")
-        self.audio.play("intro_shake", channel="intro_chase")
-        self.audio.play("intro_spray", channel="intro_spray_once")
+        if self.selected_headstarts > 0:
+            self.audio.play("intro_shake", channel="intro_chase")
+            self.audio.play("intro_spray", channel="intro_spray_once")
         self.audio.music_start("gameplay")
         event = self._active_event_profile.get("event")
         event_message = ""
@@ -4819,6 +4821,9 @@ class SubwayBlindGame:
         if key == pygame.K_r:
             if self._coin_counters_enabled():
                 self.speaker.speak(f"Coins collected: {self.state.coins}.", interrupt=False)
+            return
+        if key == pygame.K_t:
+            self.speaker.speak(f"Play time: {format_play_time(self.state.time)}.", interrupt=False)
             return
 
         if self.state.paused or self.player.jetpack > 0 or self.player.headstart > 0:
