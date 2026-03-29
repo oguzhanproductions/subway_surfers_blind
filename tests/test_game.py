@@ -1574,6 +1574,105 @@ class GameTests(unittest.TestCase):
         self.assertEqual(start_operation.call_args.args[0], "leaderboard_refresh")
         self.assertFalse(start_operation.call_args.kwargs["show_status"])
 
+    def test_leaderboard_menu_includes_filters_and_verification_labels(self):
+        game, _, _ = self.make_game()
+        game._leaderboard_period_filter = "weekly"
+        game._leaderboard_difficulty_filter = "all"
+        game._leaderboard_entries = [
+            {
+                "rank": 1,
+                "username": "runner01",
+                "score": 900,
+                "coins": 12,
+                "play_time_seconds": 85,
+                "difficulty": "hard",
+                "verification_status": "suspicious",
+            }
+        ]
+        game._leaderboard_total_players = 1
+
+        game._refresh_leaderboard_menu()
+
+        self.assertEqual(game.leaderboard_menu.items[0].label, "Period: Weekly")
+        self.assertEqual(game.leaderboard_menu.items[1].label, "Difficulty: All Difficulties")
+        self.assertIn("Suspicious", game.leaderboard_menu.items[2].label)
+        self.assertIn("Hard", game.leaderboard_menu.items[2].label)
+
+    def test_leaderboard_period_cycle_refreshes_without_status_screen(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.leaderboard_menu
+        game._leaderboard_entries = [
+            {
+                "rank": 1,
+                "username": "runner01",
+                "score": 900,
+                "coins": 12,
+                "play_time_seconds": 85,
+                "difficulty": "normal",
+                "verification_status": "verified",
+            }
+        ]
+        game._leaderboard_total_players = 1
+
+        with patch.object(game, "_start_leaderboard_operation", return_value=True) as start_operation:
+            game._cycle_leaderboard_period()
+
+        self.assertIs(game.active_menu, game.leaderboard_menu)
+        self.assertEqual(game._leaderboard_period_filter, "daily")
+        self.assertEqual(game.leaderboard_menu.items[0].label, "Period: Daily")
+        self.assertEqual(start_operation.call_args.args[0], "leaderboard_refresh")
+        self.assertFalse(start_operation.call_args.kwargs["show_status"])
+
+    def test_build_leaderboard_submission_payload_includes_extended_run_details(self):
+        game, _, _ = self.make_game()
+        game._game_over_summary = {
+            "score": 1450,
+            "coins": 12,
+            "play_time_seconds": 73,
+            "death_reason": "Hit train",
+            "game_version": APP_VERSION,
+            "difficulty": "hard",
+            "distance_meters": 1495,
+            "clean_escapes": 6,
+            "revives_used": 1,
+            "powerup_usage": {"jetpack": 1, "hoverboard": 1},
+        }
+
+        payload = game._build_leaderboard_submission_payload()
+
+        self.assertEqual(payload["difficulty"], "hard")
+        self.assertEqual(payload["death_reason"], "Hit train")
+        self.assertEqual(payload["distance_meters"], 1495)
+        self.assertEqual(payload["clean_escapes"], 6)
+        self.assertEqual(payload["revives_used"], 1)
+        self.assertEqual(payload["powerup_usage"]["hoverboard"], 1)
+
+    def test_leaderboard_run_detail_includes_extended_metadata(self):
+        game, _, _ = self.make_game()
+        game._leaderboard_selected_run = {
+            "score": 1450,
+            "coins": 12,
+            "play_time_seconds": 73,
+            "published_at": "2026-03-29T12:34:56+00:00",
+            "difficulty": "hard",
+            "distance_meters": 1495,
+            "clean_escapes": 6,
+            "revives_used": 1,
+            "powerup_usage": {"jetpack": 1, "hoverboard": 1},
+            "death_reason": "Hit train",
+            "game_version": "1.1.3",
+            "verification_status": "suspicious",
+            "verification_reasons": ["Distance exceeds the maximum travel range for the recorded play time."],
+        }
+
+        game._refresh_leaderboard_run_detail_menu()
+
+        labels = [item.label for item in game.leaderboard_run_detail_menu.items]
+        self.assertIn("Verification: Suspicious", labels)
+        self.assertIn("Difficulty: Hard", labels)
+        self.assertIn("Game Version: 1.1.3", labels)
+        self.assertTrue(any(label.startswith("Review Note: Distance exceeds") for label in labels))
+
     def test_main_menu_navigation_omits_item_description_when_disabled(self):
         game, speaker, _ = self.make_game()
         game.settings["main_menu_descriptions_enabled"] = False

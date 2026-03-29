@@ -166,9 +166,23 @@ class LeaderboardClient:
         self.auth_token = ""
         self.principal_username = ""
 
-    def fetch_leaderboard(self, offset: int = 0, limit: int | None = None) -> dict[str, Any]:
+    def fetch_leaderboard(
+        self,
+        offset: int = 0,
+        limit: int | None = None,
+        period: str = "all_time",
+        difficulty: str = "all",
+    ) -> dict[str, Any]:
         result_limit = self.connection_config.page_size if limit is None else int(limit)
-        return self._request("fetch_leaderboard", {"offset": int(offset), "limit": result_limit})
+        return self._request(
+            "fetch_leaderboard",
+            {
+                "offset": int(offset),
+                "limit": result_limit,
+                "period": str(period or "all_time"),
+                "difficulty": str(difficulty or "all"),
+            },
+        )
 
     def fetch_profile(self, username: str, history_offset: int = 0, history_limit: int = 50) -> dict[str, Any]:
         return self._request(
@@ -180,7 +194,19 @@ class LeaderboardClient:
             },
         )
 
-    def submit_score(self, score: int, coins: int, play_time_seconds: int) -> dict[str, Any]:
+    def submit_score(
+        self,
+        score: int,
+        coins: int,
+        play_time_seconds: int,
+        *,
+        difficulty: str = "unknown",
+        death_reason: str = "",
+        distance_meters: int | None = None,
+        clean_escapes: int | None = None,
+        revives_used: int | None = None,
+        powerup_usage: dict[str, int] | None = None,
+    ) -> dict[str, Any]:
         return self._request(
             "submit_score",
             {
@@ -188,6 +214,12 @@ class LeaderboardClient:
                 "coins": int(coins),
                 "play_time_seconds": int(play_time_seconds),
                 "game_version": APP_VERSION,
+                "difficulty": str(difficulty or "unknown"),
+                "death_reason": str(death_reason or ""),
+                "distance_meters": None if distance_meters is None else int(distance_meters),
+                "clean_escapes": None if clean_escapes is None else int(clean_escapes),
+                "revives_used": None if revives_used is None else int(revives_used),
+                "powerup_usage": dict(powerup_usage or {}),
             },
         )
 

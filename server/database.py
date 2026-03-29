@@ -80,7 +80,34 @@ class LeaderboardDatabase:
                 ON auth_sessions(account_id, expires_at DESC);
             """
         )
+        self._ensure_submission_columns()
+        self.connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_submissions_period_difficulty
+                ON submissions(difficulty, published_at_epoch DESC, score DESC, coins DESC, play_time_seconds DESC)
+            """
+        )
         self.connection.commit()
+
+    def _ensure_submission_columns(self) -> None:
+        existing_columns = {
+            str(row["name"])
+            for row in self.connection.execute("PRAGMA table_info(submissions)").fetchall()
+        }
+        required_columns = {
+            "difficulty": "ALTER TABLE submissions ADD COLUMN difficulty TEXT NOT NULL DEFAULT 'unknown'",
+            "death_reason": "ALTER TABLE submissions ADD COLUMN death_reason TEXT",
+            "distance_meters": "ALTER TABLE submissions ADD COLUMN distance_meters INTEGER",
+            "clean_escapes": "ALTER TABLE submissions ADD COLUMN clean_escapes INTEGER",
+            "revives_used": "ALTER TABLE submissions ADD COLUMN revives_used INTEGER NOT NULL DEFAULT 0",
+            "powerup_usage_json": "ALTER TABLE submissions ADD COLUMN powerup_usage_json TEXT NOT NULL DEFAULT '{}'",
+            "verification_status": "ALTER TABLE submissions ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'verified'",
+            "verification_reasons_json": "ALTER TABLE submissions ADD COLUMN verification_reasons_json TEXT NOT NULL DEFAULT '[]'",
+        }
+        for column_name, statement in required_columns.items():
+            if column_name in existing_columns:
+                continue
+            self.connection.execute(statement)
 
     def fetchone(self, query: str, parameters: tuple[Any, ...] = ()) -> sqlite3.Row | None:
         return self.connection.execute(query, parameters).fetchone()

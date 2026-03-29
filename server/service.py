@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import json
 import uuid
 
 from argon2 import PasswordHasher
+
+from subway_blind.balance import SPEED_PROFILES, speed_profile_for_difficulty
+from subway_blind.features import HEADSTART_SPEED_BONUS
 
 from server.database import LeaderboardDatabase
 from server.security import (
@@ -21,6 +25,14 @@ SESSION_LIFETIME_DAYS = 30
 MAX_SCORE = 100_000_000
 MAX_COINS = 1_000_000
 MAX_PLAY_TIME_SECONDS = 24 * 60 * 60
+MAX_DISTANCE_METERS = 5_000_000
+MAX_CLEAN_ESCAPES = 250_000
+MAX_REVIVES_USED = 250
+MAX_POWERUP_ACTIVATIONS = 100_000
+LEADERBOARD_PERIODS = ("all_time", "daily", "weekly", "monthly")
+LEADERBOARD_DIFFICULTY_FILTERS = ("all", "easy", "normal", "hard")
+RUN_DIFFICULTIES = tuple(sorted(SPEED_PROFILES.keys()))
+POWERUP_USAGE_KEYS = ("magnet", "jetpack", "mult2x", "sneakers", "pogo", "hoverboard")
 
 
 class ServiceError(RuntimeError):
@@ -42,7 +54,7 @@ class LeaderboardService:
     def __init__(self, database: LeaderboardDatabase, password_hasher: PasswordHasher | None = None):
         self.database = database
         self.password_hasher = password_hasher or build_password_hasher()
-        self._leaderboard_cache: dict[tuple[int, int], dict] = {}
+        self._leaderboard_cache: dict[tuple[int, int, str, str], dict] = {}
 
     @staticmethod
     def utcnow() -> datetime:
@@ -170,16 +182,29 @@ class LeaderboardService:
             device_hash=principal.device_hash,
         )
 
-    def fetch_leaderboard(self, offset: int = 0, limit: int = 100) -> dict:
+    def fetch_leaderboard(
+        self,
+        offset: int = 0,
+        limit: int = 100,
+        period: str = "all_time",
+        difficulty: str = "all",
+    ) -> dict:
         normalized_offset = max(0, int(offset))
         normalized_limit = max(1, min(100, int(limit)))
-        cache_key = (normalized_offset, normalized_limit)
+        normalized_period = self._normalize_leaderboard_period(period)
+        normalized_difficulty = self._normalize_leaderboard_difficulty_filter(difficulty)
+        cache_key = (normalized_offset, normalized_limit, normalized_period, normalized_difficulty)
         cached = self._leaderboard_cache.get(cache_key)
         if cached is not None:
             return self._copy_leaderboard_payload(cached)
+        where_clause, filter_parameters = self._build_submission_filter_clause(
+            normalized_period,
+            normalized_difficulty,
+            alias="s",
+        )
         rows = self.database.fetchall(
-            """
-            WITH best_runs AS (
+            f"""
+            WITH filtered_submissions AS (
                 SELECT
                     s.account_id,
                     a.username,
@@ -189,12 +214,29 @@ class LeaderboardService:
                     s.play_time_seconds,
                     s.published_at,
                     s.published_at_epoch,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY s.account_id
-                        ORDER BY s.score DESC, s.coins DESC, s.play_time_seconds DESC, s.published_at_epoch ASC
-                    ) AS account_rank
+                    s.difficulty,
+                    s.verification_status
                 FROM submissions s
                 INNER JOIN accounts a ON a.id = s.account_id
+                {where_clause}
+            ),
+            best_runs AS (
+                SELECT
+                    account_id,
+                    username,
+                    id,
+                    score,
+                    coins,
+                    play_time_seconds,
+                    published_at,
+                    published_at_epoch,
+                    difficulty,
+                    verification_status,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY account_id
+                        ORDER BY score DESC, coins DESC, play_time_seconds DESC, published_at_epoch ASC
+                    ) AS account_rank
+                FROM filtered_submissions
             ),
             ranked AS (
                 SELECT
@@ -205,34 +247,36 @@ class LeaderboardService:
                     coins,
                     play_time_seconds,
                     published_at,
+                    difficulty,
+                    verification_status,
                     ROW_NUMBER() OVER (
                         ORDER BY score DESC, coins DESC, play_time_seconds DESC, published_at_epoch ASC, account_id ASC
                     ) AS board_rank
                 FROM best_runs
                 WHERE account_rank = 1
             )
-            SELECT account_id, username, id, score, coins, play_time_seconds, published_at, board_rank
+            SELECT account_id, username, id, score, coins, play_time_seconds, published_at, difficulty, verification_status, board_rank
             FROM ranked
             ORDER BY board_rank
             LIMIT ? OFFSET ?
             """,
-            (normalized_limit, normalized_offset),
+            (*filter_parameters, normalized_limit, normalized_offset),
         )
         total = self.database.fetchone(
-            """
-            SELECT COUNT(*) AS total_players
-            FROM (
-                SELECT account_id
-                FROM submissions
-                GROUP BY account_id
-            )
-            """
+            f"""
+            SELECT COUNT(DISTINCT s.account_id) AS total_players
+            FROM submissions s
+            {where_clause}
+            """,
+            filter_parameters,
         )
         payload = {
             "entries": [self._serialize_leaderboard_row(row) for row in rows],
             "offset": normalized_offset,
             "limit": normalized_limit,
             "total_players": int(total["total_players"]) if total is not None else 0,
+            "period": normalized_period,
+            "difficulty": normalized_difficulty,
         }
         self._leaderboard_cache[cache_key] = payload
         return self._copy_leaderboard_payload(payload)
@@ -250,7 +294,22 @@ class LeaderboardService:
         account_id = int(account["id"])
         latest_run = self.database.fetchone(
             """
-            SELECT id, score, coins, play_time_seconds, published_at, published_at_epoch
+            SELECT
+                id,
+                score,
+                coins,
+                play_time_seconds,
+                published_at,
+                published_at_epoch,
+                game_version,
+                difficulty,
+                death_reason,
+                distance_meters,
+                clean_escapes,
+                revives_used,
+                powerup_usage_json,
+                verification_status,
+                verification_reasons_json
             FROM submissions
             WHERE account_id = ?
             ORDER BY published_at_epoch DESC
@@ -260,7 +319,22 @@ class LeaderboardService:
         )
         best_run = self.database.fetchone(
             """
-            SELECT id, score, coins, play_time_seconds, published_at, published_at_epoch
+            SELECT
+                id,
+                score,
+                coins,
+                play_time_seconds,
+                published_at,
+                published_at_epoch,
+                game_version,
+                difficulty,
+                death_reason,
+                distance_meters,
+                clean_escapes,
+                revives_used,
+                powerup_usage_json,
+                verification_status,
+                verification_reasons_json
             FROM submissions
             WHERE account_id = ?
             ORDER BY score DESC, coins DESC, play_time_seconds DESC, published_at_epoch ASC
@@ -302,7 +376,22 @@ class LeaderboardService:
         )
         history_rows = self.database.fetchall(
             """
-            SELECT id, score, coins, play_time_seconds, published_at, published_at_epoch
+            SELECT
+                id,
+                score,
+                coins,
+                play_time_seconds,
+                published_at,
+                published_at_epoch,
+                game_version,
+                difficulty,
+                death_reason,
+                distance_meters,
+                clean_escapes,
+                revives_used,
+                powerup_usage_json,
+                verification_status,
+                verification_reasons_json
             FROM submissions
             WHERE account_id = ?
             ORDER BY published_at_epoch DESC
@@ -310,8 +399,39 @@ class LeaderboardService:
             """,
             (account_id, normalized_limit, normalized_offset),
         )
+        recent_rows = self.database.fetchall(
+            """
+            SELECT score, coins, play_time_seconds, distance_meters
+            FROM submissions
+            WHERE account_id = ?
+            ORDER BY published_at_epoch DESC, id DESC
+            LIMIT 10
+            """,
+            (account_id,),
+        )
         history_total_row = self.database.fetchone(
-            "SELECT COUNT(*) AS total_runs FROM submissions WHERE account_id = ?",
+            """
+            SELECT
+                COUNT(*) AS total_runs,
+                COUNT(DISTINCT substr(published_at, 1, 10)) AS active_days
+            FROM submissions
+            WHERE account_id = ?
+            """,
+            (account_id,),
+        )
+        improvement_row = self.database.fetchone(
+            """
+            WITH ordered_runs AS (
+                SELECT
+                    score,
+                    LAG(score) OVER (ORDER BY published_at_epoch ASC, id ASC) AS previous_score
+                FROM submissions
+                WHERE account_id = ?
+            )
+            SELECT MAX(score - previous_score) AS best_improvement_score
+            FROM ordered_runs
+            WHERE previous_score IS NOT NULL
+            """,
             (account_id,),
         )
         return {
@@ -319,6 +439,14 @@ class LeaderboardService:
             "board_rank": int(board_rank_row["board_rank"]) if board_rank_row is not None else None,
             "latest_run": self._serialize_run_row(latest_run),
             "best_run": self._serialize_run_row(best_run),
+            "summary": self._summarize_profile(
+                recent_rows,
+                total_runs=int(history_total_row["total_runs"]) if history_total_row is not None else 0,
+                active_days=int(history_total_row["active_days"]) if history_total_row is not None else 0,
+                best_improvement_score=int(improvement_row["best_improvement_score"] or 0)
+                if improvement_row is not None
+                else 0,
+            ),
             "history": [self._serialize_run_row(row) for row in history_rows],
             "history_offset": normalized_offset,
             "history_limit": normalized_limit,
@@ -332,11 +460,47 @@ class LeaderboardService:
         coins: int,
         play_time_seconds: int,
         game_version: str,
+        difficulty: str = "unknown",
+        death_reason: str = "",
+        distance_meters: int | None = None,
+        clean_escapes: int | None = None,
+        revives_used: int | None = None,
+        powerup_usage: dict[str, int] | None = None,
     ) -> dict:
         principal = self.revalidate_principal(principal)
         normalized_score = self._normalize_score(score)
         normalized_coins = self._normalize_coins(coins)
         normalized_play_time = self._normalize_play_time(play_time_seconds)
+        normalized_difficulty = self._normalize_run_difficulty(difficulty)
+        normalized_death_reason = self._normalize_optional_text(death_reason, max_length=160)
+        normalized_distance = self._normalize_optional_counter(
+            distance_meters,
+            code="invalid_distance",
+            message="Distance is outside the accepted range.",
+            upper_bound=MAX_DISTANCE_METERS,
+        )
+        normalized_clean_escapes = self._normalize_optional_counter(
+            clean_escapes,
+            code="invalid_clean_escapes",
+            message="Clean escape count is outside the accepted range.",
+            upper_bound=MAX_CLEAN_ESCAPES,
+        )
+        normalized_revives_used = self._normalize_optional_counter(
+            revives_used,
+            code="invalid_revives",
+            message="Revive count is outside the accepted range.",
+            upper_bound=MAX_REVIVES_USED,
+            default=0,
+        )
+        normalized_powerup_usage = self._normalize_powerup_usage(powerup_usage)
+        verification_status, verification_reasons = self._assess_run_verification(
+            play_time_seconds=normalized_play_time,
+            difficulty=normalized_difficulty,
+            distance_meters=normalized_distance,
+            clean_escapes=normalized_clean_escapes,
+            revives_used=normalized_revives_used,
+            powerup_usage=normalized_powerup_usage,
+        )
         previous_best = self.database.fetchone(
             """
             SELECT score, coins, play_time_seconds, published_at_epoch
@@ -360,8 +524,16 @@ class LeaderboardService:
                 published_at,
                 published_at_epoch,
                 game_version,
-                device_hash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                device_hash,
+                difficulty,
+                death_reason,
+                distance_meters,
+                clean_escapes,
+                revives_used,
+                powerup_usage_json,
+                verification_status,
+                verification_reasons_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 submission_id,
@@ -373,12 +545,35 @@ class LeaderboardService:
                 int(now.timestamp()),
                 str(game_version or "").strip() or "unknown",
                 principal.device_hash,
+                normalized_difficulty,
+                normalized_death_reason,
+                normalized_distance,
+                normalized_clean_escapes,
+                normalized_revives_used,
+                json.dumps(normalized_powerup_usage, separators=(",", ":"), sort_keys=True),
+                verification_status,
+                json.dumps(verification_reasons, separators=(",", ":"), ensure_ascii=False),
             ),
         )
         self._leaderboard_cache.clear()
         new_best = self.database.fetchone(
             """
-            SELECT id, score, coins, play_time_seconds, published_at, published_at_epoch
+            SELECT
+                id,
+                score,
+                coins,
+                play_time_seconds,
+                published_at,
+                published_at_epoch,
+                game_version,
+                difficulty,
+                death_reason,
+                distance_meters,
+                clean_escapes,
+                revives_used,
+                powerup_usage_json,
+                verification_status,
+                verification_reasons_json
             FROM submissions
             WHERE account_id = ?
             ORDER BY score DESC, coins DESC, play_time_seconds DESC, published_at_epoch ASC
@@ -427,6 +622,8 @@ class LeaderboardService:
             "high_score": high_score,
             "board_rank": board_rank,
             "best_run": self._serialize_run_row(new_best),
+            "verification_status": verification_status,
+            "verification_reasons": list(verification_reasons),
         }
 
     def change_password(self, username: str, new_password: str) -> None:
@@ -576,6 +773,132 @@ class LeaderboardService:
         return normalized
 
     @staticmethod
+    def _normalize_optional_counter(
+        value: int | None,
+        *,
+        code: str,
+        message: str,
+        upper_bound: int,
+        default: int | None = None,
+    ) -> int | None:
+        if value is None:
+            return default
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ServiceError(code, message) from exc
+        if normalized < 0 or normalized > upper_bound:
+            raise ServiceError(code, message)
+        return normalized
+
+    @staticmethod
+    def _normalize_optional_text(value: str, max_length: int) -> str:
+        normalized = str(value or "").strip()
+        if len(normalized) > max_length:
+            return normalized[:max_length].rstrip()
+        return normalized
+
+    @staticmethod
+    def _normalize_leaderboard_period(period: str) -> str:
+        normalized = str(period or "all_time").strip().lower()
+        if normalized not in LEADERBOARD_PERIODS:
+            raise ServiceError("invalid_period", "Unsupported leaderboard period.")
+        return normalized
+
+    @staticmethod
+    def _normalize_leaderboard_difficulty_filter(difficulty: str) -> str:
+        normalized = str(difficulty or "all").strip().lower()
+        if normalized not in LEADERBOARD_DIFFICULTY_FILTERS:
+            raise ServiceError("invalid_difficulty", "Unsupported leaderboard difficulty filter.")
+        return normalized
+
+    @staticmethod
+    def _normalize_run_difficulty(difficulty: str) -> str:
+        normalized = str(difficulty or "unknown").strip().lower()
+        if normalized in RUN_DIFFICULTIES:
+            return normalized
+        if normalized in {"", "all", "unknown"}:
+            return "unknown"
+        raise ServiceError("invalid_difficulty", "Unsupported run difficulty.")
+
+    @staticmethod
+    def _normalize_powerup_usage(powerup_usage: dict[str, int] | None) -> dict[str, int]:
+        if powerup_usage is None:
+            return {}
+        if not isinstance(powerup_usage, dict):
+            raise ServiceError("invalid_powerups", "Power-up usage data is invalid.")
+        normalized: dict[str, int] = {}
+        for key in POWERUP_USAGE_KEYS:
+            raw_value = powerup_usage.get(key, 0)
+            try:
+                amount = int(raw_value)
+            except (TypeError, ValueError) as exc:
+                raise ServiceError("invalid_powerups", "Power-up usage data is invalid.") from exc
+            if amount < 0 or amount > MAX_POWERUP_ACTIVATIONS:
+                raise ServiceError("invalid_powerups", "Power-up usage data is outside the accepted range.")
+            if amount > 0:
+                normalized[key] = amount
+        return normalized
+
+    def _build_submission_filter_clause(self, period: str, difficulty: str, alias: str) -> tuple[str, tuple[object, ...]]:
+        parts: list[str] = []
+        parameters: list[object] = []
+        period_start = self._leaderboard_period_start_epoch(period)
+        if period_start is not None:
+            parts.append(f"{alias}.published_at_epoch >= ?")
+            parameters.append(period_start)
+        if difficulty != "all":
+            parts.append(f"{alias}.difficulty = ?")
+            parameters.append(difficulty)
+        if not parts:
+            return "", tuple()
+        return "WHERE " + " AND ".join(parts), tuple(parameters)
+
+    def _leaderboard_period_start_epoch(self, period: str) -> int | None:
+        if period == "all_time":
+            return None
+        now = self.utcnow()
+        if period == "daily":
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == "weekly":
+            start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == "monthly":
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            raise ServiceError("invalid_period", "Unsupported leaderboard period.")
+        return int(start.timestamp())
+
+    def _assess_run_verification(
+        self,
+        *,
+        play_time_seconds: int,
+        difficulty: str,
+        distance_meters: int | None,
+        clean_escapes: int | None,
+        revives_used: int | None,
+        powerup_usage: dict[str, int],
+    ) -> tuple[str, list[str]]:
+        reasons: list[str] = []
+        if distance_meters is not None and play_time_seconds > 0:
+            profile = speed_profile_for_difficulty(difficulty) if difficulty in RUN_DIFFICULTIES else max(
+                SPEED_PROFILES.values(),
+                key=lambda current: current.max_speed,
+            )
+            maximum_distance = int((profile.max_speed + HEADSTART_SPEED_BONUS) * play_time_seconds + 250)
+            if distance_meters > maximum_distance:
+                reasons.append("Distance exceeds the maximum travel range for the recorded play time.")
+        if distance_meters is not None and clean_escapes is not None:
+            if clean_escapes > max(25, distance_meters // 3):
+                reasons.append("Clean escape count is outside the expected range for the recorded distance.")
+        if revives_used is not None and revives_used > 25:
+            reasons.append("Revive count is unusually high for a single published run.")
+        if powerup_usage and play_time_seconds >= 0:
+            total_powerups = sum(powerup_usage.values())
+            if total_powerups > max(12, (play_time_seconds // 3) + 6):
+                reasons.append("Power-up activations are unusually high for the recorded play time.")
+        return ("suspicious" if reasons else "verified"), reasons
+
+    @staticmethod
     def _run_is_better(left, right) -> bool:
         left_tuple = (
             int(left["score"]),
@@ -601,6 +924,8 @@ class LeaderboardService:
             "coins": int(row["coins"]),
             "play_time_seconds": int(row["play_time_seconds"]),
             "published_at": str(row["published_at"]),
+            "difficulty": str(row["difficulty"] or "unknown"),
+            "verification_status": str(row["verification_status"] or "verified"),
             "rank": int(row["board_rank"]),
         }
 
@@ -612,6 +937,15 @@ class LeaderboardService:
             "coins": int(row["coins"]),
             "play_time_seconds": int(row["play_time_seconds"]),
             "published_at": str(row["published_at"]),
+            "game_version": str(row["game_version"] or "unknown"),
+            "difficulty": str(row["difficulty"] or "unknown"),
+            "death_reason": str(row["death_reason"] or "Run ended."),
+            "distance_meters": int(row["distance_meters"]) if row["distance_meters"] is not None else None,
+            "clean_escapes": int(row["clean_escapes"]) if row["clean_escapes"] is not None else None,
+            "revives_used": int(row["revives_used"]) if row["revives_used"] is not None else 0,
+            "powerup_usage": LeaderboardService._deserialize_powerup_usage(row["powerup_usage_json"]),
+            "verification_status": str(row["verification_status"] or "verified"),
+            "verification_reasons": LeaderboardService._deserialize_text_list(row["verification_reasons_json"]),
         }
 
     @staticmethod
@@ -621,4 +955,65 @@ class LeaderboardService:
             "offset": int(payload.get("offset", 0) or 0),
             "limit": int(payload.get("limit", 0) or 0),
             "total_players": int(payload.get("total_players", 0) or 0),
+            "period": str(payload.get("period") or "all_time"),
+            "difficulty": str(payload.get("difficulty") or "all"),
+        }
+
+    @staticmethod
+    def _deserialize_powerup_usage(value: object) -> dict[str, int]:
+        if value in (None, ""):
+            return {}
+        try:
+            decoded = json.loads(str(value))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        if not isinstance(decoded, dict):
+            return {}
+        normalized: dict[str, int] = {}
+        for key in POWERUP_USAGE_KEYS:
+            raw_amount = decoded.get(key)
+            if raw_amount in (None, ""):
+                continue
+            try:
+                amount = int(raw_amount)
+            except (TypeError, ValueError):
+                continue
+            if amount > 0:
+                normalized[key] = amount
+        return normalized
+
+    @staticmethod
+    def _deserialize_text_list(value: object) -> list[str]:
+        if value in (None, ""):
+            return []
+        try:
+            decoded = json.loads(str(value))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+        if not isinstance(decoded, list):
+            return []
+        return [str(entry).strip() for entry in decoded if str(entry).strip()]
+
+    @staticmethod
+    def _summarize_profile(
+        recent_rows,
+        *,
+        total_runs: int,
+        active_days: int,
+        best_improvement_score: int,
+    ) -> dict:
+        row_count = len(recent_rows)
+        total_score = sum(int(row["score"]) for row in recent_rows)
+        total_coins = sum(int(row["coins"]) for row in recent_rows)
+        total_play_time = sum(int(row["play_time_seconds"]) for row in recent_rows)
+        total_distance = sum(int(row["distance_meters"]) for row in recent_rows if row["distance_meters"] is not None)
+        distance_row_count = sum(1 for row in recent_rows if row["distance_meters"] is not None)
+        return {
+            "recent_average_score": int(round(total_score / row_count)) if row_count else 0,
+            "recent_average_coins": int(round(total_coins / row_count)) if row_count else 0,
+            "recent_average_play_time_seconds": int(round(total_play_time / row_count)) if row_count else 0,
+            "recent_average_distance_meters": int(round(total_distance / distance_row_count)) if distance_row_count else 0,
+            "best_improvement_score": max(0, int(best_improvement_score or 0)),
+            "published_runs_total": int(total_runs),
+            "active_days": int(active_days),
         }

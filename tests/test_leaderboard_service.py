@@ -1,6 +1,8 @@
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from server.database import LeaderboardDatabase
 from server.service import LeaderboardService, ServiceError
@@ -100,6 +102,95 @@ class LeaderboardServiceTests(unittest.TestCase):
         self.assertTrue(result["high_score"])
         self.assertEqual(result["board_rank"], 1)
         self.assertEqual(board["entries"][0]["username"], "runner01")
+
+    def test_fetch_leaderboard_filters_by_period_and_difficulty(self):
+        easy = self.service.login_or_create_account("runner01", "secret123", "a" * 64)
+        hard = self.service.login_or_create_account("runner02", "secret123", "b" * 64)
+        old = self.service.login_or_create_account("runner03", "secret123", "c" * 64)
+        submission_times = [
+            datetime(2026, 3, 26, 8, 0, tzinfo=UTC),
+            datetime(2026, 3, 29, 9, 30, tzinfo=UTC),
+            datetime(2026, 2, 10, 14, 0, tzinfo=UTC),
+        ]
+        with patch.object(self.service, "utcnow", side_effect=submission_times):
+            self.service.submit_score(easy["principal"], score=900, coins=11, play_time_seconds=70, game_version="1.0", difficulty="easy")
+            self.service.submit_score(hard["principal"], score=1500, coins=14, play_time_seconds=82, game_version="1.0", difficulty="hard")
+            self.service.submit_score(old["principal"], score=1900, coins=18, play_time_seconds=95, game_version="1.0", difficulty="hard")
+
+        with patch.object(self.service, "utcnow", return_value=datetime(2026, 3, 29, 12, 0, tzinfo=UTC)):
+            weekly_hard = self.service.fetch_leaderboard(period="weekly", difficulty="hard")
+            monthly_all = self.service.fetch_leaderboard(period="monthly", difficulty="all")
+
+        self.assertEqual(weekly_hard["total_players"], 1)
+        self.assertEqual(weekly_hard["entries"][0]["username"], "runner02")
+        self.assertEqual(weekly_hard["entries"][0]["difficulty"], "hard")
+        self.assertEqual(monthly_all["total_players"], 2)
+        self.assertEqual(monthly_all["entries"][0]["username"], "runner02")
+
+    def test_profile_includes_summary_and_extended_run_metadata(self):
+        result = self.service.login_or_create_account("runner01", "secret123", "a" * 64)
+        submission_times = [
+            datetime(2026, 3, 28, 10, 0, tzinfo=UTC),
+            datetime(2026, 3, 29, 11, 0, tzinfo=UTC),
+        ]
+        with patch.object(self.service, "utcnow", side_effect=submission_times):
+            self.service.submit_score(
+                result["principal"],
+                score=1000,
+                coins=8,
+                play_time_seconds=61,
+                game_version="1.1.3",
+                difficulty="normal",
+                death_reason="Hit train",
+                distance_meters=1180,
+                clean_escapes=4,
+                revives_used=1,
+                powerup_usage={"magnet": 1, "hoverboard": 1},
+            )
+            self.service.submit_score(
+                result["principal"],
+                score=1450,
+                coins=12,
+                play_time_seconds=73,
+                game_version="1.1.3",
+                difficulty="hard",
+                death_reason="Missed jump",
+                distance_meters=1495,
+                clean_escapes=6,
+                revives_used=0,
+                powerup_usage={"jetpack": 1, "mult2x": 2},
+            )
+
+        profile = self.service.fetch_profile("runner01", history_limit=10)
+
+        self.assertEqual(profile["summary"]["published_runs_total"], 2)
+        self.assertEqual(profile["summary"]["active_days"], 2)
+        self.assertEqual(profile["summary"]["best_improvement_score"], 450)
+        self.assertEqual(profile["latest_run"]["difficulty"], "hard")
+        self.assertEqual(profile["latest_run"]["game_version"], "1.1.3")
+        self.assertEqual(profile["latest_run"]["distance_meters"], 1495)
+        self.assertEqual(profile["latest_run"]["clean_escapes"], 6)
+        self.assertEqual(profile["latest_run"]["powerup_usage"]["jetpack"], 1)
+
+    def test_submit_score_flags_impossible_distance_as_suspicious(self):
+        result = self.service.login_or_create_account("runner01", "secret123", "a" * 64)
+
+        suspicious = self.service.submit_score(
+            result["principal"],
+            score=9000,
+            coins=40,
+            play_time_seconds=10,
+            game_version="1.1.3",
+            difficulty="easy",
+            distance_meters=950,
+            clean_escapes=2,
+            powerup_usage={"magnet": 1},
+        )
+        leaderboard = self.service.fetch_leaderboard()
+
+        self.assertEqual(suspicious["verification_status"], "suspicious")
+        self.assertTrue(suspicious["verification_reasons"])
+        self.assertEqual(leaderboard["entries"][0]["verification_status"], "suspicious")
 
 
 class SecureChannelTests(unittest.TestCase):

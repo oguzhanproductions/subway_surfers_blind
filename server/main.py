@@ -216,6 +216,8 @@ class LeaderboardServer:
             result = self.service.fetch_leaderboard(
                 offset=int(payload.get("offset", 0) or 0),
                 limit=int(payload.get("limit", 100) or 100),
+                period=str(payload.get("period") or "all_time"),
+                difficulty=str(payload.get("difficulty") or "all"),
             )
             return {"ok": True, "type": "leaderboard_result", "payload": result}
         if request_type == "fetch_profile":
@@ -235,6 +237,12 @@ class LeaderboardServer:
                 coins=int(payload.get("coins", 0) or 0),
                 play_time_seconds=int(payload.get("play_time_seconds", 0) or 0),
                 game_version=str(payload.get("game_version") or ""),
+                difficulty=str(payload.get("difficulty") or "unknown"),
+                death_reason=str(payload.get("death_reason") or ""),
+                distance_meters=payload.get("distance_meters"),
+                clean_escapes=payload.get("clean_escapes"),
+                revives_used=payload.get("revives_used"),
+                powerup_usage=payload.get("powerup_usage") if isinstance(payload.get("powerup_usage"), dict) else None,
             )
             return {"ok": True, "type": "submit_result", "payload": result}
         if request_type == "logout":

@@ -118,6 +118,33 @@ DIFFICULTY_LABELS = {
     "normal": "Normal",
     "hard": "Hard",
 }
+LEADERBOARD_PERIOD_LABELS = {
+    "all_time": "All Time",
+    "daily": "Daily",
+    "weekly": "Weekly",
+    "monthly": "Monthly",
+}
+LEADERBOARD_PERIOD_ORDER = tuple(LEADERBOARD_PERIOD_LABELS.keys())
+LEADERBOARD_DIFFICULTY_FILTER_LABELS = {
+    "all": "All Difficulties",
+    "easy": "Easy Only",
+    "normal": "Normal Only",
+    "hard": "Hard Only",
+    "unknown": "Unknown Difficulty",
+}
+LEADERBOARD_DIFFICULTY_FILTER_ORDER = ("all", "easy", "normal", "hard")
+LEADERBOARD_VERIFICATION_LABELS = {
+    "verified": "Verified",
+    "suspicious": "Suspicious",
+}
+RUN_POWERUP_LABELS = {
+    "magnet": "Magnet",
+    "jetpack": "Jetpack",
+    "mult2x": "Double Score",
+    "sneakers": "Super Sneakers",
+    "pogo": "Pogo Stick",
+    "hoverboard": "Hoverboard",
+}
 
 GUARD_LOOP_DURATION = 1.35
 POGO_STICK_DURATION = 5.5
@@ -305,6 +332,26 @@ def format_play_time(total_seconds: float) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
+def difficulty_display_label(value: object) -> str:
+    normalized = str(value or "unknown").strip().lower()
+    return DIFFICULTY_LABELS.get(normalized, "Unknown")
+
+
+def leaderboard_period_display_label(value: object) -> str:
+    normalized = str(value or "all_time").strip().lower()
+    return LEADERBOARD_PERIOD_LABELS.get(normalized, LEADERBOARD_PERIOD_LABELS["all_time"])
+
+
+def leaderboard_difficulty_filter_display_label(value: object) -> str:
+    normalized = str(value or "all").strip().lower()
+    return LEADERBOARD_DIFFICULTY_FILTER_LABELS.get(normalized, LEADERBOARD_DIFFICULTY_FILTER_LABELS["all"])
+
+
+def verification_display_label(value: object) -> str:
+    normalized = str(value or "verified").strip().lower()
+    return LEADERBOARD_VERIFICATION_LABELS.get(normalized, LEADERBOARD_VERIFICATION_LABELS["verified"])
+
+
 def help_topic_segments(topic: HelpTopic, controls_summary: str) -> tuple[str, ...]:
     if topic.key == "movement":
         text = f"Controls: {controls_summary} {topic.description}"
@@ -475,6 +522,8 @@ class SubwayBlindGame:
         self.leaderboard_client = LeaderboardClient()
         self._leaderboard_username = str(self.settings.get("leaderboard_username", "") or "").strip()
         self._restore_persisted_leaderboard_session()
+        self._leaderboard_period_filter = "all_time"
+        self._leaderboard_difficulty_filter = "all"
         self._leaderboard_entries: list[dict[str, object]] = []
         self._leaderboard_total_players = 0
         self._leaderboard_profile: dict[str, object] | None = None
@@ -488,7 +537,8 @@ class SubwayBlindGame:
         self._publish_confirm_return_menu: Menu | None = None
         self._publish_confirm_return_index = 0
         self._game_over_publish_state = "idle"
-        self._game_over_summary = {"score": 0, "coins": 0, "play_time_seconds": 0, "death_reason": "Run ended."}
+        self._active_run_stats = self._empty_run_stats()
+        self._game_over_summary = self._empty_game_over_summary()
         self._last_death_reason = "Run ended."
         self._pending_menu_announcement: Optional[tuple[Menu, float, bool]] = None
         self._magnet_loop_active = False
@@ -1040,6 +1090,68 @@ class SubwayBlindGame:
         self.game_over_menu.items[3].label = f"Death reason: {summary['death_reason']}"
         self.game_over_menu.items[4].label = "Run again"
         self.game_over_menu.items[5].label = "Main menu"
+
+    @staticmethod
+    def _empty_run_stats() -> dict[str, object]:
+        return {
+            "jumps": 0,
+            "rolls": 0,
+            "dodges": 0,
+            "powerups": 0,
+            "boxes": 0,
+            "clean_escapes": 0,
+            "powerup_usage": {key: 0 for key in RUN_POWERUP_LABELS},
+        }
+
+    def _empty_game_over_summary(self) -> dict[str, object]:
+        return {
+            "score": 0,
+            "coins": 0,
+            "play_time_seconds": 0,
+            "death_reason": "Run ended.",
+            "game_version": APP_VERSION,
+            "difficulty": self._difficulty_key(),
+            "distance_meters": 0,
+            "clean_escapes": 0,
+            "revives_used": 0,
+            "powerup_usage": {},
+        }
+
+    def _record_run_metric(self, metric: str, amount: int = 1) -> None:
+        if amount <= 0:
+            return
+        current_value = int(self._active_run_stats.get(metric, 0) or 0)
+        self._active_run_stats[metric] = current_value + int(amount)
+
+    def _record_run_powerup(self, powerup_key: str, amount: int = 1) -> None:
+        if amount <= 0:
+            return
+        usage = self._active_run_stats.get("powerup_usage")
+        if not isinstance(usage, dict):
+            usage = {key: 0 for key in RUN_POWERUP_LABELS}
+            self._active_run_stats["powerup_usage"] = usage
+        normalized_key = str(powerup_key or "").strip().lower()
+        if normalized_key not in RUN_POWERUP_LABELS:
+            return
+        usage[normalized_key] = int(usage.get(normalized_key, 0) or 0) + int(amount)
+
+    @staticmethod
+    def _compact_powerup_usage(powerup_usage: object) -> dict[str, int]:
+        if not isinstance(powerup_usage, dict):
+            return {}
+        compact: dict[str, int] = {}
+        for key in RUN_POWERUP_LABELS:
+            amount = int(powerup_usage.get(key, 0) or 0)
+            if amount > 0:
+                compact[key] = amount
+        return compact
+
+    def _powerup_usage_label(self, powerup_usage: object) -> str:
+        normalized_usage = self._compact_powerup_usage(powerup_usage)
+        if not normalized_usage:
+            return "Power-ups: none"
+        segments = [f"{RUN_POWERUP_LABELS[key]} {normalized_usage[key]}" for key in RUN_POWERUP_LABELS if key in normalized_usage]
+        return "Power-ups: " + ", ".join(segments)
 
     def _refresh_shop_menu_labels(self) -> None:
         self.shop_menu.title = self._shop_title()
@@ -1690,11 +1802,18 @@ class SubwayBlindGame:
         self.speaker.speak("Game Over.", interrupt=True)
 
     def _update_game_over_summary(self, reason: str) -> None:
+        compact_powerup_usage = self._compact_powerup_usage(self._active_run_stats.get("powerup_usage"))
         self._game_over_summary = {
             "score": int(self.state.score),
             "coins": int(self.state.coins),
             "play_time_seconds": int(self.state.time),
             "death_reason": str(reason or "Run ended."),
+            "game_version": APP_VERSION,
+            "difficulty": self._difficulty_key(),
+            "distance_meters": int(self.state.distance),
+            "clean_escapes": int(self._active_run_stats.get("clean_escapes", 0) or 0),
+            "revives_used": int(self.state.revives_used),
+            "powerup_usage": compact_powerup_usage,
         }
 
     def _should_offer_publish_prompt(self) -> bool:
@@ -1782,6 +1901,8 @@ class SubwayBlindGame:
 
     def _record_mission_event(self, metric: str, amount: int = 1) -> None:
         ensure_progression_state(self.settings)
+        if self.state.running and amount > 0:
+            self._record_run_metric(metric, amount)
         achievement_metric = {
             "jumps": "total_jumps",
             "rolls": "total_rolls",
@@ -2821,6 +2942,12 @@ class SubwayBlindGame:
             if action == "back":
                 self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "leaderboard"))
                 return True
+            if action == "leaderboard_cycle_period":
+                self._cycle_leaderboard_period()
+                return True
+            if action == "leaderboard_cycle_difficulty":
+                self._cycle_leaderboard_difficulty()
+                return True
             if action == "leaderboard_refresh":
                 self._open_leaderboard(force_refresh=True)
                 return True
@@ -3164,6 +3291,8 @@ class SubwayBlindGame:
             selected_action = None
             if self.active_menu == self.leaderboard_menu and self.leaderboard_menu.items:
                 selected_action = self.leaderboard_menu.items[self.leaderboard_menu.index].action
+            self._leaderboard_period_filter = str(data.get("period") or self._leaderboard_period_filter or "all_time")
+            self._leaderboard_difficulty_filter = str(data.get("difficulty") or self._leaderboard_difficulty_filter or "all")
             self._leaderboard_entries = list(data.get("entries") or [])
             self._leaderboard_total_players = int(data.get("total_players", len(self._leaderboard_entries)) or 0)
             self._leaderboard_cache_loaded_at = time.monotonic()
@@ -3172,7 +3301,11 @@ class SubwayBlindGame:
                 self.leaderboard_menu.index = self._menu_index_for_action(self.leaderboard_menu, selected_action)
             if operation == "leaderboard_connect":
                 self._set_active_menu(self.leaderboard_menu, play_sound=False)
-                self.speaker.speak("Leaderboard loaded.", interrupt=True)
+                self.speaker.speak(
+                    f"{leaderboard_period_display_label(self._leaderboard_period_filter)} "
+                    f"{leaderboard_difficulty_filter_display_label(self._leaderboard_difficulty_filter)} leaderboard loaded.",
+                    interrupt=True,
+                )
             return
         if operation == "leaderboard_profile":
             data = dict(payload or {})
@@ -3214,13 +3347,20 @@ class SubwayBlindGame:
             self._set_active_menu(target_menu, start_index=self._publish_confirm_return_index, play_sound=False)
             if target_menu == self.game_over_menu:
                 self.game_over_menu.index = 4
+            suspicious_run = str(data.get("verification_status") or "verified") == "suspicious"
             if bool(data.get("high_score")):
                 rank = data.get("board_rank")
                 self.audio.play("high", channel="ui")
                 if rank is not None:
-                    self.speaker.speak(f"New personal best. Leaderboard rank {rank}.", interrupt=True)
+                    message = f"New personal best. Leaderboard rank {rank}."
                 else:
-                    self.speaker.speak("New personal best.", interrupt=True)
+                    message = "New personal best."
+                if suspicious_run:
+                    message = f"{message} Run flagged as suspicious."
+                self.speaker.speak(message, interrupt=True)
+                return
+            if suspicious_run:
+                self.speaker.speak("Run published and flagged as suspicious.", interrupt=True)
             return
 
     def _handle_leaderboard_error(self, operation: str, error: object) -> None:
@@ -3272,22 +3412,61 @@ class SubwayBlindGame:
         total = max(self._leaderboard_total_players, len(self._leaderboard_entries))
         self.leaderboard_menu.title = f"Leaderboard   {len(self._leaderboard_entries)}/{total}"
         items = [
+            MenuItem(self._leaderboard_period_option_label(), "leaderboard_cycle_period"),
+            MenuItem(self._leaderboard_difficulty_option_label(), "leaderboard_cycle_difficulty"),
+        ]
+        items.extend(
             MenuItem(self._leaderboard_entry_label(entry), f"leaderboard_player:{entry['username']}")
             for entry in self._leaderboard_entries
-        ]
-        if not items:
-            items.append(MenuItem("No published runs were found.", "leaderboard_info"))
+        )
+        if not self._leaderboard_entries:
+            items.append(MenuItem("No published runs were found for the current filters.", "leaderboard_info"))
         items.append(MenuItem("Refresh", "leaderboard_refresh"))
         items.append(MenuItem("Back", "back"))
         self.leaderboard_menu.items = items
 
+    def _leaderboard_period_option_label(self) -> str:
+        return f"Period: {leaderboard_period_display_label(self._leaderboard_period_filter)}"
+
+    def _leaderboard_difficulty_option_label(self) -> str:
+        return f"Difficulty: {leaderboard_difficulty_filter_display_label(self._leaderboard_difficulty_filter)}"
+
     def _leaderboard_entry_label(self, entry: dict[str, object]) -> str:
-        return (
-            f"{int(entry.get('rank', 0) or 0)}. {entry.get('username', 'Player')}   "
-            f"Score {int(entry.get('score', 0) or 0)}   "
-            f"Coins {int(entry.get('coins', 0) or 0)}   "
-            f"Time {format_play_time(entry.get('play_time_seconds', 0) or 0)}"
+        segments = [
+            f"{int(entry.get('rank', 0) or 0)}. {entry.get('username', 'Player')}",
+            verification_display_label(entry.get("verification_status")),
+        ]
+        if self._leaderboard_difficulty_filter == "all":
+            segments.append(difficulty_display_label(entry.get("difficulty")))
+        segments.extend(
+            [
+                f"Score {int(entry.get('score', 0) or 0)}",
+                f"Coins {int(entry.get('coins', 0) or 0)}",
+                f"Time {format_play_time(entry.get('play_time_seconds', 0) or 0)}",
+            ]
         )
+        return "   ".join(segments)
+
+    def _cycle_leaderboard_period(self) -> None:
+        current_index = LEADERBOARD_PERIOD_ORDER.index(self._leaderboard_period_filter)
+        self._leaderboard_period_filter = LEADERBOARD_PERIOD_ORDER[(current_index + 1) % len(LEADERBOARD_PERIOD_ORDER)]
+        self._leaderboard_cache_loaded_at = 0.0
+        self._refresh_leaderboard_menu()
+        self._set_active_menu(self.leaderboard_menu, start_index=self._menu_index_for_action(self.leaderboard_menu, "leaderboard_cycle_period"))
+        self._request_leaderboard_refresh("leaderboard_refresh", return_menu=self.leaderboard_menu, show_status=False)
+
+    def _cycle_leaderboard_difficulty(self) -> None:
+        current_index = LEADERBOARD_DIFFICULTY_FILTER_ORDER.index(self._leaderboard_difficulty_filter)
+        self._leaderboard_difficulty_filter = LEADERBOARD_DIFFICULTY_FILTER_ORDER[
+            (current_index + 1) % len(LEADERBOARD_DIFFICULTY_FILTER_ORDER)
+        ]
+        self._leaderboard_cache_loaded_at = 0.0
+        self._refresh_leaderboard_menu()
+        self._set_active_menu(
+            self.leaderboard_menu,
+            start_index=self._menu_index_for_action(self.leaderboard_menu, "leaderboard_cycle_difficulty"),
+        )
+        self._request_leaderboard_refresh("leaderboard_refresh", return_menu=self.leaderboard_menu, show_status=False)
 
     def _open_leaderboard_profile(self, username: str) -> None:
         def worker() -> dict[str, object]:
@@ -3305,14 +3484,18 @@ class SubwayBlindGame:
     def _request_leaderboard_refresh(self, operation: str, return_menu: Menu, show_status: bool) -> bool:
         def worker() -> dict[str, object]:
             just_connected = self.leaderboard_client.connect()
-            board = self.leaderboard_client.fetch_leaderboard(limit=100)
+            board = self.leaderboard_client.fetch_leaderboard(
+                limit=100,
+                period=self._leaderboard_period_filter,
+                difficulty=self._leaderboard_difficulty_filter,
+            )
             board["just_connected"] = just_connected
             return board
 
         return self._start_leaderboard_operation(
             operation,
             "Leaderboard",
-            "Connecting to server...",
+            "Refreshing leaderboard..." if operation == "leaderboard_refresh" else "Connecting to server...",
             worker,
             return_menu=return_menu,
             show_status=show_status,
@@ -3326,6 +3509,7 @@ class SubwayBlindGame:
 
     def _refresh_leaderboard_profile_menu(self) -> None:
         profile = self._leaderboard_profile or {}
+        summary = dict(profile.get("summary") or {})
         latest_run = dict(profile.get("latest_run") or {})
         best_run = dict(profile.get("best_run") or {})
         history = list(profile.get("history") or [])
@@ -3335,12 +3519,32 @@ class SubwayBlindGame:
                 f"Leaderboard Rank: {profile.get('board_rank') if profile.get('board_rank') is not None else 'Unranked'}",
                 "leaderboard_profile_info",
             ),
+            MenuItem(f"Published Runs: {int(summary.get('published_runs_total', 0) or 0)}", "leaderboard_profile_info"),
+            MenuItem(f"Active Days: {int(summary.get('active_days', 0) or 0)}", "leaderboard_profile_info"),
+            MenuItem(f"Recent Avg Score: {int(summary.get('recent_average_score', 0) or 0)}", "leaderboard_profile_info"),
+            MenuItem(f"Recent Avg Coins: {int(summary.get('recent_average_coins', 0) or 0)}", "leaderboard_profile_info"),
+            MenuItem(
+                f"Recent Avg Play Time: {format_play_time(summary.get('recent_average_play_time_seconds', 0) or 0)}",
+                "leaderboard_profile_info",
+            ),
+            MenuItem(
+                f"Recent Avg Distance: {int(summary.get('recent_average_distance_meters', 0) or 0)} meters",
+                "leaderboard_profile_info",
+            ),
+            MenuItem(
+                f"Best Score Improvement: +{int(summary.get('best_improvement_score', 0) or 0)}",
+                "leaderboard_profile_info",
+            ),
             MenuItem(f"Latest Score: {int(latest_run.get('score', 0) or 0)}", "leaderboard_profile_info"),
             MenuItem(f"Latest Coins: {int(latest_run.get('coins', 0) or 0)}", "leaderboard_profile_info"),
             MenuItem(f"Latest Play Time: {format_play_time(latest_run.get('play_time_seconds', 0) or 0)}", "leaderboard_profile_info"),
+            MenuItem(f"Latest Difficulty: {difficulty_display_label(latest_run.get('difficulty'))}", "leaderboard_profile_info"),
+            MenuItem(f"Latest Status: {verification_display_label(latest_run.get('verification_status'))}", "leaderboard_profile_info"),
             MenuItem(f"Best Score: {int(best_run.get('score', 0) or 0)}", "leaderboard_profile_info"),
             MenuItem(f"Best Coins: {int(best_run.get('coins', 0) or 0)}", "leaderboard_profile_info"),
             MenuItem(f"Best Play Time: {format_play_time(best_run.get('play_time_seconds', 0) or 0)}", "leaderboard_profile_info"),
+            MenuItem(f"Best Difficulty: {difficulty_display_label(best_run.get('difficulty'))}", "leaderboard_profile_info"),
+            MenuItem(f"Best Status: {verification_display_label(best_run.get('verification_status'))}", "leaderboard_profile_info"),
         ]
         for history_entry in history:
             items.append(
@@ -3354,10 +3558,15 @@ class SubwayBlindGame:
 
     def _leaderboard_history_label(self, history_entry: dict[str, object]) -> str:
         published_at = str(history_entry.get("published_at") or "").replace("T", " ")[:19]
-        return (
-            f"{published_at}   Score {int(history_entry.get('score', 0) or 0)}   "
-            f"Coins {int(history_entry.get('coins', 0) or 0)}   "
-            f"Time {format_play_time(history_entry.get('play_time_seconds', 0) or 0)}"
+        return "   ".join(
+            [
+                published_at,
+                difficulty_display_label(history_entry.get("difficulty")),
+                verification_display_label(history_entry.get("verification_status")),
+                f"Score {int(history_entry.get('score', 0) or 0)}",
+                f"Coins {int(history_entry.get('coins', 0) or 0)}",
+                f"Time {format_play_time(history_entry.get('play_time_seconds', 0) or 0)}",
+            ]
         )
 
     def _open_leaderboard_run_detail(self, submission_id: str) -> None:
@@ -3375,14 +3584,26 @@ class SubwayBlindGame:
     def _refresh_leaderboard_run_detail_menu(self) -> None:
         run_data = self._leaderboard_selected_run or {}
         published_at = str(run_data.get("published_at") or "").replace("T", " ")[:19]
+        verification_reasons = list(run_data.get("verification_reasons") or [])
         self.leaderboard_run_detail_menu.title = "Published Run"
-        self.leaderboard_run_detail_menu.items = [
+        items = [
+            MenuItem(f"Verification: {verification_display_label(run_data.get('verification_status'))}", "leaderboard_run_info"),
+            MenuItem(f"Difficulty: {difficulty_display_label(run_data.get('difficulty'))}", "leaderboard_run_info"),
             MenuItem(f"Score: {int(run_data.get('score', 0) or 0)}", "leaderboard_run_info"),
             MenuItem(f"Coins: {int(run_data.get('coins', 0) or 0)}", "leaderboard_run_info"),
             MenuItem(f"Play Time: {format_play_time(run_data.get('play_time_seconds', 0) or 0)}", "leaderboard_run_info"),
+            MenuItem(f"Distance: {int(run_data.get('distance_meters', 0) or 0)} meters", "leaderboard_run_info"),
+            MenuItem(f"Clean Escapes: {int(run_data.get('clean_escapes', 0) or 0)}", "leaderboard_run_info"),
+            MenuItem(f"Revives Used: {int(run_data.get('revives_used', 0) or 0)}", "leaderboard_run_info"),
+            MenuItem(self._powerup_usage_label(run_data.get("powerup_usage")), "leaderboard_run_info"),
+            MenuItem(f"Death Reason: {run_data.get('death_reason') or 'Run ended.'}", "leaderboard_run_info"),
+            MenuItem(f"Game Version: {run_data.get('game_version') or 'unknown'}", "leaderboard_run_info"),
             MenuItem(f"Published At: {published_at}", "leaderboard_run_info"),
-            MenuItem("Back", "back"),
         ]
+        for reason in verification_reasons:
+            items.append(MenuItem(f"Review Note: {reason}", "leaderboard_run_info"))
+        items.append(MenuItem("Back", "back"))
+        self.leaderboard_run_detail_menu.items = items
 
     def _prompt_for_leaderboard_credentials(self) -> tuple[str, str] | None:
         try:
@@ -3451,16 +3672,12 @@ class SubwayBlindGame:
             return
         if self._game_over_publish_state in {"publishing", "published"}:
             return
-        summary = dict(self._game_over_summary)
+        submission_payload = self._build_leaderboard_submission_payload()
         self._game_over_publish_state = "publishing"
 
         def worker() -> dict[str, object]:
             just_connected = self.leaderboard_client.connect()
-            result = self.leaderboard_client.submit_score(
-                score=int(summary.get("score", 0) or 0),
-                coins=int(summary.get("coins", 0) or 0),
-                play_time_seconds=int(summary.get("play_time_seconds", 0) or 0),
-            )
+            result = self.leaderboard_client.submit_score(**submission_payload)
             result["just_connected"] = just_connected
             result["username"] = self.leaderboard_client.principal_username
             return result
@@ -3472,6 +3689,20 @@ class SubwayBlindGame:
             worker,
             return_menu=self.game_over_menu,
         )
+
+    def _build_leaderboard_submission_payload(self) -> dict[str, object]:
+        summary = dict(self._game_over_summary)
+        return {
+            "score": int(summary.get("score", 0) or 0),
+            "coins": int(summary.get("coins", 0) or 0),
+            "play_time_seconds": int(summary.get("play_time_seconds", 0) or 0),
+            "difficulty": str(summary.get("difficulty") or self._difficulty_key()),
+            "death_reason": str(summary.get("death_reason") or "Run ended."),
+            "distance_meters": int(summary.get("distance_meters", 0) or 0),
+            "clean_escapes": int(summary.get("clean_escapes", 0) or 0),
+            "revives_used": int(summary.get("revives_used", 0) or 0),
+            "powerup_usage": dict(summary.get("powerup_usage") or {}),
+        }
 
     def _cycle_output_device_in_options(self, direction: int) -> None:
         devices = self.audio.output_device_choices()
@@ -3698,6 +3929,7 @@ class SubwayBlindGame:
             self.selected_score_boosters
         ) + self._active_character_bonuses.starting_multiplier_bonus
         self.state.speed = self.speed_profile.base_speed
+        self._active_run_stats = self._empty_run_stats()
         self._footstep_timer = 0.0
         self._left_foot_next = True
         self._run_rewards_committed = False
@@ -3705,7 +3937,7 @@ class SubwayBlindGame:
         self._guard_loop_timer = 0.0
         self._last_death_reason = "Run ended."
         self._game_over_publish_state = "idle"
-        self._game_over_summary = {"score": 0, "coins": 0, "play_time_seconds": 0, "death_reason": "Run ended."}
+        self._game_over_summary = self._empty_game_over_summary()
         self._magnet_loop_active = False
         self._jetpack_loop_active = False
         active_character = selected_character_definition(self.settings)
@@ -3832,6 +4064,7 @@ class SubwayBlindGame:
         self.player.hoverboards -= 1
         self.settings["hoverboards"] = max(0, int(self.settings.get("hoverboards", 0)) - 1)
         self.player.hover_active = HOVERBOARD_DURATION + self._active_character_bonuses.hoverboard_duration_bonus
+        self._record_run_powerup("hoverboard")
         self.audio.play("powerup", channel="act")
         self.speaker.speak("Hoverboard active.", interrupt=False)
 
@@ -4149,6 +4382,7 @@ class SubwayBlindGame:
 
     def _collect_multiplier_pickup(self) -> None:
         self._record_mission_event("powerups")
+        self._record_run_powerup("mult2x")
         self.audio.play("powerup", channel="act")
         self.player.mult2x = max(self.player.mult2x, self._powerup_duration("mult2x"))
         self.speaker.speak("2x multiplier.", interrupt=False)
@@ -4168,6 +4402,7 @@ class SubwayBlindGame:
 
     def _collect_pogo_stick(self) -> None:
         self._record_mission_event("powerups")
+        self._record_run_powerup("pogo")
         self.audio.play("powerup", channel="act")
         self.player.pogo_active = max(self.player.pogo_active, POGO_STICK_DURATION)
         self._launch_pogo_bounce()
@@ -4260,20 +4495,24 @@ class SubwayBlindGame:
 
     def _apply_power_reward(self, reward: str, from_headstart: bool) -> None:
         if reward == "magnet":
+            self._record_run_powerup("magnet")
             self._activate_magnet(self._powerup_duration("magnet"))
             message = "Headstart reward: magnet." if from_headstart else "Magnet."
             self.speaker.speak(message, interrupt=False)
             return
         if reward == "jetpack":
+            self._record_run_powerup("jetpack")
             self._activate_jetpack(self._powerup_duration("jetpack"))
             self.speaker.speak("Jetpack.", interrupt=False)
             return
         if reward == "mult2x":
+            self._record_run_powerup("mult2x")
             self.player.mult2x = max(self.player.mult2x, self._powerup_duration("mult2x"))
             message = "Headstart reward: double score." if from_headstart else "Double score."
             self.speaker.speak(message, interrupt=False)
             return
         if reward == "sneakers":
+            self._record_run_powerup("sneakers")
             self.player.super_sneakers = self._powerup_duration("sneakers")
             message = "Headstart reward: super sneakers." if from_headstart else "Super sneakers."
             self.speaker.speak(message, interrupt=False)
@@ -4391,6 +4630,7 @@ class SubwayBlindGame:
                 sound_key = "swish_mid"
             else:
                 sound_key = "swish_short"
+            self._record_run_metric("clean_escapes")
             self.audio.play(sound_key, channel=f"near_{obstacle.lane}")
         self._near_miss_signatures = active_signatures
 

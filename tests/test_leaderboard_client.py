@@ -97,6 +97,50 @@ class LeaderboardClientTests(unittest.TestCase):
         close_mock.assert_called_once()
         self.assertEqual(len(peer.sent_packets), 1)
 
+    def test_fetch_leaderboard_passes_period_and_difficulty_filters(self):
+        with mock.patch.object(self.client, "_request", return_value={"entries": []}) as request_mock:
+            self.client.fetch_leaderboard(limit=25, period="weekly", difficulty="hard")
+
+        request_mock.assert_called_once_with(
+            "fetch_leaderboard",
+            {
+                "offset": 0,
+                "limit": 25,
+                "period": "weekly",
+                "difficulty": "hard",
+            },
+        )
+
+    def test_submit_score_includes_extended_run_metadata(self):
+        with mock.patch.object(self.client, "_request", return_value={"high_score": True}) as request_mock:
+            self.client.submit_score(
+                score=4200,
+                coins=17,
+                play_time_seconds=65,
+                difficulty="hard",
+                death_reason="Hit train",
+                distance_meters=1490,
+                clean_escapes=6,
+                revives_used=1,
+                powerup_usage={"magnet": 1, "jetpack": 2},
+            )
+
+        request_mock.assert_called_once_with(
+            "submit_score",
+            {
+                "score": 4200,
+                "coins": 17,
+                "play_time_seconds": 65,
+                "game_version": mock.ANY,
+                "difficulty": "hard",
+                "death_reason": "Hit train",
+                "distance_meters": 1490,
+                "clean_escapes": 6,
+                "revives_used": 1,
+                "powerup_usage": {"magnet": 1, "jetpack": 2},
+            },
+        )
+
 
 class ServerConfigTests(unittest.TestCase):
     def test_load_server_config_resolves_relative_key_from_resource_dirs(self):
@@ -173,13 +217,24 @@ class LeaderboardIntegrationTests(unittest.TestCase):
         auth_result = client.login("runner01", "secret123")
         self.assertEqual(auth_result["status"], "created")
 
-        submit_result = client.submit_score(score=4200, coins=17, play_time_seconds=65)
+        submit_result = client.submit_score(
+            score=4200,
+            coins=17,
+            play_time_seconds=65,
+            difficulty="hard",
+            death_reason="Hit train",
+            distance_meters=1490,
+            clean_escapes=6,
+            revives_used=1,
+            powerup_usage={"magnet": 1, "jetpack": 1, "hoverboard": 1},
+        )
         self.assertTrue(submit_result["high_score"])
 
-        leaderboard = client.fetch_leaderboard(limit=10)
+        leaderboard = client.fetch_leaderboard(limit=10, period="all_time", difficulty="hard")
         self.assertEqual(leaderboard["total_players"], 1)
         self.assertEqual(leaderboard["entries"][0]["username"], "runner01")
         self.assertEqual(leaderboard["entries"][0]["score"], 4200)
+        self.assertEqual(leaderboard["entries"][0]["difficulty"], "hard")
 
         session_token = client.auth_token
         client.close()
@@ -193,6 +248,10 @@ class LeaderboardIntegrationTests(unittest.TestCase):
         profile = resumed_client.fetch_profile("runner01", history_limit=10)
         self.assertEqual(profile["username"], "runner01")
         self.assertEqual(profile["best_run"]["score"], 4200)
+        self.assertEqual(profile["best_run"]["difficulty"], "hard")
+        self.assertEqual(profile["best_run"]["game_version"], mock.ANY)
+        self.assertEqual(profile["best_run"]["clean_escapes"], 6)
+        self.assertEqual(profile["summary"]["published_runs_total"], 1)
         resumed_client.close()
 
     def _wait_for_public_key(self) -> str:

@@ -7,6 +7,9 @@ Version: 1.1.3
 Update Summary
 - Updated the game version to 1.1.3.
 - Added a secure online leaderboard system with account sign-in, score publishing, player profiles, and persistent session support.
+- Expanded the leaderboard with all-time, daily, weekly, and monthly ranking windows plus difficulty-specific filtering for Easy, Normal, and Hard runs.
+- Added richer published run records with surfaced game version data, distance, death reason, clean escapes, revive usage, power-up usage, and leaderboard verification status.
+- Added profile-level performance summaries including recent run averages, best score improvement, total published runs, and active-day tracking.
 - Added an original-style Item Upgrades submenu inside the Shop for Coin Magnet, Jetpack, 2X Multiplier, and Super Sneakers.
 - Added persistent per-item upgrade levels with escalating coin costs and immediate in-menu feedback after each purchase.
 - Added a dedicated main-menu description system with English guidance for each main menu action.
@@ -14,6 +17,8 @@ Update Summary
 - Added an optional pause-on-focus-loss setting so active runs automatically pause when the game window loses focus.
 
 Gameplay Changes
+- Leaderboard submissions now retain richer run telemetry so competitive comparisons can include more than raw score and coins.
+- Added basic run verification heuristics that flag suspicious leaderboard entries when submitted run data is internally inconsistent.
 - Coin Magnet upgrades now extend magnet pickup duration through five persistent shop levels.
 - Jetpack upgrades now extend flight duration through five persistent shop levels.
 - 2X Multiplier upgrades now extend score multiplier pickup duration through five persistent shop levels.
@@ -22,6 +27,8 @@ Gameplay Changes
 
 Audio or UI Updates
 - Added leaderboard prompts and publishing flows for game over and run exit back-to-menu transitions.
+- Added in-menu leaderboard filter controls for ranking period and difficulty without leaving the leaderboard screen.
+- Expanded profile and run-detail views to announce game version, difficulty, verification state, review notes, and richer run statistics.
 - Fixed collision audio so each obstacle type now triggers its intended hit sound instead of falling back to the same generic crash layer.
 - Fixed the mono audio routing bug so reward and interface sounds are no longer forced through the HRTF mono path while menu feedback cues stay mono.
 - Added an Item Upgrades shop submenu with list and detail screens, level readouts, duration readouts, max-level handling, and purchase announcements.
