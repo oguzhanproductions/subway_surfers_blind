@@ -47,11 +47,12 @@ Audio or UI Updates
 - Added dedicated Boards and Collections menus with spoken summaries, active-state announcements, and detailed status rows.
 - Added dedicated Events and Quests menu screens with reward claim actions and live progress readouts.
 - Added a free daily gift entry inside the Shop so the mini mystery box flow is reachable from the original economy surface.
-- Improved the run intro by using intro_start, intro_shake, and intro_spray as a fuller chase-style opening instead of limiting those sounds to headstart behavior.
+- Improved the run intro by keeping intro_start on every run while reserving intro_shake and intro_spray for active headstarts only.
 - Fixed collision audio so each obstacle type now triggers its intended hit sound instead of falling back to the same generic crash layer.
 - Fixed the mono audio routing bug so reward and interface sounds are no longer forced through the HRTF mono path while menu feedback cues stay mono.
 - Added an Item Upgrades shop submenu with list and detail screens, level readouts, duration readouts, max-level handling, and purchase announcements.
 - Added optional spoken and on-screen descriptions for main menu items, with a direct toggle in Options.
+- Added a gameplay T hotkey to announce the current play time on demand.
 - Added an Exit Confirmation option in Options so players can choose whether the game asks before returning to desktop.
 - Added a Gameplay Announcements toggle that lets players enable or disable automatic pausing when the game window loses focus.
 - Added line-by-line clipboard copying for How to Play and What's New, plus a Copy All action at the end of each list.
