@@ -954,6 +954,7 @@ class SubwayBlindGame:
 
         self.active_menu: Optional[Menu] = self.main_menu
         if self.packaged_build and bool(self.settings.get("check_updates_on_startup", True)):
+            self._show_startup_status("Checking for updates.")
             self._check_for_updates(announce_result=False, automatic=True)
         if self.active_menu == self.main_menu and not self.main_menu.opened:
             self.active_menu.open()
@@ -2084,6 +2085,21 @@ class SubwayBlindGame:
         self._refresh_update_menu(result)
         self._set_active_menu(self.update_menu)
         self.speaker.speak(self._update_status_message, interrupt=True)
+
+    def _show_startup_status(self, message: str) -> None:
+        try:
+            width, height = self.screen.get_size()
+            self.screen.fill((10, 10, 15))
+            title_surface = self.big.render("Subway Surfers Blind Edition", True, (240, 240, 240))
+            message_surface = self.font.render(str(message or "").strip() or "Checking for updates.", True, (205, 205, 205))
+            title_rect = title_surface.get_rect(center=(width // 2, max(72, height // 2 - 30)))
+            message_rect = message_surface.get_rect(center=(width // 2, min(height - 48, height // 2 + 18)))
+            self.screen.blit(title_surface, title_rect)
+            self.screen.blit(message_surface, message_rect)
+            pygame.display.flip()
+            pygame.event.pump()
+        except pygame.error:
+            return
 
     def _begin_update_install(self) -> None:
         if not self.packaged_build:

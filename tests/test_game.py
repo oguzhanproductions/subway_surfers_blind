@@ -2042,11 +2042,12 @@ class GameTests(unittest.TestCase):
 
     def test_startup_update_check_runs_when_setting_is_enabled(self):
         updater = DummyUpdater()
-
-        game, _, _ = self.make_game(updater=updater, packaged_build=True)
+        with patch.object(SubwayBlindGame, "_show_startup_status", autospec=True) as startup_status:
+            game, _, _ = self.make_game(updater=updater, packaged_build=True)
 
         self.assertIs(game.active_menu, game.main_menu)
         self.assertEqual(updater.check_calls, 1)
+        startup_status.assert_called_once_with(game, "Checking for updates.")
 
     def test_startup_update_check_opens_mandatory_update_menu_for_newer_release(self):
         updater = DummyUpdater()
@@ -2067,11 +2068,12 @@ class GameTests(unittest.TestCase):
 
     def test_source_build_skips_startup_update_check(self):
         updater = DummyUpdater()
-
-        game, _, _ = self.make_game(updater=updater, packaged_build=False)
+        with patch.object(SubwayBlindGame, "_show_startup_status", autospec=True) as startup_status:
+            game, _, _ = self.make_game(updater=updater, packaged_build=False)
 
         self.assertIs(game.active_menu, game.main_menu)
         self.assertEqual(updater.check_calls, 0)
+        startup_status.assert_not_called()
 
     def test_manual_check_for_updates_opens_update_menu_when_update_exists(self):
         updater = DummyUpdater()
