@@ -10,8 +10,10 @@ from subway_blind.events import (
     daily_gift_available,
     ensure_event_state,
     login_calendar_available,
+    reset_daily_event_progress,
     word_hunt_target_word,
 )
+from subway_blind.progression import reset_daily_word_hunt_progress
 from subway_blind.quests import (
     can_claim_meter_reward,
     claim_meter_reward,
@@ -21,6 +23,7 @@ from subway_blind.quests import (
     next_meter_threshold,
     quest_sneakers,
     record_quest_metric,
+    reset_daily_quest_progress,
 )
 
 
@@ -92,6 +95,52 @@ class MetaSystemTests(unittest.TestCase):
 
         self.assertIsNotNone(reward)
         self.assertEqual(settings["quest_state"]["meter_stage"], 1)
+
+    def test_reset_daily_quest_progress_clears_unclaimed_daily_quests_only(self):
+        settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
+        today = date(2026, 3, 29)
+        ensure_quest_state(settings, today)
+        first_quest, second_quest, _ = daily_quests(today)
+        settings["quest_state"]["daily_progress"][first_quest.key] = first_quest.target - 1
+        settings["quest_state"]["daily_progress"][second_quest.key] = second_quest.target
+        settings["quest_state"]["daily_claimed"] = [second_quest.key]
+
+        reset_quests = reset_daily_quest_progress(settings, today)
+
+        self.assertEqual({quest.key for quest in reset_quests}, {first_quest.key})
+        self.assertEqual(settings["quest_state"]["daily_progress"][first_quest.key], 0)
+        self.assertEqual(settings["quest_state"]["daily_progress"][second_quest.key], second_quest.target)
+
+    def test_reset_daily_word_hunt_progress_preserves_completed_reward(self):
+        settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
+        today = date(2026, 3, 29)
+        settings["word_hunt_active_word"] = "TRAIN"
+        settings["word_hunt_day"] = today.isoformat()
+        settings["word_hunt_letters"] = "TRAIN"
+        settings["word_hunt_completed_on"] = today.isoformat()
+
+        reset = reset_daily_word_hunt_progress(settings, today)
+
+        self.assertFalse(reset)
+        self.assertEqual(settings["word_hunt_letters"], "TRAIN")
+
+    def test_reset_daily_event_progress_clears_counters_without_reopening_claimed_tiers(self):
+        settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
+        today = date(2026, 3, 29)
+        ensure_event_state(settings, today)
+        settings["event_state"]["daily_high_score_total"] = 4200
+        settings["event_state"]["daily_high_score_claimed_tiers"] = 2
+        settings["event_state"]["coin_meter_coins"] = 160
+        settings["event_state"]["coin_meter_claimed_tiers"] = 1
+
+        daily_high_score_reset, coin_meter_reset = reset_daily_event_progress(settings, today)
+
+        self.assertTrue(daily_high_score_reset)
+        self.assertTrue(coin_meter_reset)
+        self.assertEqual(settings["event_state"]["daily_high_score_total"], 0)
+        self.assertEqual(settings["event_state"]["coin_meter_coins"], 0)
+        self.assertEqual(settings["event_state"]["daily_high_score_claimed_tiers"], 2)
+        self.assertEqual(settings["event_state"]["coin_meter_claimed_tiers"], 1)
 
 
 if __name__ == "__main__":

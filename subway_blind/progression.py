@@ -232,6 +232,18 @@ def update_word_hunt_streak(settings: dict, today: date | None = None) -> int:
     return streak
 
 
+def reset_daily_word_hunt_progress(settings: dict, today: date | None = None) -> bool:
+    current_day = today or date.today()
+    ensure_progression_state(settings, current_day)
+    today_iso = current_day.isoformat()
+    if str(settings.get("word_hunt_completed_on", "") or "") == today_iso:
+        return False
+    had_progress = bool(str(settings.get("word_hunt_letters", "") or ""))
+    settings["word_hunt_day"] = today_iso
+    settings["word_hunt_letters"] = ""
+    return had_progress
+
+
 def word_hunt_reward_for_streak(streak: int) -> tuple[str, int]:
     normalized_streak = max(1, int(streak))
     if normalized_streak >= 5:

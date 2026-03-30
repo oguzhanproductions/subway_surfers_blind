@@ -300,6 +300,16 @@ def claim_login_calendar_reward(settings: dict, today: date | None = None) -> di
     return reward
 
 
+def reset_daily_event_progress(settings: dict, today: date | None = None) -> tuple[bool, bool]:
+    ensure_event_state(settings, today)
+    event_state = settings["event_state"]
+    daily_high_score_reset = int(event_state.get("daily_high_score_total", 0) or 0) > 0
+    coin_meter_reset = int(event_state.get("coin_meter_coins", 0) or 0) > 0
+    event_state["daily_high_score_total"] = 0
+    event_state["coin_meter_coins"] = 0
+    return daily_high_score_reset, coin_meter_reset
+
+
 def event_runtime_profile(settings: dict, today: date | None = None) -> dict[str, object]:
     current_day = today or date.today()
     event = current_daily_event(current_day)

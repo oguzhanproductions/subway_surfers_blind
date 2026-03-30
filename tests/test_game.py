@@ -3672,6 +3672,44 @@ class GameTests(unittest.TestCase):
         self.assertIn("Completed", game.mission_set_menu.items[0].label)
         self.assertIn(f"{goal.target}/{goal.target}", game.mission_set_menu.items[0].label)
 
+    def test_reset_daily_progress_action_clears_daily_progress_and_preserves_claimed_rewards(self):
+        game, speaker, _ = self.make_game()
+        daily_quest = daily_quests()[0]
+        game.settings["quest_state"]["daily_progress"][daily_quest.key] = max(1, daily_quest.target - 1)
+        game.settings["word_hunt_day"] = date.today().isoformat()
+        game.settings["word_hunt_letters"] = game._current_word()[:1]
+        game.settings["event_state"]["daily_high_score_total"] = 1400
+        game.settings["event_state"]["coin_meter_coins"] = 26
+        game._refresh_quest_menu_labels()
+        game.active_menu = game.quests_menu
+
+        result = game._handle_menu_action("reset_daily_progress")
+
+        self.assertTrue(result)
+        self.assertEqual(game.settings["quest_state"]["daily_progress"][daily_quest.key], 0)
+        self.assertEqual(game.settings["word_hunt_letters"], "")
+        self.assertEqual(game.settings["event_state"]["daily_high_score_total"], 0)
+        self.assertEqual(game.settings["event_state"]["coin_meter_coins"], 0)
+        self.assertEqual(speaker.messages[-1][0], "Today's progress was reset. Claimed rewards stayed claimed.")
+
+    def test_reset_daily_progress_keeps_completed_word_hunt_reward_locked(self):
+        game, speaker, _ = self.make_game()
+        today_iso = date.today().isoformat()
+        completed_word = game._current_word()
+        game.settings["word_hunt_day"] = today_iso
+        game.settings["word_hunt_letters"] = completed_word
+        game.settings["word_hunt_completed_on"] = today_iso
+        game._refresh_quest_menu_labels()
+        game.active_menu = game.quests_menu
+
+        game._handle_menu_action("reset_daily_progress")
+
+        self.assertEqual(game.settings["word_hunt_letters"], completed_word)
+        self.assertEqual(
+            speaker.messages[-1][0],
+            "Today's progress was reset. Word Hunt stayed complete because today's reward was already claimed.",
+        )
+
     def test_meter_milestone_is_silent_when_meters_disabled(self):
         game, speaker, audio = self.make_game()
         game.state.distance = 249.0

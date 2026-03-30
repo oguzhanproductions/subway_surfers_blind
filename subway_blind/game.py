@@ -86,6 +86,7 @@ from subway_blind.events import (
     next_daily_high_score_threshold,
     record_coin_meter_coins,
     record_daily_score,
+    reset_daily_event_progress,
     tomorrow_daily_event,
 )
 from subway_blind.leaderboard_client import LeaderboardClient, LeaderboardClientError
@@ -134,6 +135,7 @@ from subway_blind.progression import (
     register_season_token,
     register_word_letter,
     remaining_word_letters,
+    reset_daily_word_hunt_progress,
     set_achievement_progress_max,
     update_word_hunt_streak,
     word_hunt_reward_for_streak,
@@ -150,6 +152,7 @@ from subway_blind.quests import (
     quest_progress,
     quest_sneakers,
     record_quest_metric,
+    reset_daily_quest_progress,
     seasonal_quests,
 )
 from subway_blind.spawn import RoutePattern, SpawnDirector
@@ -1256,6 +1259,9 @@ class SubwayBlindGame:
         status = "Completed" if progress >= goal.target else "Active"
         return f"{goal.label}   {visible_progress}/{goal.target}   {status}"
 
+    def _daily_progress_reset_label(self) -> str:
+        return "Reset Today's Progress   Keeps claimed rewards"
+
     def _item_upgrade_menu_title(self) -> str:
         maxed = sum(
             1
@@ -1620,6 +1626,7 @@ class SubwayBlindGame:
         for quest in seasonal_quests():
             action = f"claim_quest:{quest.key}" if quest_completed(self.settings, quest) and not quest_claimed(self.settings, quest) else "quest_info"
             items.append(MenuItem(self._quest_item_label(quest.key), action))
+        items.append(MenuItem(self._daily_progress_reset_label(), "reset_daily_progress"))
         items.append(MenuItem("Back", "back"))
         self.quests_menu.items = items
 
@@ -2389,6 +2396,27 @@ class SubwayBlindGame:
                     self.speaker.speak(f"Mission complete: {goal.label}.", interrupt=False)
         if len(completed_after) == len(goals) and len(completed_before) != len(goals):
             self._complete_mission_set()
+
+    def _reset_daily_progress(self) -> None:
+        today = date.today()
+        reset_daily_quest_progress(self.settings, today)
+        word_hunt_reset = reset_daily_word_hunt_progress(self.settings, today)
+        word_hunt_completed_today = str(self.settings.get("word_hunt_completed_on", "") or "") == today.isoformat()
+        reset_daily_event_progress(self.settings, today)
+        self.audio.play("gui_tap", channel="ui")
+        self._refresh_quest_menu_labels()
+        self._refresh_events_menu_labels()
+        self._persist_settings()
+        if word_hunt_completed_today and not word_hunt_reset:
+            self.speaker.speak(
+                "Today's progress was reset. Word Hunt stayed complete because today's reward was already claimed.",
+                interrupt=True,
+            )
+            return
+        self.speaker.speak(
+            "Today's progress was reset. Claimed rewards stayed claimed.",
+            interrupt=True,
+        )
 
     def _open_super_mystery_box(self, source: str) -> None:
         self._record_achievement_metric("total_boxes_opened", 1)
@@ -3489,6 +3517,9 @@ class SubwayBlindGame:
                 self._refresh_quest_menu_labels()
                 self._refresh_missions_hub_menu_labels()
                 self._persist_settings()
+                return True
+            if action == "reset_daily_progress":
+                self._reset_daily_progress()
                 return True
             if action == "back":
                 self._refresh_missions_hub_menu_labels()

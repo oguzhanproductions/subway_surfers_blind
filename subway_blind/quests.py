@@ -212,6 +212,21 @@ def claim_quest(settings: dict, quest_key: str, today: date | None = None) -> Qu
     return quest
 
 
+def reset_daily_quest_progress(settings: dict, today: date | None = None) -> tuple[QuestDefinition, ...]:
+    ensure_quest_state(settings, today)
+    claimed = set(settings["quest_state"]["daily_claimed"])
+    progress = dict(settings["quest_state"]["daily_progress"])
+    reset_quests: list[QuestDefinition] = []
+    for quest in daily_quests(today):
+        if quest.key in claimed:
+            continue
+        if int(progress.get(quest.key, 0) or 0) > 0:
+            reset_quests.append(quest)
+        progress[quest.key] = 0
+    settings["quest_state"]["daily_progress"] = progress
+    return tuple(reset_quests)
+
+
 def quest_sneakers(settings: dict, today: date | None = None) -> int:
     ensure_quest_state(settings, today)
     return int(settings["quest_state"]["sneakers"])
