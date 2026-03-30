@@ -154,6 +154,9 @@ class DummyAudio:
     def stop(self, channel: str) -> None:
         self.stopped.append(channel)
 
+    def has_sound(self, key: str) -> bool:
+        return True
+
     def play_spatial(
         self,
         key: str,
@@ -801,10 +804,11 @@ class UpdaterTests(unittest.TestCase):
 
     def test_check_for_updates_returns_update_available_when_release_is_newer(self):
         updater = GitHubReleaseUpdater(timeout_seconds=2.0)
+        next_patch_version = f"{'.'.join(APP_VERSION.split('.')[:-1])}.{int(APP_VERSION.split('.')[-1]) + 1}"
         release_payload = {
-            "tag_name": "v1.1.4",
-            "name": "v1.1.4",
-            "html_url": "https://github.com/oguzhanproductions/subway_surfers_blind/releases/tag/v1.1.4",
+            "tag_name": f"v{next_patch_version}",
+            "name": f"v{next_patch_version}",
+            "html_url": f"https://github.com/oguzhanproductions/subway_surfers_blind/releases/tag/v{next_patch_version}",
             "published_at": "2026-03-08T10:00:00Z",
             "body": "Notes",
             "assets": [
@@ -831,7 +835,7 @@ class UpdaterTests(unittest.TestCase):
             result = updater.check_for_updates(APP_VERSION)
 
         self.assertTrue(result.update_available)
-        self.assertEqual(result.latest_version, "1.1.4")
+        self.assertEqual(result.latest_version, next_patch_version)
         self.assertEqual(result.release.assets[0].name, "SubwaySurfersBlind.zip")
 
     def test_download_and_install_stages_release_and_removes_archive(self):
@@ -1165,6 +1169,26 @@ class SpatialAudioTests(unittest.TestCase):
 
         self.assertEqual(cue.prompt, "roll")
 
+    def test_prompt_moves_earlier_as_speed_increases(self):
+        engine = SpatialThreatAudio()
+        obstacle = Obstacle(kind="high", lane=0, z=22.5)
+
+        normal_speed_cue = engine.build_threat_cues(0, 20.0, [obstacle])[0]
+        high_speed_cue = engine.build_threat_cues(0, 33.9, [obstacle])[0]
+
+        self.assertIsNone(normal_speed_cue.prompt)
+        self.assertEqual(high_speed_cue.prompt, "roll")
+
+    def test_prompt_moves_even_earlier_at_top_speed_band(self):
+        engine = SpatialThreatAudio()
+        obstacle = Obstacle(kind="high", lane=0, z=23.5)
+
+        medium_high_speed_cue = engine.build_threat_cues(0, 24.0, [obstacle])[0]
+        top_speed_cue = engine.build_threat_cues(0, 33.9, [obstacle])[0]
+
+        self.assertIsNone(medium_high_speed_cue.prompt)
+        self.assertEqual(top_speed_cue.prompt, "roll")
+
     def test_center_lane_train_prefers_clearer_escape_side(self):
         engine = SpatialThreatAudio()
         obstacles = [
@@ -1212,7 +1236,30 @@ class SpatialAudioTests(unittest.TestCase):
 
         engine.update(0.1, 0, 20.0, [obstacle], audio, speaker)
 
-        self.assertIn(("roll now", True), speaker.messages)
+        self.assertIn(("announcer_roll_now", "announcer_prompt", False), audio.played)
+        self.assertEqual(speaker.messages, [])
+
+    def test_train_prompt_uses_announcer_direction_clip(self):
+        engine = SpatialThreatAudio()
+        audio = DummyAudio({})
+        speaker = DummySpeaker()
+        obstacle = Obstacle(kind="train", lane=0, z=14.5)
+
+        engine.update(0.1, 0, 20.0, [obstacle], audio, speaker)
+
+        self.assertIn(("announcer_move_left_now", "announcer_prompt", False), audio.played)
+        self.assertEqual(speaker.messages, [])
+
+    def test_non_train_threat_does_not_emit_spatial_warning_sound(self):
+        engine = SpatialThreatAudio()
+        audio = DummyAudio({})
+        speaker = DummySpeaker()
+        obstacle = Obstacle(kind="low", lane=0, z=7.0)
+
+        engine.update(0.1, 0, 20.0, [obstacle], audio, speaker)
+
+        self.assertFalse(audio.spatial_played)
+        self.assertIn(("announcer_jump_now", "announcer_prompt", False), audio.played)
 
     def test_update_repositions_active_spatial_sources_and_stops_inactive_ones(self):
         engine = SpatialThreatAudio()
@@ -1663,7 +1710,7 @@ class GameTests(unittest.TestCase):
             "revives_used": 1,
             "powerup_usage": {"jetpack": 1, "hoverboard": 1},
             "death_reason": "Hit train",
-            "game_version": "1.1.3",
+            "game_version": APP_VERSION,
             "verification_status": "suspicious",
             "verification_reasons": ["Distance exceeds the maximum travel range for the recorded play time."],
         }
@@ -1673,7 +1720,7 @@ class GameTests(unittest.TestCase):
         labels = [item.label for item in game.leaderboard_run_detail_menu.items]
         self.assertIn("Verification: Suspicious", labels)
         self.assertIn("Difficulty: Hard", labels)
-        self.assertIn("Game Version: 1.1.3", labels)
+        self.assertIn(f"Game Version: {APP_VERSION}", labels)
         self.assertTrue(any(label.startswith("Review Note: Distance exceeds") for label in labels))
 
     def test_main_menu_navigation_omits_item_description_when_disabled(self):
@@ -1683,7 +1730,7 @@ class GameTests(unittest.TestCase):
         game.main_menu.open()
         game.main_menu.handle_key(pygame.K_DOWN)
 
-        self.assertEqual(speaker.messages[0][0], "Main Menu   Version: 1.1.3. Start Game")
+        self.assertEqual(speaker.messages[0][0], f"Main Menu   Version: {APP_VERSION}. Start Game")
         self.assertEqual(speaker.messages[-1][0], "Events")
 
     def test_main_menu_exit_action_opens_desktop_confirmation(self):
@@ -1869,9 +1916,9 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.whats_new_menu)
-        self.assertEqual(game.whats_new_menu.title, "What's New   1.1.3")
+        self.assertEqual(game.whats_new_menu.title, f"What's New   {APP_VERSION}")
         self.assertEqual(game.whats_new_menu.items[0].action, "copy_info_line")
-        self.assertEqual(game.whats_new_menu.items[0].label, "Version: 1.1.3")
+        self.assertEqual(game.whats_new_menu.items[0].label, f"Version: {APP_VERSION}")
         self.assertEqual(game.whats_new_menu.items[-2].label, "Copy All")
         self.assertFalse(any("Update Summary" == message for message, _ in speaker.messages))
 
@@ -1954,7 +2001,7 @@ class GameTests(unittest.TestCase):
     def test_load_whats_new_content_uses_latest_changelog_entry(self):
         content = load_whats_new_content()
 
-        self.assertEqual(content.title, "What's New   1.1.3")
+        self.assertEqual(content.title, f"What's New   {APP_VERSION}")
         self.assertIn("Update Summary", content.lines)
         self.assertNotIn("Press Enter to repeat the selected line.", content.lines)
 
@@ -1981,7 +2028,7 @@ class GameTests(unittest.TestCase):
         self.assertTrue(result)
         copied_text = copy_mock.call_args.args[0]
         self.assertTrue(copied_text.startswith("Hazards and Warnings\n\n"))
-        self.assertIn("Listen for danger speech and warning sounds.", copied_text)
+        self.assertIn("Listen for the announcer callouts and the train fly-by sound.", copied_text)
         self.assertEqual(speaker.messages[-1], ("Hazards and Warnings copied to clipboard.", True))
 
     def test_whats_new_copy_all_copies_title_and_lines(self):
@@ -1993,9 +2040,9 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(result)
         copied_text = copy_mock.call_args.args[0]
-        self.assertTrue(copied_text.startswith("What's New   1.1.3\n\n"))
-        self.assertIn("Version: 1.1.3", copied_text)
-        self.assertEqual(speaker.messages[-1], ("What's New   1.1.3 copied to clipboard.", True))
+        self.assertTrue(copied_text.startswith(f"What's New   {APP_VERSION}\n\n"))
+        self.assertIn(f"Version: {APP_VERSION}", copied_text)
+        self.assertEqual(speaker.messages[-1], (f"What's New   {APP_VERSION} copied to clipboard.", True))
 
     def test_upgrade_version_marks_current_version_seen_without_auto_opening_help(self):
         settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
@@ -2305,6 +2352,22 @@ class GameTests(unittest.TestCase):
         self.assertEqual(actions[:-1], [f"learn_sound:{key}" for key in ACTIVE_GAMEPLAY_SOUND_KEYS])
         self.assertEqual(actions[-1], "back")
         self.assertNotIn("learn_sound:menuopen", actions)
+        self.assertIn("learn_sound:announcer_jump_now", actions)
+        self.assertIn("learn_sound:announcer_move_left_now", actions)
+
+    def test_enter_on_announcer_learn_sound_plays_announcer_preview(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.learn_sounds_menu
+        game.learn_sounds_menu.index = next(
+            index for index, item in enumerate(game.learn_sounds_menu.items) if item.action == "learn_sound:announcer_move_right_now"
+        )
+        game._refresh_learn_sound_description()
+
+        result = game._handle_active_menu_key(pygame.K_RETURN)
+
+        self.assertTrue(result)
+        self.assertIn(("announcer_move_right_now", LEARN_SOUND_PREVIEW_CHANNEL, False), audio.played)
+        self.assertTrue(speaker.messages[-1][0].startswith("Announcer Move Right Now."))
 
     def test_headstart_adds_speed_bonus_and_consumes_inventory(self):
         game, _, _ = self.make_game()
@@ -3744,6 +3807,14 @@ class GameTests(unittest.TestCase):
 
         self.assertEqual(game.state.coins, 1)
         self.assertLess(game.obstacles[0].z, -100)
+
+    def test_support_pickups_do_not_emit_warning_sound(self):
+        game, _, audio = self.make_game()
+        game.obstacles = [Obstacle(kind="power", lane=0, z=5.0)]
+
+        game._handle_obstacles()
+
+        self.assertFalse(any(key == "warning" for key, _, _ in audio.played))
 
     def test_jetpack_disables_lane_change_actions(self):
         game, _, audio = self.make_game()

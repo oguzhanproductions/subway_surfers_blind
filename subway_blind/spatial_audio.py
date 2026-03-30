@@ -11,6 +11,40 @@ TRAIN_REAR_TRACKING_DISTANCE = 10.0
 OBSTACLE_FRONT_TRACKING_DISTANCE = 26.0
 LANE_ORDER = (-1, 0, 1)
 PRIORITY = {"train": 0, "high": 1, "low": 2, "bush": 3}
+ANNOUNCER_PROMPT_SOUND_KEYS = {
+    "jump": "announcer_jump_now",
+    "jump now": "announcer_jump_now",
+    "roll": "announcer_roll_now",
+    "roll now": "announcer_roll_now",
+    "turn left": "announcer_move_left_now",
+    "turn left now": "announcer_move_left_now",
+    "turn right": "announcer_move_right_now",
+    "turn right now": "announcer_move_right_now",
+}
+PROMPT_LEAD_TIMES = {
+    "train": 0.84,
+    "high": 0.62,
+    "low": 0.6,
+    "bush": 0.58,
+}
+PROMPT_LEAD_TIME_SPEED_BONUS = {
+    "train": 0.22,
+    "high": 0.18,
+    "low": 0.16,
+    "bush": 0.16,
+}
+PROMPT_LEAD_TIME_HIGH_SPEED_BONUS = {
+    "train": 0.18,
+    "high": 0.14,
+    "low": 0.13,
+    "bush": 0.12,
+}
+PROMPT_DISTANCE_BUFFERS = {
+    "train": 5.5,
+    "high": 4.4,
+    "low": 4.0,
+    "bush": 3.8,
+}
 
 
 @dataclass(frozen=True)
@@ -29,12 +63,13 @@ class ThreatCue:
     velocity_z: float
     pitch: float
     prompt: Optional[str]
+    announcer_key: Optional[str]
 
 
 class SpatialThreatAudio:
     def __init__(self) -> None:
         self._pulse_cooldowns = {lane: 0.0 for lane in LANE_ORDER}
-        self._spoken_signatures: dict[int, tuple[str, str]] = {}
+        self._spoken_signatures: dict[int, str] = {}
 
     def reset(self) -> None:
         self._pulse_cooldowns = {lane: 0.0 for lane in LANE_ORDER}
@@ -52,22 +87,22 @@ class SpatialThreatAudio:
                 audio.stop(f"spatial_{lane}")
 
         for cue in cues:
-            audio.update_spatial(
-                channel=f"spatial_{cue.lane}",
-                x=cue.source_x,
-                y=cue.source_y,
-                z=cue.source_z,
-                gain=cue.gain,
-                pitch=cue.pitch,
-                fallback_pan=cue.pan,
-                velocity_x=cue.velocity_x,
-                velocity_y=cue.velocity_y,
-                velocity_z=cue.velocity_z,
-            )
-            if self._pulse_cooldowns[cue.lane] <= 0:
-                sound_key = "train_pass" if cue.kind == "train" else "warning"
+            if cue.kind == "train":
+                audio.update_spatial(
+                    channel=f"spatial_{cue.lane}",
+                    x=cue.source_x,
+                    y=cue.source_y,
+                    z=cue.source_z,
+                    gain=cue.gain,
+                    pitch=cue.pitch,
+                    fallback_pan=cue.pan,
+                    velocity_x=cue.velocity_x,
+                    velocity_y=cue.velocity_y,
+                    velocity_z=cue.velocity_z,
+                )
+            if cue.kind == "train" and self._pulse_cooldowns[cue.lane] <= 0:
                 audio.play_spatial(
-                    sound_key,
+                    "train_pass",
                     channel=f"spatial_{cue.lane}",
                     x=cue.source_x,
                     y=cue.source_y,
@@ -80,10 +115,18 @@ class SpatialThreatAudio:
                     velocity_z=cue.velocity_z,
                 )
                 self._pulse_cooldowns[cue.lane] = cue.interval
-            if cue.prompt is not None:
-                signature = (cue.kind, cue.prompt)
+            if cue.announcer_key is not None:
+                signature = cue.announcer_key
                 if self._spoken_signatures.get(cue.lane) != signature:
-                    speaker.speak(cue.prompt, interrupt=True)
+                    play_announcer = getattr(audio, "play", None)
+                    has_sound = getattr(audio, "has_sound", None)
+                    played = False
+                    if callable(play_announcer):
+                        if not callable(has_sound) or bool(has_sound(cue.announcer_key)):
+                            play_announcer(cue.announcer_key, channel="announcer_prompt")
+                            played = True
+                    if not played and cue.prompt is not None:
+                        speaker.speak(cue.prompt, interrupt=True)
                     self._spoken_signatures[cue.lane] = signature
 
     def build_threat_cues(self, player_lane: int, speed: float, obstacles: list[Obstacle]) -> list[ThreatCue]:
@@ -164,7 +207,8 @@ class SpatialThreatAudio:
         if signed_distance < 0:
             pitch = max(0.82, pitch - 0.08)
             gain *= 0.88
-        prompt = self._prompt_for_obstacle(player_lane, obstacle, signed_distance, speed_factor, lane_threats)
+        prompt = self._prompt_for_obstacle(player_lane, obstacle, signed_distance, speed, speed_factor, lane_threats)
+        announcer_key = self._announcer_key_for_prompt(prompt)
         return ThreatCue(
             lane=obstacle.lane,
             kind=obstacle.kind,
@@ -180,6 +224,7 @@ class SpatialThreatAudio:
             velocity_z=velocity_z,
             pitch=max(0.75, min(1.3, pitch)),
             prompt=prompt,
+            announcer_key=announcer_key,
         )
 
     @staticmethod
@@ -199,11 +244,19 @@ class SpatialThreatAudio:
         player_lane: int,
         obstacle: Obstacle,
         signed_distance: float,
+        speed: float,
         speed_factor: float,
         lane_threats: dict[int, Obstacle],
     ) -> Optional[str]:
-        base_prompt_distance = {"train": 18.0, "low": 15.0, "high": 15.0, "bush": 15.0}[obstacle.kind]
-        prompt_distance = base_prompt_distance + speed_factor * (6.0 if obstacle.kind == "train" else 4.5)
+        range_limit = TRAIN_FRONT_TRACKING_DISTANCE if obstacle.kind == "train" else OBSTACLE_FRONT_TRACKING_DISTANCE
+        high_speed_factor = speed_factor * speed_factor
+        lead_time = (
+            PROMPT_LEAD_TIMES[obstacle.kind]
+            + (speed_factor * PROMPT_LEAD_TIME_SPEED_BONUS[obstacle.kind])
+            + (high_speed_factor * PROMPT_LEAD_TIME_HIGH_SPEED_BONUS[obstacle.kind])
+        )
+        prompt_distance = PROMPT_DISTANCE_BUFFERS[obstacle.kind] + (max(0.0, float(speed)) * lead_time)
+        prompt_distance = min(range_limit - 0.75, prompt_distance)
         if signed_distance <= 0 or signed_distance > prompt_distance:
             return None
         if obstacle.lane != player_lane:
@@ -234,3 +287,9 @@ class SpatialThreatAudio:
     @staticmethod
     def _speed_factor(speed: float) -> float:
         return max(0.0, min(1.0, (float(speed) - 18.0) / 16.0))
+
+    @staticmethod
+    def _announcer_key_for_prompt(prompt: Optional[str]) -> Optional[str]:
+        if prompt is None:
+            return None
+        return ANNOUNCER_PROMPT_SOUND_KEYS.get(str(prompt).strip().lower())

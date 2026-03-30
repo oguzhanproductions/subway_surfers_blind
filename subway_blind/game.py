@@ -256,6 +256,10 @@ LEARN_SOUND_DETAILS: dict[str, LearnSoundEntry] = {
     "jump": LearnSoundEntry("jump", "Jump", "Plays when you perform a normal jump."),
     "roll": LearnSoundEntry("roll", "Roll", "Plays when you duck under a high obstacle."),
     "dodge": LearnSoundEntry("dodge", "Lane Change", "Plays when you move left or right between lanes."),
+    "announcer_jump_now": LearnSoundEntry("announcer_jump_now", "Announcer Jump Now", "Voice callout that tells you to jump immediately."),
+    "announcer_roll_now": LearnSoundEntry("announcer_roll_now", "Announcer Roll Now", "Voice callout that tells you to roll immediately."),
+    "announcer_move_left_now": LearnSoundEntry("announcer_move_left_now", "Announcer Move Left Now", "Voice callout that tells you to move left immediately."),
+    "announcer_move_right_now": LearnSoundEntry("announcer_move_right_now", "Announcer Move Right Now", "Voice callout that tells you to move right immediately."),
     "landing": LearnSoundEntry("landing", "Landing", "Plays when you land after a normal jump."),
     "stumble": LearnSoundEntry("stumble", "Stumble", "Plays after a standard hit that still leaves one chance."),
     "stumble_side": LearnSoundEntry("stumble_side", "Side Stumble", "Plays after a side impact warning stumble."),
@@ -292,7 +296,6 @@ LEARN_SOUND_DETAILS: dict[str, LearnSoundEntry] = {
     "swish_short": LearnSoundEntry("swish_short", "Short Near Miss", "Short near-miss pass sound for a very quick close call."),
     "swish_mid": LearnSoundEntry("swish_mid", "Medium Near Miss", "Medium near-miss pass sound for a close call."),
     "swish_long": LearnSoundEntry("swish_long", "Long Near Miss", "Long near-miss pass sound for a sweeping close call."),
-    "warning": LearnSoundEntry("warning", "Warning Pulse", "Warning pulse for hazards and support items ahead."),
 }
 ACTIVE_GAMEPLAY_SOUND_KEYS: tuple[str, ...] = (
     "coin",
@@ -300,6 +303,10 @@ ACTIVE_GAMEPLAY_SOUND_KEYS: tuple[str, ...] = (
     "jump",
     "roll",
     "dodge",
+    "announcer_jump_now",
+    "announcer_roll_now",
+    "announcer_move_left_now",
+    "announcer_move_right_now",
     "landing",
     "stumble",
     "stumble_side",
@@ -336,7 +343,6 @@ ACTIVE_GAMEPLAY_SOUND_KEYS: tuple[str, ...] = (
     "swish_short",
     "swish_mid",
     "swish_long",
-    "warning",
 )
 LEARN_SOUND_LIBRARY: tuple[LearnSoundEntry, ...] = tuple(
     LEARN_SOUND_DETAILS[key] for key in ACTIVE_GAMEPLAY_SOUND_KEYS
@@ -350,7 +356,7 @@ HOW_TO_TOPICS: tuple[HelpTopic, ...] = (
     HelpTopic(
         "warnings",
         "Hazards and Warnings",
-        "Listen for danger speech and warning sounds. The callout focuses on the action needed for your current lane, such as jump, roll, turn left, or turn right. Near misses, collisions, hoverboard breaks, and guard pressure all have distinct audio layers.",
+        "Listen for the announcer callouts and the train fly-by sound. The callout focuses on the action needed for your current lane, such as jump, roll, move left, or move right. Near misses, collisions, hoverboard breaks, and guard pressure all have distinct audio layers.",
     ),
     HelpTopic(
         "powerups",
@@ -5211,21 +5217,10 @@ class SubwayBlindGame:
         self.obstacles.append(Obstacle(kind=obstacle_kind, lane=lane, z=distance))
 
     def _handle_obstacles(self) -> None:
-        warning_distance = 14.0
         hit_distance = 2.1
         pickup_distance = 2.2
 
         for obstacle in self.obstacles:
-            if not obstacle.warned and 0 < obstacle.z < warning_distance and obstacle.kind in (
-                "power",
-                "box",
-                "multiplier",
-                "super_box",
-                "pogo",
-            ):
-                obstacle.warned = True
-                self.audio.play("warning", pan=lane_to_pan(obstacle.lane), channel=f"warn_{id(obstacle)}", gain=0.5)
-
             if obstacle.kind == "coin" and -0.5 < obstacle.z < pickup_distance:
                 if self.player.jetpack > 0:
                     self._collect_coin(obstacle)

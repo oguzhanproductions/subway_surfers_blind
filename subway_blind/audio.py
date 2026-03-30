@@ -75,6 +75,13 @@ FORCED_MONO_SOUND_KEYS = {
     "menuclose",
     "confirm",
 }
+ANNOUNCER_SOUND_FILES = {
+    "announcer_jump_now": "jump_now.mp3",
+    "announcer_move_left_now": "move_left_now.mp3",
+    "announcer_move_right_now": "move_right_now.mp3",
+    "announcer_roll_now": "roll_now.mp3",
+}
+ANNOUNCER_SOUND_KEYS = frozenset(ANNOUNCER_SOUND_FILES)
 
 SYSTEM_DEFAULT_OUTPUT_LABEL = "System Default"
 SAPI_VOICE_UNAVAILABLE_LABEL = "Unavailable"
@@ -511,6 +518,7 @@ class Audio:
 
     def _load(self) -> None:
         sfx_path = lambda name: resource_path("assets", "sfx", name)
+        announcer_path = lambda name: resource_path("assets", "announcer", name)
 
         self._load_sound("coin", sfx_path("coin.wav"))
         self._load_sound("coin_gui", sfx_path("coin_gui.wav"))
@@ -560,7 +568,8 @@ class Audio:
         self._load_sound("menuopen", self._pick_menu_sound("menuopen"))
         self._load_sound("menuclose", self._pick_menu_sound("menuclose"))
         self._load_sound("confirm", self._pick_menu_sound("confirm"))
-        self._load_sound("warning", self._pick_menu_sound("warning"))
+        for key, filename in ANNOUNCER_SOUND_FILES.items():
+            self._load_sound(key, announcer_path(filename))
         self._music_catalog = self._discover_music_catalog()
 
     def refresh_volumes(self) -> None:
@@ -633,6 +642,9 @@ class Audio:
         self.channels.clear()
         self._next_channel_index = 0
         self.hrtf.shutdown()
+
+    def has_sound(self, key: str) -> bool:
+        return key in self.sound_paths or key in self.sounds
 
     def _get_channel(self, name: str) -> Optional[pygame.mixer.Channel]:
         if not self._mixer_ready:
@@ -820,6 +832,11 @@ class Audio:
             pitch = 0.9
         elif key in {"warning", "menumove", "menuedge", "menuopen", "menuclose", "confirm"}:
             z = -0.8
+            relative = True
+        elif key in ANNOUNCER_SOUND_KEYS:
+            x = 0.0
+            y = 0.0
+            z = -0.9
             relative = True
         elif key in {"left_foot", "right_foot", "sneakers_left", "sneakers_right"}:
             x = clamped_pan * 1.4

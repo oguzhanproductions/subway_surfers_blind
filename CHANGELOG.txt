@@ -8,6 +8,7 @@ Update Summary
 - Updated the game version to 1.1.4.
 - Fixed mission and quest progress tracking so progression keeps updating even when quest announcements are disabled.
 - Added a daily reset flow inside Quests so players can clear today's daily quest, Word Hunt, Daily High Score, and Coin Meter progress without reopening already claimed rewards.
+- Added a dedicated announcer callout system for critical gameplay prompts, with bundled voice clips that can also be previewed from Learn Game Sounds.
 
 Gameplay Changes
 - Mission completion progress now continues to count in the background regardless of whether quest announcement speech is enabled.
@@ -17,6 +18,8 @@ Gameplay Changes
 Audio or UI Updates
 - Renamed the Gameplay Announcements option from Quest Changes to Quest Announcements so the setting matches its real behavior.
 - Added a Reset Today's Progress action to the Quests menu with spoken confirmation that claimed rewards remain preserved.
+- Replaced the gameplay obstacle NVDA callouts with the new bundled announcer prompt clips while keeping train fly-by warnings and speed-based early timing logic.
+- Added the new announcer prompt clips to Learn Game Sounds so players can preview the jump, roll, move left, and move right callouts from the menu.
 
 ------------------------------------------------------------
 
