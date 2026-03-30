@@ -1030,7 +1030,7 @@ class SubwayBlindGame:
         return f"Coin Counters: {'On' if self._coin_counters_enabled() else 'Off'}"
 
     def _quest_changes_option_label(self) -> str:
-        return f"Quest Changes: {'On' if self._quest_changes_enabled() else 'Off'}"
+        return f"Quest Announcements: {'On' if self._quest_changes_enabled() else 'Off'}"
 
     def _pause_on_focus_loss_option_label(self) -> str:
         return f"Pause on Focus Loss: {'On' if self._pause_on_focus_loss_enabled() else 'Off'}"
@@ -1250,6 +1250,12 @@ class SubwayBlindGame:
             return "Sneaker Meter Complete"
         return f"Next Sneaker Meter Reward at {next_threshold}"
 
+    def _mission_goal_item_label(self, goal) -> str:
+        progress = int(self.settings.get("mission_metrics", {}).get(goal.metric, 0) or 0)
+        visible_progress = min(progress, goal.target)
+        status = "Completed" if progress >= goal.target else "Active"
+        return f"{goal.label}   {visible_progress}/{goal.target}   {status}"
+
     def _item_upgrade_menu_title(self) -> str:
         maxed = sum(
             1
@@ -1431,8 +1437,9 @@ class SubwayBlindGame:
         current_value = int(self._active_run_stats.get(metric, 0) or 0)
         self._active_run_stats[metric] = current_value + int(amount)
         for quest in record_quest_metric(self.settings, metric, amount):
-            self.audio.play("mission_reward", channel="ui")
-            self.speaker.speak(f"Quest ready: {quest.label}.", interrupt=False)
+            if self._quest_changes_enabled():
+                self.audio.play("mission_reward", channel="ui")
+                self.speaker.speak(f"Quest ready: {quest.label}.", interrupt=False)
 
     def _record_run_powerup(self, powerup_key: str, amount: int = 1) -> None:
         if amount <= 0:
@@ -1593,10 +1600,7 @@ class SubwayBlindGame:
         ensure_progression_state(self.settings)
         self.mission_set_menu.title = self._mission_set_menu_title()
         items = [
-            MenuItem(
-                f"{goal.label}   {int(self.settings.get('mission_metrics', {}).get(goal.metric, 0) or 0)}/{goal.target}",
-                "mission_info",
-            )
+            MenuItem(self._mission_goal_item_label(goal), "mission_info")
             for goal in self._mission_goals()
         ]
         items.append(MenuItem(f"Permanent Multiplier: x{1 + int(self.settings.get('mission_multiplier_bonus', 0))}", "mission_info"))
@@ -2373,17 +2377,16 @@ class SubwayBlindGame:
         metrics = self.settings.get("mission_metrics", {})
         if metric not in metrics or amount <= 0:
             return
-        if not self._quest_changes_enabled():
-            return
         goals = self._mission_goals()
         completed_before = completed_mission_metrics(self.settings)
         metrics[metric] = int(metrics.get(metric, 0)) + amount
         completed_after = completed_mission_metrics(self.settings)
         newly_completed = completed_after - completed_before
-        for goal in goals:
-            if goal.metric in newly_completed:
-                self.audio.play("mission_reward", channel="ui")
-                self.speaker.speak(f"Mission complete: {goal.label}.", interrupt=False)
+        if self._quest_changes_enabled():
+            for goal in goals:
+                if goal.metric in newly_completed:
+                    self.audio.play("mission_reward", channel="ui")
+                    self.speaker.speak(f"Mission complete: {goal.label}.", interrupt=False)
         if len(completed_after) == len(goals) and len(completed_before) != len(goals):
             self._complete_mission_set()
 

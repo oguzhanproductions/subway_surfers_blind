@@ -57,6 +57,7 @@ from subway_blind.item_upgrades import (
 )
 from subway_blind.menu import Menu, MenuItem
 from subway_blind.models import Obstacle, lane_name
+from subway_blind.quests import daily_quests
 from subway_blind.spatial_audio import SpatialThreatAudio
 from subway_blind.spawn import PATTERNS, PatternEntry, RoutePattern, SpawnDirector
 from subway_blind.updater import (
@@ -1768,7 +1769,7 @@ class GameTests(unittest.TestCase):
         labels = [item.label for item in game.announcements_menu.items]
         self.assertEqual(
             labels,
-            ["Meters: Off", "Coin Counters: Off", "Quest Changes: Off", "Pause on Focus Loss: On", "Back"],
+            ["Meters: Off", "Coin Counters: Off", "Quest Announcements: Off", "Pause on Focus Loss: On", "Back"],
         )
 
     def test_shop_menu_labels_include_coin_currency(self):
@@ -2894,7 +2895,7 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(game.settings["quest_changes_enabled"])
         self.assertIn(("confirm", "ui", False), audio.played)
-        self.assertEqual(speaker.messages[-1][0], "Quest Changes: On")
+        self.assertEqual(speaker.messages[-1][0], "Quest Announcements: On")
 
     def test_menu_repeat_moves_quickly_after_hold_delay(self):
         game, speaker, _ = self.make_game()
@@ -3643,12 +3644,33 @@ class GameTests(unittest.TestCase):
         coins = [obstacle for obstacle in game.obstacles if obstacle.kind == "coin"]
         self.assertTrue(coins)
 
-    def test_record_mission_event_does_not_advance_metrics_when_quest_changes_disabled(self):
+    def test_record_mission_event_advances_metrics_when_quest_changes_disabled(self):
         game, _, _ = self.make_game()
 
         game._record_mission_event("coins")
 
-        self.assertEqual(game.settings["mission_metrics"]["coins"], 0)
+        self.assertEqual(game.settings["mission_metrics"]["coins"], 1)
+
+    def test_record_run_metric_tracks_quest_progress_without_announcing_when_disabled(self):
+        game, speaker, audio = self.make_game()
+        quest = daily_quests()[0]
+        game.settings["quest_state"]["daily_progress"][quest.key] = quest.target - 1
+
+        game._record_run_metric(quest.metric)
+
+        self.assertEqual(game.settings["quest_state"]["daily_progress"][quest.key], quest.target)
+        self.assertNotIn(("mission_reward", "ui", False), audio.played)
+        self.assertFalse(any("Quest ready:" in message for message, _ in speaker.messages))
+
+    def test_mission_set_menu_marks_over_target_goal_as_completed(self):
+        game, _, _ = self.make_game()
+        goal = game._mission_goals()[0]
+        game.settings["mission_metrics"][goal.metric] = goal.target + 21
+
+        game._refresh_mission_set_menu_labels()
+
+        self.assertIn("Completed", game.mission_set_menu.items[0].label)
+        self.assertIn(f"{goal.target}/{goal.target}", game.mission_set_menu.items[0].label)
 
     def test_meter_milestone_is_silent_when_meters_disabled(self):
         game, speaker, audio = self.make_game()
