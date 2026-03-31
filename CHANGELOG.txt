@@ -6,16 +6,24 @@ Version: 1.1.4
 
 Update Summary
 - Updated the game version to 1.1.4.
+- Added a weekly seasonal leaderboard system with automatic season rollover, season countdowns, and season-specific rewards.
+- Added fixed custom season names for every 2026 leaderboard week through the end of the year.
 - Fixed mission and quest progress tracking so progression keeps updating even when quest announcements are disabled.
 - Added a daily reset flow inside Quests so players can clear today's daily quest, Word Hunt, Daily High Score, and Coin Meter progress without reopening already claimed rewards.
 - Added a dedicated announcer callout system for critical gameplay prompts, with bundled voice clips that can also be previewed from Learn Game Sounds.
 
 Gameplay Changes
+- Leaderboard rankings now reset at the end of each weekly season and start the next season from a clean board.
+- Season finalization now preserves account rewards in a separate inbox while clearing expired leaderboard submissions, season rows, and reward rows so only active-season leaderboard data remains on the server.
+- Seasonal rewards now scale across ranks 1 through 10 instead of rewarding only the top and bottom positions, with item seasons awarding 5, 5, 4, 4, 3, 3, 2, 2, 1, and 1 items by rank.
+- Coin reward seasons now scale from 3x run coins for rank 1 down to 1x run coins for rank 10 based on each winner's published run coin total.
 - Mission completion progress now continues to count in the background regardless of whether quest announcement speech is enabled.
 - Completed mission rows now cap their visible progress at the target value so the Missions menu reports finished goals cleanly.
 - Daily reset keeps claimed quest, Word Hunt, Daily High Score, and Coin Meter rewards locked while clearing the resettable daily counters.
 
 Audio or UI Updates
+- Leaderboard now opens without the spoken "leaderboard loaded" announcement and instead shows the current season name, countdown, and reward preview directly in the menu.
+- Leaderboard help and menu labels now reflect the weekly seasonal board flow instead of the old multi-period ranking system.
 - Renamed the Gameplay Announcements option from Quest Changes to Quest Announcements so the setting matches its real behavior.
 - Added a Reset Today's Progress action to the Quests menu with spoken confirmation that claimed rewards remain preserved.
 - Replaced the gameplay obstacle NVDA callouts with the new bundled announcer prompt clips while keeping train fly-by warnings and speed-based early timing logic.

@@ -47,6 +47,7 @@ class LeaderboardClient:
         self.connected = False
         self.principal_username = ""
         self.auth_token = ""
+        self.last_account_sync: dict[str, Any] = {}
         self._last_activity_at = 0.0
 
     def close(self) -> None:
@@ -158,6 +159,16 @@ class LeaderboardClient:
         self.auth_token = str(result.get("session_token") or "")
         return result
 
+    def sync_account(self, claimed_reward_ids: list[str] | None = None) -> dict[str, Any]:
+        result = self._request(
+            "sync_account",
+            {
+                "claimed_reward_ids": [str(reward_id).strip() for reward_id in list(claimed_reward_ids or []) if str(reward_id).strip()],
+            },
+        )
+        self.last_account_sync = dict(result)
+        return result
+
     def logout(self) -> None:
         try:
             self._request("logout", {})
@@ -170,7 +181,7 @@ class LeaderboardClient:
         self,
         offset: int = 0,
         limit: int | None = None,
-        period: str = "all_time",
+        period: str = "season",
         difficulty: str = "all",
     ) -> dict[str, Any]:
         result_limit = self.connection_config.page_size if limit is None else int(limit)
@@ -179,7 +190,7 @@ class LeaderboardClient:
             {
                 "offset": int(offset),
                 "limit": result_limit,
-                "period": str(period or "all_time"),
+                "period": str(period or "season"),
                 "difficulty": str(difficulty or "all"),
             },
         )

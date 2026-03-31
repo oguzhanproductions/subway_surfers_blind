@@ -40,7 +40,7 @@ from subway_blind.leaderboard_protocol import (
 )
 
 DEFAULT_HOST = "0.0.0.0"
-DEFAULT_PORT = 27888
+DEFAULT_PORT = 5363
 DEFAULT_RUNTIME_DIR_NAME = "runtime"
 DEFAULT_IDLE_TIMEOUT_SECONDS = 600.0
 CONNECT_BUCKET_CAPACITY = 10.0
@@ -212,11 +212,21 @@ class LeaderboardServer:
                     "username": principal.username,
                 },
             }
+        if request_type == "sync_account":
+            if peer_state.principal is None:
+                raise ServiceError("authentication_required", "Sign in before syncing seasonal rewards.")
+            peer_state.principal = self.service.revalidate_principal(peer_state.principal)
+            claimed_reward_ids = payload.get("claimed_reward_ids")
+            result = self.service.sync_account(
+                peer_state.principal,
+                claimed_reward_ids=claimed_reward_ids if isinstance(claimed_reward_ids, list) else None,
+            )
+            return {"ok": True, "type": "sync_account_result", "payload": result}
         if request_type == "fetch_leaderboard":
             result = self.service.fetch_leaderboard(
                 offset=int(payload.get("offset", 0) or 0),
                 limit=int(payload.get("limit", 100) or 100),
-                period=str(payload.get("period") or "all_time"),
+                period=str(payload.get("period") or "season"),
                 difficulty=str(payload.get("difficulty") or "all"),
             )
             return {"ok": True, "type": "leaderboard_result", "payload": result}

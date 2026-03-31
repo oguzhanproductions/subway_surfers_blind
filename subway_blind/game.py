@@ -172,10 +172,7 @@ DIFFICULTY_LABELS = {
     "hard": "Hard",
 }
 LEADERBOARD_PERIOD_LABELS = {
-    "all_time": "All Time",
-    "daily": "Daily",
-    "weekly": "Weekly",
-    "monthly": "Monthly",
+    "season": "Weekly Season",
 }
 LEADERBOARD_PERIOD_ORDER = tuple(LEADERBOARD_PERIOD_LABELS.keys())
 LEADERBOARD_DIFFICULTY_FILTER_LABELS = {
@@ -386,7 +383,7 @@ HOW_TO_TOPICS: tuple[HelpTopic, ...] = (
     HelpTopic(
         "leaderboard",
         "Leaderboard and Publishing",
-        "Open Leaderboard from the main menu after signing in through Options. You can browse all-time, daily, weekly, and monthly boards with difficulty filters, inspect player profiles, and publish finished runs with extended run details and verification status.",
+        "Open Leaderboard from the main menu after signing in through Options. The board tracks the current weekly season, shows the remaining time and active reward, lets you filter by difficulty, inspect player profiles, and publish finished runs with extended run details and verification status.",
     ),
     HelpTopic(
         "navigation",
@@ -437,8 +434,8 @@ def difficulty_display_label(value: object) -> str:
 
 
 def leaderboard_period_display_label(value: object) -> str:
-    normalized = str(value or "all_time").strip().lower()
-    return LEADERBOARD_PERIOD_LABELS.get(normalized, LEADERBOARD_PERIOD_LABELS["all_time"])
+    normalized = str(value or "season").strip().lower()
+    return LEADERBOARD_PERIOD_LABELS.get(normalized, LEADERBOARD_PERIOD_LABELS["season"])
 
 
 def leaderboard_difficulty_filter_display_label(value: object) -> str:
@@ -628,8 +625,9 @@ class SubwayBlindGame:
         self.leaderboard_client = LeaderboardClient()
         self._leaderboard_username = str(self.settings.get("leaderboard_username", "") or "").strip()
         self._restore_persisted_leaderboard_session()
-        self._leaderboard_period_filter = "all_time"
+        self._leaderboard_period_filter = "season"
         self._leaderboard_difficulty_filter = "all"
+        self._leaderboard_season: dict[str, object] = {}
         self._leaderboard_entries: list[dict[str, object]] = []
         self._leaderboard_total_players = 0
         self._leaderboard_profile: dict[str, object] | None = None
@@ -640,6 +638,7 @@ class SubwayBlindGame:
         self._leaderboard_operation_token = 0
         self._leaderboard_active_operation: str | None = None
         self._leaderboard_return_menu: Menu | None = None
+        self._leaderboard_startup_sync_started = False
         self._meta_return_menu: Menu | None = None
         self._publish_confirm_return_menu: Menu | None = None
         self._publish_confirm_return_index = 0
@@ -970,6 +969,7 @@ class SubwayBlindGame:
             self._sync_music_context()
         self._sync_character_progress()
         self._mark_current_version_seen()
+        self._start_background_leaderboard_sync()
 
     def _sfx_option_label(self) -> str:
         return f"SFX Volume: {int(float(self.settings['sfx_volume']) * 100)}"
@@ -2548,6 +2548,106 @@ class SubwayBlindGame:
         self._leaderboard_username = persisted_username
         self.leaderboard_client.principal_username = persisted_username
         self.leaderboard_client.auth_token = persisted_token
+
+    def _claimed_leaderboard_reward_ids(self) -> list[str]:
+        return [
+            str(reward_id).strip()
+            for reward_id in list(self.settings.get("leaderboard_applied_reward_ids") or [])
+            if str(reward_id).strip()
+        ]
+
+    def _remember_leaderboard_reward_ids(self, reward_ids: list[str]) -> None:
+        remembered = self._claimed_leaderboard_reward_ids()
+        for reward_id in reward_ids:
+            normalized = str(reward_id).strip()
+            if not normalized or normalized in remembered:
+                continue
+            remembered.append(normalized)
+        self.settings["leaderboard_applied_reward_ids"] = remembered[-256:]
+
+    def _format_leaderboard_season_remaining(self) -> str:
+        season = self._leaderboard_season or {}
+        remaining = max(0, int(season.get("seconds_remaining", 0) or 0))
+        days = remaining // 86400
+        hours = (remaining % 86400) // 3600
+        minutes = (remaining % 3600) // 60
+        return f"{days} day{'s' if days != 1 else ''} {hours} hour{'s' if hours != 1 else ''} {minutes} minute{'s' if minutes != 1 else ''}"
+
+    def _leaderboard_season_status_label(self) -> str:
+        if not self._leaderboard_season:
+            return "Season Ends In: Loading..."
+        return f"Season Ends In: {self._format_leaderboard_season_remaining()}"
+
+    def _leaderboard_reward_status_label(self) -> str:
+        season = self._leaderboard_season or {}
+        reward_label = str(season.get("reward_label") or "Reward").strip()
+        reward_preview = str(season.get("reward_preview") or "Loading current season reward...").strip()
+        return f"Season Reward: {reward_label}. {reward_preview}"
+
+    def _leaderboard_season_identity_label(self) -> str:
+        season = self._leaderboard_season or {}
+        season_name = str(season.get("season_name") or "").strip()
+        season_key = str(season.get("season_key") or "").strip()
+        if season_name and season_key:
+            return f"Season: {season_name} ({season_key})"
+        if season_name:
+            return f"Season: {season_name}"
+        if season_key:
+            return f"Season: {season_key}"
+        return "Season: Loading current week"
+
+    def _apply_leaderboard_account_sync(self, payload: dict[str, object], *, announce_rewards: bool) -> int:
+        applied_reward_ids: list[str] = []
+        username = str(payload.get("username") or self._leaderboard_username or "").strip()
+        if username and username != self._leaderboard_username:
+            self._leaderboard_username = username
+            self.settings["leaderboard_username"] = username
+            self._refresh_options_menu_labels()
+        season = payload.get("season")
+        if isinstance(season, dict):
+            self._leaderboard_season = dict(season)
+        known_ids = set(self._claimed_leaderboard_reward_ids())
+        for reward_entry in list(payload.get("pending_rewards") or []):
+            if not isinstance(reward_entry, dict):
+                continue
+            reward_id = str(reward_entry.get("id") or "").strip()
+            if not reward_id or reward_id in known_ids:
+                continue
+            reward_kind = str(reward_entry.get("reward_kind") or "").strip().lower()
+            reward_amount = max(1, int(reward_entry.get("reward_amount", 1) or 1))
+            source = f"Season reward for rank {int(reward_entry.get('rank', 0) or 0)}"
+            if self._apply_meta_reward({"kind": reward_kind, "amount": reward_amount}, source):
+                applied_reward_ids.append(reward_id)
+                known_ids.add(reward_id)
+        if applied_reward_ids:
+            self._remember_leaderboard_reward_ids(applied_reward_ids)
+            self._persist_settings()
+            if announce_rewards and len(applied_reward_ids) > 1:
+                self.speaker.speak(f"{len(applied_reward_ids)} seasonal rewards were delivered.", interrupt=True)
+        elif username:
+            self._persist_settings()
+        return len(applied_reward_ids)
+
+    def _start_background_leaderboard_sync(self) -> None:
+        if self._leaderboard_startup_sync_started or not self._leaderboard_is_authenticated():
+            return
+        self._leaderboard_startup_sync_started = True
+
+        def worker() -> dict[str, object]:
+            just_connected = self.leaderboard_client.connect()
+            sync_payload = self.leaderboard_client.sync_account(self._claimed_leaderboard_reward_ids())
+            sync_payload["just_connected"] = just_connected
+            return sync_payload
+
+        self._start_leaderboard_operation(
+            "leaderboard_startup_sync",
+            "Leaderboard",
+            "Checking seasonal rewards...",
+            worker,
+            return_menu=self.active_menu,
+            show_status=False,
+            reject_message=False,
+        )
 
     def _sync_character_progress(self) -> None:
         ensure_character_progress_state(self.settings)
@@ -4152,8 +4252,9 @@ class SubwayBlindGame:
             selected_action = None
             if self.active_menu == self.leaderboard_menu and self.leaderboard_menu.items:
                 selected_action = self.leaderboard_menu.items[self.leaderboard_menu.index].action
-            self._leaderboard_period_filter = str(data.get("period") or self._leaderboard_period_filter or "all_time")
+            self._leaderboard_period_filter = str(data.get("period") or self._leaderboard_period_filter or "season")
             self._leaderboard_difficulty_filter = str(data.get("difficulty") or self._leaderboard_difficulty_filter or "all")
+            self._leaderboard_season = dict(data.get("season") or self._leaderboard_season or {})
             self._leaderboard_entries = list(data.get("entries") or [])
             self._leaderboard_total_players = int(data.get("total_players", len(self._leaderboard_entries)) or 0)
             self._leaderboard_cache_loaded_at = time.monotonic()
@@ -4162,15 +4263,11 @@ class SubwayBlindGame:
                 self.leaderboard_menu.index = self._menu_index_for_action(self.leaderboard_menu, selected_action)
             if operation == "leaderboard_connect":
                 self._set_active_menu(self.leaderboard_menu, play_sound=False)
-                self.speaker.speak(
-                    f"{leaderboard_period_display_label(self._leaderboard_period_filter)} "
-                    f"{leaderboard_difficulty_filter_display_label(self._leaderboard_difficulty_filter)} leaderboard loaded.",
-                    interrupt=True,
-                )
             return
         if operation == "leaderboard_profile":
             data = dict(payload or {})
             self._leaderboard_profile = data
+            self._leaderboard_season = dict(data.get("season") or self._leaderboard_season or {})
             self._leaderboard_profile_history_count = int(data.get("history_total", 0) or 0)
             self._refresh_leaderboard_profile_menu()
             self._set_active_menu(self.leaderboard_profile_menu, play_sound=False)
@@ -4182,6 +4279,9 @@ class SubwayBlindGame:
                 self.audio.play("connect", channel="ui")
             self._leaderboard_username = str(data.get("username") or self._leaderboard_username or "").strip()
             self.settings["leaderboard_username"] = self._leaderboard_username
+            account_sync = dict(data.get("account_sync") or {})
+            if account_sync:
+                self._apply_leaderboard_account_sync(account_sync, announce_rewards=True)
             self._refresh_options_menu_labels()
             self._persist_settings()
             self.speaker.speak(
@@ -4223,6 +4323,11 @@ class SubwayBlindGame:
             if suspicious_run:
                 self.speaker.speak("Run published and flagged as suspicious.", interrupt=True)
             return
+        if operation == "leaderboard_startup_sync":
+            data = dict(payload or {})
+            self._apply_leaderboard_account_sync(data, announce_rewards=True)
+            self._refresh_leaderboard_menu()
+            return
 
     def _handle_leaderboard_error(self, operation: str, error: object) -> None:
         if isinstance(error, LeaderboardClientError) and error.code == "reauth_required":
@@ -4232,6 +4337,10 @@ class SubwayBlindGame:
             self.leaderboard_client.auth_token = ""
             self._refresh_options_menu_labels()
             self._persist_settings()
+        if operation == "leaderboard_startup_sync" and not (
+            isinstance(error, LeaderboardClientError) and error.code == "reauth_required"
+        ):
+            return
         message = str(error)
         if operation == "leaderboard_refresh" and self._leaderboard_entries:
             self.audio.play("menuedge", channel="ui")
@@ -4271,9 +4380,14 @@ class SubwayBlindGame:
 
     def _refresh_leaderboard_menu(self) -> None:
         total = max(self._leaderboard_total_players, len(self._leaderboard_entries))
-        self.leaderboard_menu.title = f"Leaderboard   {len(self._leaderboard_entries)}/{total}"
+        self.leaderboard_menu.title = f"Season Leaderboard   {len(self._leaderboard_entries)}/{total}"
         items = [
-            MenuItem(self._leaderboard_period_option_label(), "leaderboard_cycle_period"),
+            MenuItem(
+                self._leaderboard_season_identity_label(),
+                "leaderboard_info",
+            ),
+            MenuItem(self._leaderboard_season_status_label(), "leaderboard_info"),
+            MenuItem(self._leaderboard_reward_status_label(), "leaderboard_info"),
             MenuItem(self._leaderboard_difficulty_option_label(), "leaderboard_cycle_difficulty"),
         ]
         items.extend(
@@ -4287,7 +4401,7 @@ class SubwayBlindGame:
         self.leaderboard_menu.items = items
 
     def _leaderboard_period_option_label(self) -> str:
-        return f"Period: {leaderboard_period_display_label(self._leaderboard_period_filter)}"
+        return f"Season: {leaderboard_period_display_label(self._leaderboard_period_filter)}"
 
     def _leaderboard_difficulty_option_label(self) -> str:
         return f"Difficulty: {leaderboard_difficulty_filter_display_label(self._leaderboard_difficulty_filter)}"
@@ -4377,7 +4491,7 @@ class SubwayBlindGame:
         self.leaderboard_profile_menu.title = str(profile.get("username") or "Player")
         items = [
             MenuItem(
-                f"Leaderboard Rank: {profile.get('board_rank') if profile.get('board_rank') is not None else 'Unranked'}",
+                f"Season Rank: {profile.get('board_rank') if profile.get('board_rank') is not None else 'Unranked'}",
                 "leaderboard_profile_info",
             ),
             MenuItem(f"Published Runs: {int(summary.get('published_runs_total', 0) or 0)}", "leaderboard_profile_info"),
@@ -4496,6 +4610,7 @@ class SubwayBlindGame:
         def worker() -> dict[str, object]:
             just_connected = self.leaderboard_client.connect()
             result = self.leaderboard_client.login(username=username, password=password)
+            result["account_sync"] = self.leaderboard_client.sync_account(self._claimed_leaderboard_reward_ids())
             result["just_connected"] = just_connected
             return result
 

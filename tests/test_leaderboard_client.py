@@ -99,15 +99,26 @@ class LeaderboardClientTests(unittest.TestCase):
 
     def test_fetch_leaderboard_passes_period_and_difficulty_filters(self):
         with mock.patch.object(self.client, "_request", return_value={"entries": []}) as request_mock:
-            self.client.fetch_leaderboard(limit=25, period="weekly", difficulty="hard")
+            self.client.fetch_leaderboard(limit=25, period="season", difficulty="hard")
 
         request_mock.assert_called_once_with(
             "fetch_leaderboard",
             {
                 "offset": 0,
                 "limit": 25,
-                "period": "weekly",
+                "period": "season",
                 "difficulty": "hard",
+            },
+        )
+
+    def test_sync_account_sends_claimed_reward_ids(self):
+        with mock.patch.object(self.client, "_request", return_value={"pending_rewards": []}) as request_mock:
+            self.client.sync_account(["reward-1", "reward-2"])
+
+        request_mock.assert_called_once_with(
+            "sync_account",
+            {
+                "claimed_reward_ids": ["reward-1", "reward-2"],
             },
         )
 
@@ -254,7 +265,7 @@ class LeaderboardIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(submit_result["high_score"])
 
-        leaderboard = client.fetch_leaderboard(limit=10, period="all_time", difficulty="hard")
+        leaderboard = client.fetch_leaderboard(limit=10, period="season", difficulty="hard")
         self.assertEqual(leaderboard["total_players"], 1)
         self.assertEqual(leaderboard["entries"][0]["username"], "runner01")
         self.assertEqual(leaderboard["entries"][0]["score"], 4200)

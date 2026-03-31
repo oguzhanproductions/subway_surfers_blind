@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -103,37 +103,71 @@ class LeaderboardServiceTests(unittest.TestCase):
         self.assertEqual(result["board_rank"], 1)
         self.assertEqual(board["entries"][0]["username"], "runner01")
 
-    def test_fetch_leaderboard_filters_by_period_and_difficulty(self):
+    def test_fetch_leaderboard_uses_current_season_and_difficulty_filter(self):
         easy = self.service.login_or_create_account("runner01", "secret123", "a" * 64)
         hard = self.service.login_or_create_account("runner02", "secret123", "b" * 64)
         old = self.service.login_or_create_account("runner03", "secret123", "c" * 64)
-        submission_times = [
-            datetime(2026, 3, 26, 8, 0, tzinfo=UTC),
-            datetime(2026, 3, 29, 9, 30, tzinfo=UTC),
-            datetime(2026, 2, 10, 14, 0, tzinfo=UTC),
-        ]
-        with patch.object(self.service, "utcnow", side_effect=submission_times):
+        with patch.object(self.service, "utcnow", return_value=datetime(2026, 3, 26, 8, 0, tzinfo=UTC)):
             self.service.submit_score(easy["principal"], score=900, coins=11, play_time_seconds=70, game_version="1.0", difficulty="easy")
+        with patch.object(self.service, "utcnow", return_value=datetime(2026, 3, 29, 9, 30, tzinfo=UTC)):
             self.service.submit_score(hard["principal"], score=1500, coins=14, play_time_seconds=82, game_version="1.0", difficulty="hard")
+        with patch.object(self.service, "utcnow", return_value=datetime(2026, 2, 10, 14, 0, tzinfo=UTC)):
             self.service.submit_score(old["principal"], score=1900, coins=18, play_time_seconds=95, game_version="1.0", difficulty="hard")
 
         with patch.object(self.service, "utcnow", return_value=datetime(2026, 3, 29, 12, 0, tzinfo=UTC)):
-            weekly_hard = self.service.fetch_leaderboard(period="weekly", difficulty="hard")
-            monthly_all = self.service.fetch_leaderboard(period="monthly", difficulty="all")
+            season_hard = self.service.fetch_leaderboard(period="season", difficulty="hard")
+            season_all = self.service.fetch_leaderboard(period="season", difficulty="all")
 
-        self.assertEqual(weekly_hard["total_players"], 1)
-        self.assertEqual(weekly_hard["entries"][0]["username"], "runner02")
-        self.assertEqual(weekly_hard["entries"][0]["difficulty"], "hard")
-        self.assertEqual(monthly_all["total_players"], 2)
-        self.assertEqual(monthly_all["entries"][0]["username"], "runner02")
+        self.assertEqual(season_hard["total_players"], 1)
+        self.assertEqual(season_hard["entries"][0]["username"], "runner02")
+        self.assertEqual(season_hard["entries"][0]["difficulty"], "hard")
+        self.assertEqual(season_all["total_players"], 2)
+        self.assertEqual(season_all["entries"][0]["username"], "runner02")
+
+    def test_sync_account_finalizes_previous_season_and_acknowledges_rewards(self):
+        first = self.service.login_or_create_account("runner01", "secret123", "a" * 64)
+        second = self.service.login_or_create_account("runner02", "secret123", "b" * 64)
+        previous_season_time = datetime(2026, 3, 23, 10, 0, tzinfo=UTC)
+        current_season_time = datetime(2026, 3, 30, 9, 0, tzinfo=UTC)
+        previous_season = self.service._season_for_time(previous_season_time)
+        expected_reward_kind = previous_season.reward_kind
+
+        with patch.object(self.service, "utcnow", return_value=previous_season_time):
+            self.service.submit_score(first["principal"], score=2400, coins=18, play_time_seconds=80, game_version="1.0")
+        with patch.object(self.service, "utcnow", return_value=previous_season_time + timedelta(hours=1)):
+            self.service.submit_score(second["principal"], score=1900, coins=12, play_time_seconds=70, game_version="1.0")
+
+        with patch.object(self.service, "utcnow", return_value=current_season_time):
+            sync_payload = self.service.sync_account(first["principal"], [])
+
+        self.assertEqual(sync_payload["username"], "runner01")
+        self.assertEqual(sync_payload["season"]["season_key"], "2026-W14")
+        self.assertEqual(sync_payload["season"]["season_name"], "Nightline Chase")
+        self.assertEqual(len(sync_payload["pending_rewards"]), 1)
+        pending_reward = sync_payload["pending_rewards"][0]
+        self.assertEqual(pending_reward["rank"], 1)
+        self.assertEqual(pending_reward["season_name"], previous_season.season_name)
+        self.assertEqual(pending_reward["reward_kind"], expected_reward_kind)
+        self.assertEqual(
+            pending_reward["reward_amount"],
+            54 if expected_reward_kind == "coins" else 5,
+        )
+        remaining_submissions = self.database.fetchone("SELECT COUNT(*) AS total FROM submissions")
+        self.assertEqual(int(remaining_submissions["total"]), 0)
+        remaining_old_seasons = self.database.fetchone(
+            "SELECT COUNT(*) AS total FROM leaderboard_seasons WHERE season_key = ?",
+            (previous_season.season_key,),
+        )
+        self.assertEqual(int(remaining_old_seasons["total"]), 0)
+
+        with patch.object(self.service, "utcnow", return_value=current_season_time):
+            acknowledged_payload = self.service.sync_account(first["principal"], [pending_reward["id"]])
+
+        self.assertEqual(acknowledged_payload["pending_reward_count"], 0)
 
     def test_profile_includes_summary_and_extended_run_metadata(self):
         result = self.service.login_or_create_account("runner01", "secret123", "a" * 64)
-        submission_times = [
-            datetime(2026, 3, 28, 10, 0, tzinfo=UTC),
-            datetime(2026, 3, 29, 11, 0, tzinfo=UTC),
-        ]
-        with patch.object(self.service, "utcnow", side_effect=submission_times):
+        with patch.object(self.service, "utcnow", return_value=datetime(2026, 3, 28, 10, 0, tzinfo=UTC)):
             self.service.submit_score(
                 result["principal"],
                 score=1000,
@@ -147,6 +181,7 @@ class LeaderboardServiceTests(unittest.TestCase):
                 revives_used=1,
                 powerup_usage={"magnet": 1, "hoverboard": 1},
             )
+        with patch.object(self.service, "utcnow", return_value=datetime(2026, 3, 29, 11, 0, tzinfo=UTC)):
             self.service.submit_score(
                 result["principal"],
                 score=1450,
@@ -161,7 +196,8 @@ class LeaderboardServiceTests(unittest.TestCase):
                 powerup_usage={"jetpack": 1, "mult2x": 2},
             )
 
-        profile = self.service.fetch_profile("runner01", history_limit=10)
+        with patch.object(self.service, "utcnow", return_value=datetime(2026, 3, 29, 12, 0, tzinfo=UTC)):
+            profile = self.service.fetch_profile("runner01", history_limit=10)
 
         self.assertEqual(profile["summary"]["published_runs_total"], 2)
         self.assertEqual(profile["summary"]["active_days"], 2)

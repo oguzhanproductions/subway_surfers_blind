@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import json
+import math
 import uuid
 
 from argon2 import PasswordHasher
@@ -29,10 +30,75 @@ MAX_DISTANCE_METERS = 5_000_000
 MAX_CLEAN_ESCAPES = 250_000
 MAX_REVIVES_USED = 250
 MAX_POWERUP_ACTIVATIONS = 100_000
-LEADERBOARD_PERIODS = ("all_time", "daily", "weekly", "monthly")
+LEADERBOARD_PERIODS = ("season",)
 LEADERBOARD_DIFFICULTY_FILTERS = ("all", "easy", "normal", "hard")
 RUN_DIFFICULTIES = tuple(sorted(SPEED_PROFILES.keys()))
 POWERUP_USAGE_KEYS = ("magnet", "jetpack", "mult2x", "sneakers", "pogo", "hoverboard")
+SEASON_REWARD_KINDS = ("coins", "hoverboard", "key", "headstart", "score_booster")
+SEASON_ITEM_REWARD_COUNTS = (5, 5, 4, 4, 3, 3, 2, 2, 1, 1)
+SEASON_COIN_REWARD_MULTIPLIERS = (3.0, 2.75, 2.5, 2.25, 2.0, 1.75, 1.5, 1.25, 1.1, 1.0)
+SEASON_NAMES_2026 = (
+    "Neon Kickoff",
+    "Rail Rush",
+    "Tunnel Echo",
+    "Skyline Sprint",
+    "Signal Surge",
+    "Metro Pulse",
+    "Steel Horizon",
+    "Afterglow Dash",
+    "Turbo Junction",
+    "Sonic Drift",
+    "City Flash",
+    "Ember Track",
+    "Voltage Alley",
+    "Nightline Chase",
+    "Chrome Current",
+    "Beacon Burst",
+    "Gravity Glide",
+    "Sonic Overpass",
+    "Iron Tempo",
+    "Dawn Runner",
+    "Prism Route",
+    "Thunder Rail",
+    "Velocity Bloom",
+    "Horizon Break",
+    "Firetrail Loop",
+    "Rushline Prime",
+    "Orbit Runner",
+    "Asphalt Pulse",
+    "Hyper Junction",
+    "Aurora Tracks",
+    "Echo Velocity",
+    "Summit Sprint",
+    "Flashpoint Run",
+    "Neon Tide",
+    "Railbreaker",
+    "Zenith Rush",
+    "Skyline Heat",
+    "Pulsefront",
+    "Circuit Dash",
+    "Ember Velocity",
+    "Metro Mirage",
+    "Stormline",
+    "Rapid Orbit",
+    "Blueflare Run",
+    "Trackstorm",
+    "Luminous Rail",
+    "Overdrive Week",
+    "Midnight Momentum",
+    "Frostline Sprint",
+    "Golden Signal",
+    "Final Ascent",
+    "Nightshift Rush",
+    "Terminal Crown",
+)
+SEASON_REWARD_LABELS = {
+    "coins": "Coins",
+    "hoverboard": "Hoverboard",
+    "key": "Key",
+    "headstart": "Headstart",
+    "score_booster": "Score Booster",
+}
 
 
 class ServiceError(RuntimeError):
@@ -50,11 +116,28 @@ class SessionPrincipal:
     device_hash: str
 
 
+@dataclass(frozen=True)
+class SeasonDefinition:
+    season_key: str
+    season_name: str
+    start_at: datetime
+    end_at: datetime
+    reward_kind: str
+
+    @property
+    def start_epoch(self) -> int:
+        return int(self.start_at.timestamp())
+
+    @property
+    def end_epoch(self) -> int:
+        return int(self.end_at.timestamp())
+
+
 class LeaderboardService:
     def __init__(self, database: LeaderboardDatabase, password_hasher: PasswordHasher | None = None):
         self.database = database
         self.password_hasher = password_hasher or build_password_hasher()
-        self._leaderboard_cache: dict[tuple[int, int, str, str], dict] = {}
+        self._leaderboard_cache: dict[tuple[int, int, str, str, str], dict] = {}
 
     @staticmethod
     def utcnow() -> datetime:
@@ -64,6 +147,7 @@ class LeaderboardService:
         normalized_username = validate_username(username)
         normalized_password = validate_password(password)
         normalized_device_hash = self._normalize_device_hash(device_hash)
+        self._ensure_season_state_current()
         existing_account = self.database.fetchone(
             "SELECT id, username, password_hash, auth_epoch FROM accounts WHERE username = ?",
             (normalized_username,),
@@ -133,6 +217,7 @@ class LeaderboardService:
         normalized_device_hash = self._normalize_device_hash(device_hash)
         if len(normalized_token) < 20:
             raise ServiceError("authentication_required", "Session token is missing.")
+        self._ensure_season_state_current()
         now = self.utcnow()
         session_row = self.database.fetchone(
             """
@@ -182,18 +267,37 @@ class LeaderboardService:
             device_hash=principal.device_hash,
         )
 
+    def sync_account(self, principal: SessionPrincipal, claimed_reward_ids: list[str] | None = None) -> dict:
+        principal = self.revalidate_principal(principal)
+        self._acknowledge_reward_claims(principal.account_id, claimed_reward_ids or [])
+        current_season = self._ensure_season_state_current()
+        pending_rewards = self._fetch_pending_rewards(principal.account_id)
+        return {
+            "username": principal.username,
+            "season": self._serialize_season_definition(current_season),
+            "pending_rewards": pending_rewards,
+            "pending_reward_count": len(pending_rewards),
+        }
+
     def fetch_leaderboard(
         self,
         offset: int = 0,
         limit: int = 100,
-        period: str = "all_time",
+        period: str = "season",
         difficulty: str = "all",
     ) -> dict:
+        current_season = self._ensure_season_state_current()
         normalized_offset = max(0, int(offset))
         normalized_limit = max(1, min(100, int(limit)))
         normalized_period = self._normalize_leaderboard_period(period)
         normalized_difficulty = self._normalize_leaderboard_difficulty_filter(difficulty)
-        cache_key = (normalized_offset, normalized_limit, normalized_period, normalized_difficulty)
+        cache_key = (
+            normalized_offset,
+            normalized_limit,
+            normalized_period,
+            normalized_difficulty,
+            current_season.season_key if normalized_period == "season" else "",
+        )
         cached = self._leaderboard_cache.get(cache_key)
         if cached is not None:
             return self._copy_leaderboard_payload(cached)
@@ -201,6 +305,7 @@ class LeaderboardService:
             normalized_period,
             normalized_difficulty,
             alias="s",
+            current_season=current_season,
         )
         rows = self.database.fetchall(
             f"""
@@ -277,11 +382,13 @@ class LeaderboardService:
             "total_players": int(total["total_players"]) if total is not None else 0,
             "period": normalized_period,
             "difficulty": normalized_difficulty,
+            "season": self._serialize_season_definition(current_season),
         }
         self._leaderboard_cache[cache_key] = payload
         return self._copy_leaderboard_payload(payload)
 
     def fetch_profile(self, username: str, history_offset: int = 0, history_limit: int = 50) -> dict:
+        current_season = self._ensure_season_state_current()
         normalized_username = validate_username(username)
         normalized_offset = max(0, int(history_offset))
         normalized_limit = max(1, min(100, int(history_limit)))
@@ -358,6 +465,7 @@ class LeaderboardService:
                         ORDER BY s.score DESC, s.coins DESC, s.play_time_seconds DESC, s.published_at_epoch ASC
                     ) AS account_rank
                 FROM submissions s
+                WHERE s.published_at_epoch >= ? AND s.published_at_epoch < ?
             ),
             ranked AS (
                 SELECT
@@ -367,12 +475,12 @@ class LeaderboardService:
                     ) AS board_rank
                 FROM best_runs
                 WHERE account_rank = 1
-            )
+                )
             SELECT board_rank
             FROM ranked
             WHERE account_id = ?
             """,
-            (account_id,),
+            (current_season.start_epoch, current_season.end_epoch, account_id),
         )
         history_rows = self.database.fetchall(
             """
@@ -437,6 +545,7 @@ class LeaderboardService:
         return {
             "username": str(account["username"]),
             "board_rank": int(board_rank_row["board_rank"]) if board_rank_row is not None else None,
+            "season": self._serialize_season_definition(current_season),
             "latest_run": self._serialize_run_row(latest_run),
             "best_run": self._serialize_run_row(best_run),
             "summary": self._summarize_profile(
@@ -468,6 +577,7 @@ class LeaderboardService:
         powerup_usage: dict[str, int] | None = None,
     ) -> dict:
         principal = self.revalidate_principal(principal)
+        current_season = self._ensure_season_state_current()
         normalized_score = self._normalize_score(score)
         normalized_coins = self._normalize_coins(coins)
         normalized_play_time = self._normalize_play_time(play_time_seconds)
@@ -600,27 +710,29 @@ class LeaderboardService:
                             ORDER BY s.score DESC, s.coins DESC, s.play_time_seconds DESC, s.published_at_epoch ASC
                         ) AS account_rank
                     FROM submissions s
+                    WHERE s.published_at_epoch >= ? AND s.published_at_epoch < ?
                 ),
                 ranked AS (
                     SELECT
                         account_id,
                         ROW_NUMBER() OVER (
-                            ORDER BY score DESC, coins DESC, play_time_seconds DESC, published_at_epoch ASC, account_id ASC
-                        ) AS board_rank
-                    FROM best_runs
-                    WHERE account_rank = 1
+                        ORDER BY score DESC, coins DESC, play_time_seconds DESC, published_at_epoch ASC, account_id ASC
+                    ) AS board_rank
+                FROM best_runs
+                WHERE account_rank = 1
                 )
                 SELECT board_rank
                 FROM ranked
                 WHERE account_id = ?
                 """,
-                (principal.account_id,),
+                (current_season.start_epoch, current_season.end_epoch, principal.account_id),
             )
             board_rank = int(rank_row["board_rank"]) if rank_row is not None else None
         return {
             "submission_id": submission_id,
             "high_score": high_score,
             "board_rank": board_rank,
+            "season": self._serialize_season_definition(current_season),
             "best_run": self._serialize_run_row(new_best),
             "verification_status": verification_status,
             "verification_reasons": list(verification_reasons),
@@ -800,7 +912,7 @@ class LeaderboardService:
 
     @staticmethod
     def _normalize_leaderboard_period(period: str) -> str:
-        normalized = str(period or "all_time").strip().lower()
+        normalized = str(period or "season").strip().lower()
         if normalized not in LEADERBOARD_PERIODS:
             raise ServiceError("invalid_period", "Unsupported leaderboard period.")
         return normalized
@@ -840,13 +952,434 @@ class LeaderboardService:
                 normalized[key] = amount
         return normalized
 
-    def _build_submission_filter_clause(self, period: str, difficulty: str, alias: str) -> tuple[str, tuple[object, ...]]:
+    def _ensure_season_state_current(self) -> SeasonDefinition:
+        current_season = self._season_for_time(self.utcnow())
+        self._finalize_completed_seasons(current_season)
+        self._migrate_legacy_pending_rewards_to_inbox()
+        self._purge_expired_leaderboard_data(current_season.start_epoch)
+        self._ensure_season_row(current_season)
+        return current_season
+
+    def _season_for_time(self, value: datetime) -> SeasonDefinition:
+        normalized = value.astimezone(UTC)
+        start_at = (normalized - timedelta(days=normalized.weekday())).replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        end_at = start_at + timedelta(days=7)
+        season_key = f"{start_at.isocalendar().year}-W{start_at.isocalendar().week:02d}"
+        season_name = self._season_name(season_key)
+        reward_kind = self._season_reward_kind(start_at)
+        return SeasonDefinition(
+            season_key=season_key,
+            season_name=season_name,
+            start_at=start_at,
+            end_at=end_at,
+            reward_kind=reward_kind,
+        )
+
+    @staticmethod
+    def _season_name(season_key: str) -> str:
+        normalized_key = str(season_key or "").strip().upper()
+        if normalized_key.startswith("2026-W"):
+            try:
+                week_number = int(normalized_key.split("-W", 1)[1])
+            except (IndexError, ValueError):
+                week_number = 0
+            if 1 <= week_number <= len(SEASON_NAMES_2026):
+                return SEASON_NAMES_2026[week_number - 1]
+        return f"Weekly Season {normalized_key}" if normalized_key else "Weekly Season"
+
+    def _season_reward_kind(self, season_start_at: datetime) -> str:
+        normalized_start = season_start_at.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        rotation_index = int(normalized_start.timestamp() // int(timedelta(days=7).total_seconds()))
+        return SEASON_REWARD_KINDS[rotation_index % len(SEASON_REWARD_KINDS)]
+
+    def _ensure_season_row(self, season: SeasonDefinition) -> None:
+        self.database.execute(
+            """
+            INSERT INTO leaderboard_seasons (
+                season_key,
+                start_at,
+                end_at,
+                start_epoch,
+                end_epoch,
+                reward_kind,
+                created_at,
+                finalized_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(season_key) DO NOTHING
+            """,
+            (
+                season.season_key,
+                season.start_at.isoformat(),
+                season.end_at.isoformat(),
+                int(season.start_at.timestamp()),
+                int(season.end_at.timestamp()),
+                season.reward_kind,
+                self.utcnow().isoformat(),
+            ),
+        )
+
+    def _finalize_completed_seasons(self, current_season: SeasonDefinition) -> None:
+        seasons_to_finalize = self.database.fetchall(
+            """
+            SELECT season_key, start_at, end_at, start_epoch, end_epoch, reward_kind
+            FROM leaderboard_seasons
+            WHERE finalized_at IS NULL AND end_epoch <= ?
+            ORDER BY end_epoch ASC
+            """,
+            (current_season.start_epoch,),
+        )
+        for row in seasons_to_finalize:
+            self._finalize_season(row)
+
+    def _finalize_season(self, season_row) -> None:
+        season_key = str(season_row["season_key"])
+        season_name = self._season_name(season_key)
+        start_epoch = int(season_row["start_epoch"])
+        end_epoch = int(season_row["end_epoch"])
+        reward_kind = str(season_row["reward_kind"])
+        ranked_rows = self.database.fetchall(
+            """
+            WITH filtered_submissions AS (
+                SELECT
+                    s.account_id,
+                    s.id,
+                    s.score,
+                    s.coins,
+                    s.play_time_seconds,
+                    s.published_at_epoch
+                FROM submissions s
+                WHERE s.published_at_epoch >= ? AND s.published_at_epoch < ?
+            ),
+            best_runs AS (
+                SELECT
+                    account_id,
+                    id,
+                    score,
+                    coins,
+                    play_time_seconds,
+                    published_at_epoch,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY account_id
+                        ORDER BY score DESC, coins DESC, play_time_seconds DESC, published_at_epoch ASC
+                    ) AS account_rank
+                FROM filtered_submissions
+            ),
+            ranked AS (
+                SELECT
+                    account_id,
+                    id,
+                    score,
+                    coins,
+                    play_time_seconds,
+                    published_at_epoch,
+                    ROW_NUMBER() OVER (
+                        ORDER BY score DESC, coins DESC, play_time_seconds DESC, published_at_epoch ASC, account_id ASC
+                    ) AS board_rank
+                FROM best_runs
+                WHERE account_rank = 1
+            )
+            SELECT account_id, id, coins, board_rank
+            FROM ranked
+            WHERE board_rank <= 10
+            ORDER BY board_rank ASC
+            """,
+            (start_epoch, end_epoch),
+        )
+        now_text = self.utcnow().isoformat()
+        connection = self.database.connection
+        try:
+            connection.execute("BEGIN")
+            for row in ranked_rows:
+                reward_amount, base_run_coins = self._season_reward_values(
+                    reward_kind=reward_kind,
+                    rank=int(row["board_rank"]),
+                    coins=int(row["coins"]),
+                )
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO account_reward_inbox (
+                        id,
+                        account_id,
+                        season_key,
+                        season_name,
+                        season_start_at,
+                        season_end_at,
+                        rank,
+                        reward_kind,
+                        reward_amount,
+                        base_run_coins,
+                        message,
+                        created_at,
+                        claimed_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                    """,
+                    (
+                        uuid.uuid4().hex,
+                        int(row["account_id"]),
+                        season_key,
+                        season_name,
+                        str(season_row["start_at"]),
+                        str(season_row["end_at"]),
+                        int(row["board_rank"]),
+                        reward_kind,
+                        reward_amount,
+                        base_run_coins,
+                        self._season_reward_message(
+                            season_key=season_key,
+                            season_name=season_name,
+                            reward_kind=reward_kind,
+                            rank=int(row["board_rank"]),
+                            reward_amount=reward_amount,
+                            base_run_coins=base_run_coins,
+                        ),
+                        now_text,
+                    ),
+                )
+            connection.execute(
+                "UPDATE leaderboard_seasons SET finalized_at = ? WHERE season_key = ?",
+                (now_text, season_key),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        self._leaderboard_cache.clear()
+
+    def _migrate_legacy_pending_rewards_to_inbox(self) -> None:
+        legacy_rows = self.database.fetchall(
+            """
+            SELECT
+                r.id,
+                r.account_id,
+                r.season_key,
+                r.rank,
+                r.reward_kind,
+                r.reward_amount,
+                r.base_run_coins,
+                r.message,
+                r.created_at,
+                s.start_at,
+                s.end_at
+            FROM season_rewards r
+            INNER JOIN leaderboard_seasons s ON s.season_key = r.season_key
+            WHERE r.claimed_at IS NULL
+            ORDER BY s.end_epoch DESC, r.rank ASC
+            """
+        )
+        if not legacy_rows:
+            return
+        connection = self.database.connection
+        try:
+            connection.execute("BEGIN")
+            for row in legacy_rows:
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO account_reward_inbox (
+                        id,
+                        account_id,
+                        season_key,
+                        season_name,
+                        season_start_at,
+                        season_end_at,
+                        rank,
+                        reward_kind,
+                        reward_amount,
+                        base_run_coins,
+                        message,
+                        created_at,
+                        claimed_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                    """,
+                    (
+                        str(row["id"]),
+                        int(row["account_id"]),
+                        str(row["season_key"]),
+                        self._season_name(str(row["season_key"])),
+                        str(row["start_at"]),
+                        str(row["end_at"]),
+                        int(row["rank"]),
+                        str(row["reward_kind"]),
+                        int(row["reward_amount"]),
+                        int(row["base_run_coins"]) if row["base_run_coins"] is not None else None,
+                        str(row["message"]),
+                        str(row["created_at"]),
+                    ),
+                )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+
+    def _purge_expired_leaderboard_data(self, current_season_start_epoch: int) -> None:
+        connection = self.database.connection
+        try:
+            connection.execute("BEGIN")
+            connection.execute(
+                "DELETE FROM submissions WHERE published_at_epoch < ?",
+                (int(current_season_start_epoch),),
+            )
+            connection.execute(
+                "DELETE FROM season_rewards WHERE season_key IN (SELECT season_key FROM leaderboard_seasons WHERE end_epoch <= ?)",
+                (int(current_season_start_epoch),),
+            )
+            connection.execute(
+                "DELETE FROM leaderboard_seasons WHERE end_epoch <= ?",
+                (int(current_season_start_epoch),),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        self._leaderboard_cache.clear()
+
+    def _season_reward_values(self, *, reward_kind: str, rank: int, coins: int) -> tuple[int, int | None]:
+        normalized_rank = max(1, min(10, int(rank)))
+        if reward_kind == "coins":
+            multiplier = SEASON_COIN_REWARD_MULTIPLIERS[normalized_rank - 1]
+            normalized_coins = max(0, int(coins))
+            return int(math.floor(normalized_coins * multiplier)), normalized_coins
+        return int(SEASON_ITEM_REWARD_COUNTS[normalized_rank - 1]), None
+
+    def _season_reward_message(
+        self,
+        *,
+        season_key: str,
+        season_name: str,
+        reward_kind: str,
+        rank: int,
+        reward_amount: int,
+        base_run_coins: int | None,
+    ) -> str:
+        reward_label = self._reward_kind_label(reward_kind, reward_amount)
+        season_title = f"{season_name} ({season_key})"
+        if reward_kind == "coins":
+            multiplier = SEASON_COIN_REWARD_MULTIPLIERS[max(0, min(9, int(rank) - 1))]
+            return (
+                f"Season {season_title} reward: rank {rank} earned {reward_amount} coins "
+                f"from {base_run_coins or 0} run coins at x{multiplier:.2f}."
+            )
+        return f"Season {season_title} reward: rank {rank} earned {reward_label}."
+
+    def _fetch_pending_rewards(self, account_id: int) -> list[dict]:
+        rows = self.database.fetchall(
+            """
+            SELECT
+                r.id,
+                r.season_key,
+                r.rank,
+                r.reward_kind,
+                r.reward_amount,
+                r.base_run_coins,
+                r.message,
+                r.created_at,
+                r.season_name,
+                r.season_start_at,
+                r.season_end_at
+            FROM account_reward_inbox r
+            WHERE r.account_id = ? AND r.claimed_at IS NULL
+            ORDER BY r.season_end_at DESC, r.rank ASC
+            """,
+            (account_id,),
+        )
+        return [
+            {
+                "id": str(row["id"]),
+                "season_key": str(row["season_key"]),
+                "season_name": str(row["season_name"]),
+                "rank": int(row["rank"]),
+                "reward_kind": str(row["reward_kind"]),
+                "reward_label": self._reward_kind_label(str(row["reward_kind"]), int(row["reward_amount"])),
+                "reward_amount": int(row["reward_amount"]),
+                "base_run_coins": int(row["base_run_coins"]) if row["base_run_coins"] is not None else None,
+                "message": str(row["message"]),
+                "created_at": str(row["created_at"]),
+                "season_start_at": str(row["season_start_at"]),
+                "season_end_at": str(row["season_end_at"]),
+            }
+            for row in rows
+        ]
+
+    def _acknowledge_reward_claims(self, account_id: int, reward_ids: list[str]) -> None:
+        normalized_ids = [str(reward_id).strip() for reward_id in reward_ids if str(reward_id).strip()]
+        if not normalized_ids:
+            return
+        unique_ids = list(dict.fromkeys(normalized_ids))[:256]
+        placeholders = ", ".join("?" for _ in unique_ids)
+        self.database.execute(
+            f"""
+            UPDATE account_reward_inbox
+            SET claimed_at = ?
+            WHERE account_id = ? AND claimed_at IS NULL AND id IN ({placeholders})
+            """,
+            (self.utcnow().isoformat(), account_id, *unique_ids),
+        )
+
+    def _serialize_season_definition(self, season: SeasonDefinition) -> dict:
+        seconds_remaining = max(0, int((season.end_at - self.utcnow()).total_seconds()))
+        return {
+            "season_key": season.season_key,
+            "season_name": season.season_name,
+            "starts_at": season.start_at.isoformat(),
+            "ends_at": season.end_at.isoformat(),
+            "seconds_remaining": seconds_remaining,
+            "reward_kind": season.reward_kind,
+            "reward_label": self._reward_kind_label(season.reward_kind, 2),
+            "reward_preview": self._season_reward_preview(season.reward_kind),
+        }
+
+    def _season_reward_preview(self, reward_kind: str) -> str:
+        if reward_kind == "coins":
+            return (
+                f"Rank 1 earns x{SEASON_COIN_REWARD_MULTIPLIERS[0]:.2f} run coins. "
+                f"Rank 10 earns x{SEASON_COIN_REWARD_MULTIPLIERS[9]:.2f} run coins."
+            )
+        return (
+            f"Rank 1 earns {SEASON_ITEM_REWARD_COUNTS[0]} {self._reward_kind_label(reward_kind, SEASON_ITEM_REWARD_COUNTS[0])}. "
+            f"Rank 10 earns {SEASON_ITEM_REWARD_COUNTS[9]} {self._reward_kind_label(reward_kind, SEASON_ITEM_REWARD_COUNTS[9])}."
+        )
+
+    def _reward_kind_label(self, reward_kind: str, amount: int) -> str:
+        base_label = SEASON_REWARD_LABELS.get(str(reward_kind), "Reward")
+        if str(reward_kind) == "coins":
+            return "Coin" if int(amount) == 1 else "Coins"
+        if str(reward_kind) == "hoverboard":
+            return "Hoverboard" if int(amount) == 1 else "Hoverboards"
+        if str(reward_kind) == "key":
+            return "Key" if int(amount) == 1 else "Keys"
+        if str(reward_kind) == "headstart":
+            return "Headstart" if int(amount) == 1 else "Headstarts"
+        if str(reward_kind) == "score_booster":
+            return "Score Booster" if int(amount) == 1 else "Score Boosters"
+        return base_label
+
+    def _build_submission_filter_clause(
+        self,
+        period: str,
+        difficulty: str,
+        alias: str,
+        current_season: SeasonDefinition | None = None,
+    ) -> tuple[str, tuple[object, ...]]:
         parts: list[str] = []
         parameters: list[object] = []
-        period_start = self._leaderboard_period_start_epoch(period)
-        if period_start is not None:
+        if period == "season":
+            season = current_season or self._ensure_season_state_current()
             parts.append(f"{alias}.published_at_epoch >= ?")
-            parameters.append(period_start)
+            parameters.append(int(season.start_at.timestamp()))
+            parts.append(f"{alias}.published_at_epoch < ?")
+            parameters.append(int(season.end_at.timestamp()))
+        else:
+            period_start = self._leaderboard_period_start_epoch(period)
+            if period_start is not None:
+                parts.append(f"{alias}.published_at_epoch >= ?")
+                parameters.append(period_start)
         if difficulty != "all":
             parts.append(f"{alias}.difficulty = ?")
             parameters.append(difficulty)
@@ -955,8 +1488,9 @@ class LeaderboardService:
             "offset": int(payload.get("offset", 0) or 0),
             "limit": int(payload.get("limit", 0) or 0),
             "total_players": int(payload.get("total_players", 0) or 0),
-            "period": str(payload.get("period") or "all_time"),
+            "period": str(payload.get("period") or "season"),
             "difficulty": str(payload.get("difficulty") or "all"),
+            "season": dict(payload.get("season") or {}),
         }
 
     @staticmethod

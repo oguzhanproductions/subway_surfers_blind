@@ -62,6 +62,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "confirm_exit_enabled": True,
     "leaderboard_username": "",
     "leaderboard_session_token": "",
+    "leaderboard_applied_reward_ids": [],
     "bank_coins": 0,
     "keys": 3,
     "hoverboards": 3,
@@ -232,6 +233,11 @@ def _normalized_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
     ensure_collection_state(merged)
     ensure_quest_state(merged)
     ensure_event_state(merged)
+    merged["leaderboard_applied_reward_ids"] = [
+        str(value).strip()
+        for value in list(merged.get("leaderboard_applied_reward_ids") or [])
+        if str(value).strip()
+    ][:256]
     merged["keyboard_bindings"] = ensure_keyboard_bindings(merged.get("keyboard_bindings"))
     merged["controller_bindings"] = ensure_controller_bindings(merged.get("controller_bindings"))
     return merged

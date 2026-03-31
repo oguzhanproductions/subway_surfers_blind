@@ -1626,8 +1626,15 @@ class GameTests(unittest.TestCase):
 
     def test_leaderboard_menu_includes_filters_and_verification_labels(self):
         game, _, _ = self.make_game()
-        game._leaderboard_period_filter = "weekly"
+        game._leaderboard_period_filter = "season"
         game._leaderboard_difficulty_filter = "all"
+        game._leaderboard_season = {
+            "season_key": "2026-W14",
+            "season_name": "Nightline Chase",
+            "seconds_remaining": 93780,
+            "reward_label": "Score Boosters",
+            "reward_preview": "Rank 1 earns 5 Score Boosters. Rank 10 earns 1 Score Booster.",
+        }
         game._leaderboard_entries = [
             {
                 "rank": 1,
@@ -1643,10 +1650,37 @@ class GameTests(unittest.TestCase):
 
         game._refresh_leaderboard_menu()
 
-        self.assertEqual(game.leaderboard_menu.items[0].label, "Period: Weekly")
-        self.assertEqual(game.leaderboard_menu.items[1].label, "Difficulty: All Difficulties")
-        self.assertIn("Suspicious", game.leaderboard_menu.items[2].label)
-        self.assertIn("Hard", game.leaderboard_menu.items[2].label)
+        self.assertEqual(game.leaderboard_menu.items[0].label, "Season: Nightline Chase (2026-W14)")
+        self.assertEqual(game.leaderboard_menu.items[1].label, "Season Ends In: 1 day 2 hours 3 minutes")
+        self.assertIn("Score Boosters", game.leaderboard_menu.items[2].label)
+        self.assertEqual(game.leaderboard_menu.items[3].label, "Difficulty: All Difficulties")
+        self.assertIn("Suspicious", game.leaderboard_menu.items[4].label)
+        self.assertIn("Hard", game.leaderboard_menu.items[4].label)
+
+    def test_leaderboard_connect_does_not_speak_loaded_message(self):
+        game, speaker, _ = self.make_game()
+        game.active_menu = game.main_menu
+
+        game._handle_leaderboard_success(
+            "leaderboard_connect",
+            {
+                "just_connected": True,
+                "period": "season",
+                "difficulty": "all",
+                "season": {
+                    "season_key": "2026-W14",
+                    "season_name": "Nightline Chase",
+                    "seconds_remaining": 93780,
+                    "reward_label": "Score Boosters",
+                    "reward_preview": "Rank 1 earns 5 Score Boosters. Rank 10 earns 1 Score Booster.",
+                },
+                "entries": [],
+                "total_players": 0,
+            },
+        )
+
+        self.assertIs(game.active_menu, game.leaderboard_menu)
+        self.assertFalse(any("leaderboard loaded" in text.lower() for text, _ in speaker.messages))
 
     def test_leaderboard_period_cycle_refreshes_without_status_screen(self):
         game, _, _ = self.make_game()
@@ -1668,8 +1702,8 @@ class GameTests(unittest.TestCase):
             game._cycle_leaderboard_period()
 
         self.assertIs(game.active_menu, game.leaderboard_menu)
-        self.assertEqual(game._leaderboard_period_filter, "daily")
-        self.assertEqual(game.leaderboard_menu.items[0].label, "Period: Daily")
+        self.assertEqual(game._leaderboard_period_filter, "season")
+        self.assertEqual(game.leaderboard_menu.items[0].label, "Season: Loading current week")
         self.assertEqual(start_operation.call_args.args[0], "leaderboard_refresh")
         self.assertFalse(start_operation.call_args.kwargs["show_status"])
 
@@ -3427,6 +3461,7 @@ class GameTests(unittest.TestCase):
     def test_mystery_box_can_grant_new_inventory_rewards(self):
         game, _, _ = self.make_game()
         original_keys = game.settings["keys"]
+        game._active_event_profile["jackpot_bonus"] = False
 
         with patch("subway_blind.game.pick_mystery_box_reward", return_value="key"):
             game._collect_box()
@@ -3499,6 +3534,7 @@ class GameTests(unittest.TestCase):
 
     def test_mystery_box_announces_opening_before_reward(self):
         game, speaker, _ = self.make_game()
+        game._active_event_profile["jackpot_bonus"] = False
 
         with patch("subway_blind.game.pick_mystery_box_reward", return_value="key"):
             game._collect_box()

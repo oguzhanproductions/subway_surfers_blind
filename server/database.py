@@ -70,14 +70,73 @@ class LeaderboardDatabase:
                 FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS leaderboard_seasons (
+                season_key TEXT PRIMARY KEY,
+                start_at TEXT NOT NULL,
+                end_at TEXT NOT NULL,
+                start_epoch INTEGER NOT NULL,
+                end_epoch INTEGER NOT NULL,
+                reward_kind TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                finalized_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS season_rewards (
+                id TEXT PRIMARY KEY,
+                season_key TEXT NOT NULL,
+                account_id INTEGER NOT NULL,
+                submission_id TEXT NOT NULL,
+                rank INTEGER NOT NULL,
+                reward_kind TEXT NOT NULL,
+                reward_amount INTEGER NOT NULL,
+                base_run_coins INTEGER,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                claimed_at TEXT,
+                FOREIGN KEY (season_key) REFERENCES leaderboard_seasons(season_key) ON DELETE CASCADE,
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+                FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+                UNIQUE (season_key, account_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS account_reward_inbox (
+                id TEXT PRIMARY KEY,
+                account_id INTEGER NOT NULL,
+                season_key TEXT NOT NULL,
+                season_name TEXT NOT NULL,
+                season_start_at TEXT NOT NULL,
+                season_end_at TEXT NOT NULL,
+                rank INTEGER NOT NULL,
+                reward_kind TEXT NOT NULL,
+                reward_amount INTEGER NOT NULL,
+                base_run_coins INTEGER,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                claimed_at TEXT,
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+                UNIQUE (account_id, season_key)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_submissions_account_time
                 ON submissions(account_id, published_at_epoch DESC);
 
             CREATE INDEX IF NOT EXISTS idx_submissions_ranking
                 ON submissions(score DESC, coins DESC, play_time_seconds DESC, published_at_epoch ASC);
 
+            CREATE INDEX IF NOT EXISTS idx_submissions_period
+                ON submissions(published_at_epoch DESC, score DESC, coins DESC, play_time_seconds DESC);
+
             CREATE INDEX IF NOT EXISTS idx_auth_sessions_account
                 ON auth_sessions(account_id, expires_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_leaderboard_seasons_finalization
+                ON leaderboard_seasons(finalized_at, end_epoch DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_season_rewards_account_claimed
+                ON season_rewards(account_id, claimed_at, season_key DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_account_reward_inbox_claimed
+                ON account_reward_inbox(account_id, claimed_at, season_key DESC);
             """
         )
         self._ensure_submission_columns()
