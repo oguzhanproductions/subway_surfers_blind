@@ -2308,7 +2308,7 @@ class SubwayBlindGame:
         self.active_menu = self.publish_confirm_menu
         self.publish_confirm_menu.opened = True
         self.publish_confirm_menu.index = 0
-        self._pending_menu_announcement = (self.publish_confirm_menu, 0.45, True)
+        self._pending_menu_announcement = (self.publish_confirm_menu, 0.0, True)
 
     def _mission_goals(self):
         return mission_goals_for_set(int(self.settings.get("mission_set", 1)))
@@ -4177,6 +4177,9 @@ class SubwayBlindGame:
                 self.start_run()
                 return True
             if action == "game_over_main_menu":
+                if self._game_over_publish_state != "published" and self._should_offer_publish_prompt():
+                    self._open_publish_confirmation(return_menu=self.main_menu, start_index=0)
+                    return True
                 self.active_menu = self.main_menu
                 self.active_menu.open()
                 return True

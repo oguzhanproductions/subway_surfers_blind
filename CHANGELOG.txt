@@ -26,6 +26,7 @@ Gameplay Changes
 Audio or UI Updates
 - Leaderboard now opens without the spoken "leaderboard loaded" announcement and instead shows the current season name, countdown, and reward preview directly in the menu.
 - Leaderboard help and menu labels now reflect the weekly seasonal board flow instead of the old multi-period ranking system.
+- Restored the score publishing confirmation prompt so it is announced again after a run ends and when leaving an active run for the main menu.
 - Renamed the Gameplay Announcements option from Quest Changes to Quest Announcements so the setting matches its real behavior.
 - Added a Reset Today's Progress action to the Quests menu with spoken confirmation that claimed rewards remain preserved.
 - Replaced the gameplay obstacle NVDA callouts with the new bundled announcer prompt clips while keeping train fly-by warnings and speed-based early timing logic.

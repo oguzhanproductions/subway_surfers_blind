@@ -3977,6 +3977,21 @@ class GameTests(unittest.TestCase):
 
         self.assertIs(game.active_menu, game.main_menu)
 
+    def test_game_over_main_menu_reopens_publish_prompt_for_authenticated_player(self):
+        game, speaker, _ = self.make_game()
+        game.leaderboard_client.auth_token = "token"
+        game.leaderboard_client.principal_username = "runner01"
+        game._game_over_summary = {"score": 80, "coins": 6, "play_time_seconds": 42, "death_reason": "Hit train"}
+        game._refresh_game_over_menu()
+        game.active_menu = game.game_over_menu
+
+        game._handle_menu_action("game_over_main_menu")
+        game._update_pending_menu_announcement(0.01)
+
+        self.assertIs(game.active_menu, game.publish_confirm_menu)
+        self.assertEqual(game._publish_confirm_return_menu, game.main_menu)
+        self.assertEqual(speaker.messages[-1], ("Publish to Leaderboard?. Yes", True))
+
     def test_game_over_detail_rows_are_read_only(self):
         game, speaker, _ = self.make_game()
         game._game_over_summary = {"score": 80, "coins": 6, "play_time_seconds": 42, "death_reason": "Hit train"}
