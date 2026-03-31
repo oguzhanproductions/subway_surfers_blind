@@ -32,7 +32,13 @@ from subway_blind.audio import (
 )
 from subway_blind.balance import SPEED_PROFILES, speed_profile_for_difficulty
 from subway_blind.controls import ConnectedController, PLAYSTATION_FAMILY, XBOX_FAMILY, family_label
-from subway_blind.features import HEADSTART_SPEED_BONUS, HOVERBOARD_DURATION, headstart_duration_for_uses
+from subway_blind.features import (
+    HEADSTART_SPEED_BONUS,
+    HOVERBOARD_DURATION,
+    HOVERBOARD_MAX_USES_PER_RUN,
+    REVIVE_MAX_USES_PER_RUN,
+    headstart_duration_for_uses,
+)
 from subway_blind.features import SHOP_PRICES
 from subway_blind.game import (
     ACTIVE_GAMEPLAY_SOUND_KEYS,
@@ -3333,6 +3339,27 @@ class GameTests(unittest.TestCase):
 
         self.assertEqual(game.player.hover_active, HOVERBOARD_DURATION)
 
+    def test_hoverboard_limit_blocks_fifth_use_in_one_run(self):
+        game, speaker, audio = self.make_game()
+        game.player.hoverboards = HOVERBOARD_MAX_USES_PER_RUN + 1
+
+        for _ in range(HOVERBOARD_MAX_USES_PER_RUN):
+            game.player.hover_active = 0.0
+            game._try_hoverboard()
+
+        remaining_inventory = game.player.hoverboards
+        game.player.hover_active = 0.0
+        game._try_hoverboard()
+
+        self.assertEqual(game.state.hoverboards_used, HOVERBOARD_MAX_USES_PER_RUN)
+        self.assertEqual(game.player.hoverboards, remaining_inventory)
+        self.assertEqual(game.player.hover_active, 0.0)
+        self.assertIn(("menuedge", "ui", False), audio.played)
+        self.assertEqual(
+            speaker.messages[-1][0],
+            f"Hoverboard limit reached. You can use {HOVERBOARD_MAX_USES_PER_RUN} per run.",
+        )
+
     def test_bush_hit_uses_bush_stumble_sound(self):
         game, speaker, audio = self.make_game()
 
@@ -3428,6 +3455,20 @@ class GameTests(unittest.TestCase):
         self.assertIs(game.active_menu, game.revive_menu)
         self.assertIn(("You can revive for 1 key.", True), speaker.messages)
 
+    def test_second_hit_skips_revive_after_three_revives_used(self):
+        game, speaker, _ = self.make_game()
+        game.player.stumbles = 1
+        game.state.revives_used = REVIVE_MAX_USES_PER_RUN
+        game.settings["keys"] = 99
+        game.state.score = 40
+        game.state.coins = 3
+        game.state.running = True
+
+        game._on_hit()
+
+        self.assertIs(game.active_menu, game.game_over_menu)
+        self.assertIn(("Run over. Score 40. Hit train.", True), speaker.messages)
+
     def test_bush_death_reason_is_recorded_in_game_over_dialog(self):
         game, _, _ = self.make_game()
         game.player.stumbles = 1
@@ -3457,6 +3498,29 @@ class GameTests(unittest.TestCase):
         self.assertIsNone(game.active_menu)
         self.assertEqual(game.player.stumbles, 0)
         self.assertGreater(game.player.hover_active, 0)
+
+    def test_revive_run_ends_run_when_revive_limit_is_reached(self):
+        game, speaker, audio = self.make_game()
+        game.settings["keys"] = 99
+        game.state.revives_used = REVIVE_MAX_USES_PER_RUN
+        game.active_menu = game.revive_menu
+        game.state.paused = True
+        game.state.score = 55
+        game.state.coins = 4
+        game.state.running = True
+        game.player.stumbles = 2
+
+        game._revive_run()
+
+        self.assertIs(game.active_menu, game.game_over_menu)
+        self.assertIn(("menuedge", "ui", False), audio.played)
+        self.assertTrue(
+            any(
+                text == f"Revive limit reached. Only {REVIVE_MAX_USES_PER_RUN} revives work in one run."
+                for text, _ in speaker.messages
+            )
+        )
+        self.assertEqual(speaker.messages[-1][0], "Game Over.")
 
     def test_mystery_box_can_grant_new_inventory_rewards(self):
         game, _, _ = self.make_game()

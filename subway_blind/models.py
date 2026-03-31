@@ -60,3 +60,4 @@ class RunState:
     next_support: float = 0.0
     milestone: int = 0
     revives_used: int = 0
+    hoverboards_used: int = 0

@@ -104,10 +104,12 @@ from subway_blind.features import (
     HEADSTART_SPEED_BONUS,
     headstart_duration_for_uses,
     HOVERBOARD_DURATION,
+    HOVERBOARD_MAX_USES_PER_RUN,
     pick_headstart_end_reward,
     pick_mystery_box_reward,
     pick_shop_mystery_box_reward,
     revive_cost,
+    REVIVE_MAX_USES_PER_RUN,
     SHOP_PRICES,
     shop_box_reward_amount,
     score_booster_bonus,
@@ -1072,6 +1074,8 @@ class SubwayBlindGame:
         return f"Score Booster: {self.selected_score_boosters}   Owned: {owned}"
 
     def _revive_option_label(self) -> str:
+        if int(self.state.revives_used) >= REVIVE_MAX_USES_PER_RUN:
+            return f"Revive unavailable   Limit reached: {REVIVE_MAX_USES_PER_RUN} per run"
         cost = revive_cost(self.state.revives_used)
         owned = int(self.settings.get("keys", 0))
         return f"Use {cost} key{'s' if cost != 1 else ''} to revive   Owned: {owned}"
@@ -5081,12 +5085,20 @@ class SubwayBlindGame:
     def _try_hoverboard(self) -> None:
         if self.player.hover_active > 0:
             return
+        if int(self.state.hoverboards_used) >= HOVERBOARD_MAX_USES_PER_RUN:
+            self.speaker.speak(
+                f"Hoverboard limit reached. You can use {HOVERBOARD_MAX_USES_PER_RUN} per run.",
+                interrupt=False,
+            )
+            self.audio.play("menuedge", channel="ui")
+            return
         if self.player.hoverboards <= 0:
             self.speaker.speak("No hoverboards available.", interrupt=False)
             self.audio.play("menuedge", channel="ui")
             return
         self.player.hoverboards -= 1
         self.settings["hoverboards"] = max(0, int(self.settings.get("hoverboards", 0)) - 1)
+        self.state.hoverboards_used += 1
         self.player.hover_active = HOVERBOARD_DURATION + self._active_character_bonuses.hoverboard_duration_bonus
         self.player.board_extra_jump_available = False
         self._record_run_powerup("hoverboard")
@@ -5551,6 +5563,9 @@ class SubwayBlindGame:
             self.speaker.speak(message, interrupt=False)
 
     def _queue_revive_or_finish(self) -> None:
+        if int(self.state.revives_used) >= REVIVE_MAX_USES_PER_RUN:
+            self._finish_run_loss()
+            return
         cost = revive_cost(self.state.revives_used)
         if int(self.settings.get("keys", 0)) < cost:
             self._finish_run_loss()
@@ -5566,6 +5581,14 @@ class SubwayBlindGame:
         )
 
     def _revive_run(self) -> None:
+        if int(self.state.revives_used) >= REVIVE_MAX_USES_PER_RUN:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(
+                f"Revive limit reached. Only {REVIVE_MAX_USES_PER_RUN} revives work in one run.",
+                interrupt=True,
+            )
+            self._finish_run_loss("Run ended after crash")
+            return
         cost = revive_cost(self.state.revives_used)
         owned = int(self.settings.get("keys", 0))
         if owned < cost:
