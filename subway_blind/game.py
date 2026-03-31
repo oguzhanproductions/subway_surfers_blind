@@ -644,6 +644,7 @@ class SubwayBlindGame:
         self._meta_return_menu: Menu | None = None
         self._publish_confirm_return_menu: Menu | None = None
         self._publish_confirm_return_index = 0
+        self._publish_after_leaderboard_auth = False
         self._game_over_publish_state = "idle"
         self._active_run_stats = self._empty_run_stats()
         self._game_over_summary = self._empty_game_over_summary()
@@ -1061,6 +1062,11 @@ class SubwayBlindGame:
 
     def _leaderboard_is_authenticated(self) -> bool:
         return self.leaderboard_client.is_authenticated()
+
+    def _leaderboard_has_publish_identity(self) -> bool:
+        if self._leaderboard_is_authenticated():
+            return True
+        return bool(str(self._leaderboard_username or "").strip())
 
     def _exit_confirmation_option_label(self) -> str:
         return f"Exit Confirmation: {'On' if self._exit_confirmation_enabled() else 'Off'}"
@@ -2271,7 +2277,7 @@ class SubwayBlindGame:
         self._game_over_publish_state = "idle"
         self._update_game_over_summary(summary_reason)
         self._refresh_game_over_menu()
-        if self._leaderboard_is_authenticated():
+        if self._should_offer_publish_prompt():
             self._open_publish_confirmation(return_menu=self.game_over_menu, start_index=0)
         else:
             self.active_menu = self.game_over_menu
@@ -2297,7 +2303,7 @@ class SubwayBlindGame:
         }
 
     def _should_offer_publish_prompt(self) -> bool:
-        if not self._leaderboard_is_authenticated():
+        if not self._leaderboard_has_publish_identity():
             return False
         summary = self._game_over_summary
         return int(summary.get("score", 0) or 0) > 0 or int(summary.get("coins", 0) or 0) > 0
@@ -4295,6 +4301,10 @@ class SubwayBlindGame:
                 "Account created." if str(data.get("status")) == "created" else "Signed in.",
                 interrupt=True,
             )
+            if self._publish_after_leaderboard_auth:
+                self._publish_after_leaderboard_auth = False
+                self._publish_latest_game_over_run()
+                return
             if self._leaderboard_return_menu is not None:
                 self._set_active_menu(self._leaderboard_return_menu, play_sound=False)
             return
@@ -4337,6 +4347,8 @@ class SubwayBlindGame:
             return
 
     def _handle_leaderboard_error(self, operation: str, error: object) -> None:
+        if operation == "leaderboard_auth":
+            self._publish_after_leaderboard_auth = False
         if isinstance(error, LeaderboardClientError) and error.code == "reauth_required":
             self._leaderboard_username = ""
             self.settings["leaderboard_username"] = ""
@@ -4608,11 +4620,18 @@ class SubwayBlindGame:
             return None
         return username, password
 
-    def _prompt_and_authenticate_leaderboard_account(self) -> None:
+    def _prompt_and_authenticate_leaderboard_account(
+        self,
+        *,
+        return_menu: Menu | None = None,
+        publish_after_auth: bool = False,
+    ) -> None:
+        self._publish_after_leaderboard_auth = False
         credentials = self._prompt_for_leaderboard_credentials()
         if credentials is None:
             return
         username, password = credentials
+        self._publish_after_leaderboard_auth = bool(publish_after_auth)
 
         def worker() -> dict[str, object]:
             just_connected = self.leaderboard_client.connect()
@@ -4626,7 +4645,7 @@ class SubwayBlindGame:
             "Leaderboard",
             "Connecting to server...",
             worker,
-            return_menu=self.options_menu,
+            return_menu=return_menu or self.options_menu,
         )
 
     def _logout_leaderboard_account(self) -> None:
@@ -4651,6 +4670,12 @@ class SubwayBlindGame:
 
     def _publish_latest_game_over_run(self) -> None:
         if not self._leaderboard_is_authenticated():
+            if self._leaderboard_has_publish_identity():
+                self._prompt_and_authenticate_leaderboard_account(
+                    return_menu=self.publish_confirm_menu,
+                    publish_after_auth=True,
+                )
+                return
             self._set_active_menu(self.game_over_menu)
             return
         if self._game_over_publish_state in {"publishing", "published"}:

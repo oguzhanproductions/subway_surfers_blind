@@ -63,6 +63,7 @@ from subway_blind.item_upgrades import (
 )
 from subway_blind.menu import Menu, MenuItem
 from subway_blind.models import Obstacle, lane_name
+from subway_blind.native_windows_credentials import CredentialPromptResult
 from subway_blind.quests import daily_quests
 from subway_blind.spatial_audio import SpatialThreatAudio
 from subway_blind.spawn import PATTERNS, PatternEntry, RoutePattern, SpawnDirector
@@ -1529,6 +1530,18 @@ class GameTests(unittest.TestCase):
         self.assertIs(game.active_menu, game.publish_confirm_menu)
         self.assertEqual(speaker.messages[-1], ("Game Over.", True))
 
+    def test_game_over_opens_publish_prompt_for_remembered_leaderboard_username(self):
+        game, speaker, _ = self.make_game()
+        game._leaderboard_username = "runner01"
+        game.settings["leaderboard_username"] = "runner01"
+        game.state.score = 120
+        game.state.coins = 8
+
+        game._open_game_over_dialog("Hit train")
+
+        self.assertIs(game.active_menu, game.publish_confirm_menu)
+        self.assertEqual(speaker.messages[-1], ("Game Over.", True))
+
     def test_publish_prompt_delayed_announcement_includes_title(self):
         game, speaker, _ = self.make_game()
         game.leaderboard_client.auth_token = "token"
@@ -1540,6 +1553,40 @@ class GameTests(unittest.TestCase):
         game._update_pending_menu_announcement(0.5)
 
         self.assertEqual(speaker.messages[-1], ("Publish to Leaderboard?. Yes", True))
+
+    def test_publish_latest_game_over_run_requests_auth_for_remembered_username(self):
+        game, _, _ = self.make_game()
+        game._leaderboard_username = "runner01"
+        game.settings["leaderboard_username"] = "runner01"
+        game.active_menu = game.publish_confirm_menu
+
+        with patch(
+            "subway_blind.game.prompt_for_credentials",
+            return_value=CredentialPromptResult(username="runner01", password="secret"),
+        ), patch.object(game, "_start_leaderboard_operation", return_value=True) as start_operation:
+            game._publish_latest_game_over_run()
+
+        self.assertTrue(game._publish_after_leaderboard_auth)
+        self.assertEqual(start_operation.call_args.args[0], "leaderboard_auth")
+        self.assertIs(start_operation.call_args.kwargs["return_menu"], game.publish_confirm_menu)
+
+    def test_leaderboard_auth_success_publishes_pending_game_over_run(self):
+        game, _, _ = self.make_game()
+        game._publish_after_leaderboard_auth = True
+
+        with patch.object(game, "_publish_latest_game_over_run") as publish_latest_game_over_run:
+            game._handle_leaderboard_success(
+                "leaderboard_auth",
+                {
+                    "just_connected": False,
+                    "username": "runner01",
+                    "status": "existing",
+                    "account_sync": {},
+                },
+            )
+
+        self.assertFalse(game._publish_after_leaderboard_auth)
+        publish_latest_game_over_run.assert_called_once()
 
     def test_options_menu_shows_logout_when_leaderboard_session_exists(self):
         game, _, _ = self.make_game()
