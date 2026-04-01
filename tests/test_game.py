@@ -61,6 +61,7 @@ from subway_blind.item_upgrades import (
     item_upgrade_duration,
     next_item_upgrade_cost,
 )
+from subway_blind.leaderboard_client import LeaderboardClientError
 from subway_blind.menu import Menu, MenuItem
 from subway_blind.models import Obstacle, lane_name
 from subway_blind.native_windows_credentials import CredentialPromptCancelled, CredentialPromptResult
@@ -2010,6 +2011,53 @@ class GameTests(unittest.TestCase):
             ("Bug report submitted. Status: Investigating. 2 submissions remaining today.", True),
         )
         refresh_mock.assert_called_once()
+
+    def test_issue_connect_reports_server_upgrade_requirement_when_feature_is_unsupported(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.main_menu
+        game._leaderboard_return_menu = game.main_menu
+
+        game._handle_leaderboard_error(
+            "issue_connect",
+            LeaderboardClientError("unsupported_request", "Unsupported request type."),
+        )
+
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertIn(("menuedge", "ui", False), audio.played)
+        self.assertEqual(
+            speaker.messages[-1],
+            ("This server does not support the bug report system yet. Update the server and try again.", True),
+        )
+
+    def test_issue_refresh_uses_friendly_message_when_old_server_keeps_cached_reports(self):
+        game, speaker, audio = self.make_game()
+        game._issue_entries = [
+            {
+                "report_id": "a" * 32,
+                "reporter_username": "runner01",
+                "title": "Menu focus jumps unexpectedly",
+                "status": "investigating",
+                "created_at": "2026-04-01T12:34:56+00:00",
+            }
+        ]
+        game._issue_total_reports = 1
+        game.active_menu = game.main_menu
+
+        game._handle_leaderboard_error(
+            "issue_refresh",
+            LeaderboardClientError("unsupported_request", "Unsupported request type."),
+        )
+
+        self.assertIs(game.active_menu, game.issue_menu)
+        self.assertIn(("menuedge", "ui", False), audio.played)
+        self.assertEqual(
+            speaker.messages[-1],
+            (
+                "This server does not support the bug report system yet. Update the server and try again. "
+                "Showing the last downloaded bug reports.",
+                True,
+            ),
+        )
 
     def test_issue_detail_menu_preserves_multiline_message_lines(self):
         game, _, _ = self.make_game()

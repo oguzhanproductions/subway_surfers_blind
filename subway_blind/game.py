@@ -4573,7 +4573,7 @@ class SubwayBlindGame:
             isinstance(error, LeaderboardClientError) and error.code == "reauth_required"
         ):
             return
-        message = str(error)
+        message = self._leaderboard_error_message(operation, error)
         if operation == "leaderboard_refresh" and self._leaderboard_entries:
             self.audio.play("menuedge", channel="ui")
             self._refresh_leaderboard_menu()
@@ -4594,6 +4594,16 @@ class SubwayBlindGame:
         else:
             self._set_active_menu(self.main_menu, play_sound=False)
         self.speaker.speak(message, interrupt=True)
+
+    @staticmethod
+    def _leaderboard_error_message(operation: str, error: object) -> str:
+        if (
+            operation.startswith("issue_")
+            and isinstance(error, LeaderboardClientError)
+            and error.code == "unsupported_request"
+        ):
+            return "This server does not support the bug report system yet. Update the server and try again."
+        return str(error)
 
     def _open_leaderboard(self, force_refresh: bool = False) -> None:
         if not self._leaderboard_is_authenticated():

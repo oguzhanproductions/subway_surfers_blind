@@ -190,6 +190,21 @@ class LeaderboardClientTests(unittest.TestCase):
 
 
 class ServerConfigTests(unittest.TestCase):
+    def test_default_server_config_path_prefers_executable_directory_when_frozen(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            temp_root = Path(temp_directory)
+            external_path = temp_root / "server.json"
+
+            with mock.patch.object(server_config_module, "RESOURCE_BASE_DIR", temp_root), mock.patch.object(
+                server_config_module.sys,
+                "frozen",
+                True,
+                create=True,
+            ):
+                config_path = server_config_module.default_server_config_path()
+
+            self.assertEqual(config_path, external_path)
+
     def test_load_server_config_uses_inline_server_connection_values(self):
         with tempfile.TemporaryDirectory() as temp_directory:
             temp_root = Path(temp_directory)

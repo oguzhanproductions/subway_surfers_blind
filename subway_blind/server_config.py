@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 from subway_blind.config import BASE_DIR, BUNDLED_RESOURCE_BASE_DIR, RESOURCE_BASE_DIR, resource_path
@@ -28,6 +29,8 @@ def default_server_config_path() -> Path:
     external_path = RESOURCE_BASE_DIR / "server.json"
     if external_path.exists():
         return external_path
+    if getattr(sys, "frozen", False):
+        return external_path
     fallback_directory = BASE_DIR / "data"
     fallback_directory.mkdir(parents=True, exist_ok=True)
     return fallback_directory / "server.json"
@@ -44,7 +47,17 @@ def ensure_server_config() -> Path:
         else:
             config_path.write_text(json.dumps(DEFAULT_SERVER_CONFIG, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
-        pass
+        fallback_directory = BASE_DIR / "data"
+        fallback_directory.mkdir(parents=True, exist_ok=True)
+        fallback_path = fallback_directory / "server.json"
+        try:
+            if template_path.exists() and template_path != fallback_path:
+                fallback_path.write_text(template_path.read_text(encoding="utf-8"), encoding="utf-8")
+            else:
+                fallback_path.write_text(json.dumps(DEFAULT_SERVER_CONFIG, ensure_ascii=False, indent=2), encoding="utf-8")
+            return fallback_path
+        except Exception:
+            pass
     return config_path
 
 
