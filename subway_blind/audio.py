@@ -516,6 +516,13 @@ class Audio:
                 return candidate
         return resource_path("assets", "menu", f"{base_name}.wav")
 
+    def _pick_sfx_sound(self, base_name: str) -> str:
+        for extension in (".ogg", ".wav", ".mp3"):
+            candidate = resource_path("assets", "sfx", f"{base_name}{extension}")
+            if os.path.exists(candidate):
+                return candidate
+        return resource_path("assets", "sfx", f"{base_name}.wav")
+
     def _load(self) -> None:
         sfx_path = lambda name: resource_path("assets", "sfx", name)
         announcer_path = lambda name: resource_path("assets", "announcer", name)
@@ -537,6 +544,8 @@ class Audio:
         self._load_sound("powerdown", sfx_path("powerdown.wav"))
         self._load_sound("magnet_loop", sfx_path("magnet_loop.wav"))
         self._load_sound("jetpack_loop", sfx_path("jetpack_loop.wav"))
+        self._load_sound("connect", self._pick_sfx_sound("connect"))
+        self._load_sound("high", self._pick_sfx_sound("high"))
         self._load_sound("mystery_box", sfx_path("mystery_box.wav"))
         self._load_sound("mystery_box_open", sfx_path("Hr_mysteryBoxOpen #20822.wav"))
         self._load_sound("mission_reward", sfx_path("mission_reward.wav"))

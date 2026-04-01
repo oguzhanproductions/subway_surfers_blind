@@ -623,6 +623,33 @@ class AudioTests(unittest.TestCase):
         jetpack_entry = next(path for key, path in loaded if key == "jetpack_loop")
         self.assertTrue(jetpack_entry.endswith("assets\\sfx\\jetpack_loop.wav"))
 
+    def test_audio_loads_leaderboard_feedback_assets(self):
+        loaded: list[tuple[str, str]] = []
+
+        def capture_load(_self, key: str, path: str) -> None:
+            loaded.append((key, path))
+
+        with patch.object(Audio, "_load_sound", autospec=True, side_effect=capture_load), patch(
+            "subway_blind.audio.OpenALHrtfEngine",
+            return_value=type(
+                "FakeHrtf",
+                (),
+                {
+                    "available": False,
+                    "register_sound": staticmethod(lambda *_args, **_kwargs: None),
+                    "set_listener_gain": staticmethod(lambda *_args, **_kwargs: None),
+                    "stop": staticmethod(lambda *_args, **_kwargs: None),
+                    "play_sound": staticmethod(lambda *_args, **_kwargs: False),
+                    "update_source": staticmethod(lambda *_args, **_kwargs: False),
+                },
+            )(),
+        ):
+            Audio(copy.deepcopy(config_module.DEFAULT_SETTINGS))
+
+        loaded_map = dict(loaded)
+        self.assertTrue(loaded_map["connect"].endswith("assets\\sfx\\connect.mp3"))
+        self.assertTrue(loaded_map["high"].endswith("assets\\sfx\\high.mp3"))
+
     def test_transient_player_channels_are_collapsed(self):
         self.assertEqual(Audio._normalize_channel_for_key("jump", "act"), "player_jump")
         self.assertEqual(Audio._normalize_channel_for_key("dodge", "move"), "player_dodge")
@@ -3161,6 +3188,26 @@ class GameTests(unittest.TestCase):
         )
 
         self.assertIs(game.active_menu, game.main_menu)
+
+    def test_publish_success_with_personal_best_plays_high_score_feedback(self):
+        game, speaker, audio = self.make_game()
+        game._publish_confirm_return_menu = game.game_over_menu
+        game._publish_confirm_return_index = 0
+
+        game._handle_leaderboard_success(
+            "leaderboard_publish",
+            {
+                "just_connected": True,
+                "username": "runner01",
+                "high_score": True,
+                "board_rank": 7,
+                "verification_status": "verified",
+            },
+        )
+
+        self.assertIn(("connect", "ui", False), audio.played)
+        self.assertIn(("high", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1], ("New personal best. Leaderboard rank 7.", True))
 
     def test_shop_purchase_spends_bank_coins_and_grants_hoverboard(self):
         game, speaker, _ = self.make_game()
