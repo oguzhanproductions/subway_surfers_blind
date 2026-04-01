@@ -121,6 +121,13 @@ from subway_blind.native_windows_credentials import (
     NativeCredentialPromptError,
     prompt_for_credentials,
 )
+from subway_blind.native_windows_issue_dialog import (
+    IssueDialogCancelled,
+    NativeIssueDialogError,
+    ISSUE_MESSAGE_LIMIT,
+    ISSUE_TITLE_LIMIT,
+    prompt_for_inline_issue_text,
+)
 from subway_blind.progression import (
     achievement_definitions,
     achievement_progress,
@@ -189,6 +196,12 @@ LEADERBOARD_VERIFICATION_LABELS = {
     "verified": "Verified",
     "suspicious": "Suspicious",
 }
+ISSUE_STATUS_LABELS = {
+    "all": "All Statuses",
+    "investigating": "Investigating",
+    "resolved": "Resolved",
+}
+ISSUE_STATUS_ORDER = ("all", "investigating", "resolved")
 RUN_POWERUP_LABELS = {
     "magnet": "Magnet",
     "jetpack": "Jetpack",
@@ -208,6 +221,8 @@ HEADSTART_SHAKE_CHANNEL = "intro_headstart_shake"
 HEADSTART_SPRAY_CHANNEL = "intro_headstart_spray"
 MIN_WINDOW_WIDTH = 640
 MIN_WINDOW_HEIGHT = 360
+ISSUE_REPORT_PAGE_SIZE = 50
+ISSUE_CACHE_TTL_SECONDS = 20.0
 
 
 @dataclass(frozen=True)
@@ -445,6 +460,11 @@ def leaderboard_difficulty_filter_display_label(value: object) -> str:
     return LEADERBOARD_DIFFICULTY_FILTER_LABELS.get(normalized, LEADERBOARD_DIFFICULTY_FILTER_LABELS["all"])
 
 
+def issue_status_display_label(value: object) -> str:
+    normalized = str(value or "all").strip().lower()
+    return ISSUE_STATUS_LABELS.get(normalized, ISSUE_STATUS_LABELS["all"])
+
+
 def verification_display_label(value: object) -> str:
     normalized = str(value or "verified").strip().lower()
     return LEADERBOARD_VERIFICATION_LABELS.get(normalized, LEADERBOARD_VERIFICATION_LABELS["verified"])
@@ -641,10 +661,20 @@ class SubwayBlindGame:
         self._leaderboard_active_operation: str | None = None
         self._leaderboard_return_menu: Menu | None = None
         self._leaderboard_startup_sync_started = False
+        self._issue_status_filter = "all"
+        self._issue_entries: list[dict[str, object]] = []
+        self._issue_total_reports = 0
+        self._issue_offset = 0
+        self._issue_cache_loaded_at = 0.0
+        self._selected_issue_report: dict[str, object] | None = None
+        self._selected_issue_detail_content: InfoDialogContent | None = None
+        self._issue_draft_title = ""
+        self._issue_draft_message = ""
         self._meta_return_menu: Menu | None = None
         self._publish_confirm_return_menu: Menu | None = None
         self._publish_confirm_return_index = 0
         self._publish_after_leaderboard_auth = False
+        self._issue_submit_after_leaderboard_auth = False
         self._game_over_publish_state = "idle"
         self._active_run_stats = self._empty_run_stats()
         self._game_over_summary = self._empty_game_over_summary()
@@ -837,6 +867,38 @@ class SubwayBlindGame:
             "Published Run",
             [MenuItem("Back", "back")],
         )
+        self.issue_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Report a Bug",
+            [
+                MenuItem("Report an Issue", "issue_submit"),
+                MenuItem("Status: All Statuses", "issue_cycle_status"),
+                MenuItem("Connect to the server to load bug reports.", "issue_info"),
+                MenuItem("Page 1 of 1", "issue_page_info"),
+                MenuItem("Previous Page", "issue_prev_page"),
+                MenuItem("Next Page", "issue_next_page"),
+                MenuItem("Refresh", "issue_refresh"),
+                MenuItem("Back", "back"),
+            ],
+        )
+        self.issue_detail_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Bug Report",
+            [MenuItem("Back", "back")],
+        )
+        self.issue_compose_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Report a Bug",
+            [
+                MenuItem("Title: Not set", "issue_edit_title"),
+                MenuItem("Message: Not set", "issue_edit_message"),
+                MenuItem("Submit Report", "issue_submit_confirm"),
+                MenuItem("Back", "back"),
+            ],
+        )
         self.keyboard_bindings_menu = Menu(
             self.speaker,
             self.audio,
@@ -961,6 +1023,7 @@ class SubwayBlindGame:
         self._refresh_mission_set_menu_labels()
         self._refresh_quest_menu_labels()
         self._refresh_me_menu_labels()
+        self._refresh_issue_menu()
         self._refresh_control_menus()
 
         self.active_menu: Optional[Menu] = self.main_menu
@@ -1727,6 +1790,8 @@ class SubwayBlindGame:
             return help_topic_segments(self._selected_help_topic, self._gameplay_controls_summary())
         if menu == self.whats_new_menu and self._selected_info_dialog is not None:
             return self._selected_info_dialog.lines
+        if menu == self.issue_detail_menu and self._selected_issue_detail_content is not None:
+            return self._selected_issue_detail_content.lines
         return ()
 
     def _selected_info_copy_all_text(self, menu: Menu) -> str:
@@ -1990,6 +2055,11 @@ class SubwayBlindGame:
                 "Leaderboard",
                 "leaderboard",
                 "Connect to the online leaderboard, browse top players, and inspect published run history.",
+            ),
+            MenuItem(
+                "Report a Bug",
+                "issue_reports",
+                "Send a bug report through the online issue system and browse submitted reports by status.",
             ),
             MenuItem(
                 "What's New",
@@ -2972,6 +3042,24 @@ class SubwayBlindGame:
         self._menu_repeat_key = None
         self._menu_repeat_delay_remaining = 0.0
 
+    def _reset_input_after_native_modal(self) -> None:
+        self._clear_menu_repeat()
+        try:
+            pygame.event.pump()
+            pygame.key.set_mods(0)
+        except Exception:
+            pass
+        event_types = [pygame.KEYDOWN, pygame.KEYUP, pygame.ACTIVEEVENT]
+        for event_name in ("WINDOWFOCUSGAINED", "WINDOWFOCUSLOST", "WINDOWTAKEFOCUS", "WINDOWMINIMIZED", "WINDOWRESTORED"):
+            event_type = getattr(pygame, event_name, None)
+            if event_type is not None:
+                event_types.append(event_type)
+        for event_type in event_types:
+            try:
+                pygame.event.clear(event_type)
+            except Exception:
+                continue
+
     def _set_active_menu(self, menu: Optional[Menu], start_index: int = 0, play_sound: bool = True) -> None:
         self._clear_menu_repeat()
         self._stop_learn_sound_preview()
@@ -3423,6 +3511,16 @@ class SubwayBlindGame:
             if self.active_menu == self.leaderboard_run_detail_menu:
                 self._set_active_menu(self.leaderboard_profile_menu)
                 return True
+            if self.active_menu == self.issue_menu:
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "issue_reports"))
+                return True
+            if self.active_menu == self.issue_compose_menu:
+                self._refresh_issue_menu()
+                self._set_active_menu(self.issue_menu, start_index=self._menu_index_for_action(self.issue_menu, "issue_submit"))
+                return True
+            if self.active_menu == self.issue_detail_menu:
+                self._set_active_menu(self.issue_menu)
+                return True
             if self.active_menu == self.item_upgrade_detail_menu:
                 self._refresh_item_upgrade_menu_labels()
                 self._set_active_menu(self.item_upgrade_menu)
@@ -3497,6 +3595,9 @@ class SubwayBlindGame:
                 return True
             if action == "leaderboard":
                 self._open_leaderboard()
+                return True
+            if action == "issue_reports":
+                self._open_issue_reports()
                 return True
             if action == "options":
                 self._refresh_options_menu_labels()
@@ -3869,6 +3970,65 @@ class SubwayBlindGame:
                 self._set_active_menu(self.leaderboard_profile_menu)
                 return True
             self.speaker.speak(self.leaderboard_run_detail_menu.items[self.leaderboard_run_detail_menu.index].label, interrupt=True)
+            return True
+
+        if self.active_menu == self.issue_menu:
+            if action == "back":
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "issue_reports"))
+                return True
+            if action == "issue_submit":
+                self._begin_issue_submission()
+                return True
+            if action == "issue_cycle_status":
+                self._cycle_issue_status_filter()
+                return True
+            if action == "issue_prev_page":
+                self._change_issue_page(-1)
+                return True
+            if action == "issue_next_page":
+                self._change_issue_page(1)
+                return True
+            if action == "issue_refresh":
+                self._open_issue_reports(force_refresh=True)
+                return True
+            if action.startswith("issue_report:"):
+                self._open_issue_report_detail(action.split(":", 1)[1])
+                return True
+            self.speaker.speak(self.issue_menu.items[self.issue_menu.index].label, interrupt=True)
+            return True
+
+        if self.active_menu == self.issue_compose_menu:
+            if action == "back":
+                self._refresh_issue_menu()
+                self._set_active_menu(self.issue_menu, start_index=self._menu_index_for_action(self.issue_menu, "issue_submit"))
+                return True
+            if action == "issue_edit_title":
+                self._edit_issue_draft_field("title")
+                return True
+            if action == "issue_edit_message":
+                self._edit_issue_draft_field("message")
+                return True
+            if action == "issue_submit_confirm":
+                self._submit_issue_draft()
+                return True
+            self.speaker.speak(self.issue_compose_menu.items[self.issue_compose_menu.index].label, interrupt=True)
+            return True
+
+        if self.active_menu == self.issue_detail_menu:
+            if action == "back":
+                self._set_active_menu(self.issue_menu)
+                return True
+            if action == "copy_info_line":
+                return self._copy_menu_text(
+                    self.issue_detail_menu.items[self.issue_detail_menu.index].label,
+                    "Selected line copied to clipboard.",
+                )
+            if action == "copy_info_all":
+                return self._copy_menu_text(
+                    self._selected_info_copy_all_text(self.issue_detail_menu),
+                    self._selected_info_copy_all_message(self.issue_detail_menu),
+                )
+            self.speaker.speak(self.issue_detail_menu.items[self.issue_detail_menu.index].label, interrupt=True)
             return True
 
         if self.active_menu == self.shop_menu:
@@ -4305,6 +4465,10 @@ class SubwayBlindGame:
                 self._publish_after_leaderboard_auth = False
                 self._publish_latest_game_over_run()
                 return
+            if self._issue_submit_after_leaderboard_auth:
+                self._issue_submit_after_leaderboard_auth = False
+                self._begin_issue_submission()
+                return
             if self._leaderboard_return_menu is not None:
                 self._set_active_menu(self._leaderboard_return_menu, play_sound=False)
             return
@@ -4340,6 +4504,54 @@ class SubwayBlindGame:
             if suspicious_run:
                 self.speaker.speak("Run published and flagged as suspicious.", interrupt=True)
             return
+        if operation in {"issue_connect", "issue_refresh"}:
+            data = dict(payload or {})
+            if bool(data.get("just_connected")):
+                self.audio.play("connect", channel="ui")
+            selected_action = None
+            if self.active_menu == self.issue_menu and self.issue_menu.items:
+                selected_action = self.issue_menu.items[self.issue_menu.index].action
+            self._issue_status_filter = str(data.get("status") or self._issue_status_filter or "all")
+            self._issue_entries = list(data.get("entries") or [])
+            self._issue_total_reports = int(data.get("total_reports", len(self._issue_entries)) or 0)
+            self._issue_offset = int(data.get("offset", self._issue_offset) or 0)
+            self._issue_cache_loaded_at = time.monotonic()
+            self._refresh_issue_menu()
+            if selected_action:
+                self.issue_menu.index = self._menu_index_for_action(self.issue_menu, selected_action)
+            if operation == "issue_connect":
+                self._set_active_menu(self.issue_menu, play_sound=False)
+            return
+        if operation == "issue_detail":
+            data = dict(payload or {})
+            if bool(data.get("just_connected")):
+                self.audio.play("connect", channel="ui")
+            self._set_issue_detail_content(data)
+            self._set_active_menu(self.issue_detail_menu, play_sound=False)
+            return
+        if operation == "issue_submit":
+            data = dict(payload or {})
+            if bool(data.get("just_connected")):
+                self.audio.play("connect", channel="ui")
+            self._issue_status_filter = "investigating"
+            self._issue_offset = 0
+            self._issue_cache_loaded_at = 0.0
+            self._issue_draft_title = ""
+            self._issue_draft_message = ""
+            self._refresh_issue_menu()
+            self._set_active_menu(
+                self.issue_menu,
+                start_index=self._menu_index_for_action(self.issue_menu, "issue_submit"),
+                play_sound=False,
+            )
+            submissions_remaining = int(data.get("submissions_remaining_today", 0) or 0)
+            self.audio.play("confirm", channel="ui")
+            self.speaker.speak(
+                f"Bug report submitted. Status: Investigating. {submissions_remaining} submissions remaining today.",
+                interrupt=True,
+            )
+            self._request_issue_refresh("issue_refresh", return_menu=self.issue_menu, show_status=False)
+            return
         if operation == "leaderboard_startup_sync":
             data = dict(payload or {})
             self._apply_leaderboard_account_sync(data, announce_rewards=True)
@@ -4349,6 +4561,7 @@ class SubwayBlindGame:
     def _handle_leaderboard_error(self, operation: str, error: object) -> None:
         if operation == "leaderboard_auth":
             self._publish_after_leaderboard_auth = False
+            self._issue_submit_after_leaderboard_auth = False
         if isinstance(error, LeaderboardClientError) and error.code == "reauth_required":
             self._leaderboard_username = ""
             self.settings["leaderboard_username"] = ""
@@ -4367,6 +4580,13 @@ class SubwayBlindGame:
             if self.active_menu != self.leaderboard_menu:
                 self._set_active_menu(self.leaderboard_menu, play_sound=False)
             self.speaker.speak(f"{message} Showing the last downloaded leaderboard.", interrupt=True)
+            return
+        if operation == "issue_refresh" and (self._issue_entries or self._issue_total_reports == 0):
+            self.audio.play("menuedge", channel="ui")
+            self._refresh_issue_menu()
+            if self.active_menu != self.issue_menu:
+                self._set_active_menu(self.issue_menu, play_sound=False)
+            self.speaker.speak(f"{message} Showing the last downloaded bug reports.", interrupt=True)
             return
         self.audio.play("menuedge", channel="ui")
         if self._leaderboard_return_menu is not None:
@@ -4607,11 +4827,14 @@ class SubwayBlindGame:
                 username_hint=self._leaderboard_username,
             )
         except CredentialPromptCancelled:
+            self._reset_input_after_native_modal()
             return None
         except NativeCredentialPromptError as exc:
+            self._reset_input_after_native_modal()
             self.audio.play("menuedge", channel="ui")
             self.speaker.speak(str(exc), interrupt=True)
             return None
+        self._reset_input_after_native_modal()
         username = result.username.strip()
         password = result.password
         if not username or not password:
@@ -4625,13 +4848,16 @@ class SubwayBlindGame:
         *,
         return_menu: Menu | None = None,
         publish_after_auth: bool = False,
+        submit_issue_after_auth: bool = False,
     ) -> None:
         self._publish_after_leaderboard_auth = False
+        self._issue_submit_after_leaderboard_auth = False
         credentials = self._prompt_for_leaderboard_credentials()
         if credentials is None:
             return
         username, password = credentials
         self._publish_after_leaderboard_auth = bool(publish_after_auth)
+        self._issue_submit_after_leaderboard_auth = bool(submit_issue_after_auth)
 
         def worker() -> dict[str, object]:
             just_connected = self.leaderboard_client.connect()
@@ -4667,6 +4893,300 @@ class SubwayBlindGame:
         )
         self.audio.play("confirm", channel="ui")
         self.speaker.speak("Leaderboard account signed out.", interrupt=True)
+
+    def _issue_filter_option_label(self) -> str:
+        return f"Status: {issue_status_display_label(self._issue_status_filter)}"
+
+    def _issue_total_pages(self) -> int:
+        total_reports = max(0, int(self._issue_total_reports))
+        return max(1, (total_reports + ISSUE_REPORT_PAGE_SIZE - 1) // ISSUE_REPORT_PAGE_SIZE)
+
+    def _issue_current_page(self) -> int:
+        return (max(0, int(self._issue_offset)) // ISSUE_REPORT_PAGE_SIZE) + 1
+
+    def _issue_page_info_label(self) -> str:
+        return f"Page {self._issue_current_page()} of {self._issue_total_pages()}"
+
+    def _issue_report_summary_label(self, entry: dict[str, object]) -> str:
+        created_at = str(entry.get("created_at") or "").replace("T", " ")[:19]
+        username = (
+            str(
+                entry.get("reporter_username")
+                or entry.get("username")
+                or entry.get("reported_by")
+                or "Unknown user"
+            ).strip()
+            or "Unknown user"
+        )
+        return (
+            f"{username}: "
+            f"{str(entry.get('title') or 'Untitled issue')}: "
+            f"{issue_status_display_label(entry.get('status'))}: "
+            f"{created_at or 'Unknown date'}"
+        )
+
+    def _issue_draft_title_label(self) -> str:
+        title = " ".join(self._issue_draft_title.strip().split())
+        if not title:
+            return "Title: Not set"
+        preview = title if len(title) <= 72 else f"{title[:69].rstrip()}..."
+        return f"Title: {preview}"
+
+    def _issue_draft_message_label(self) -> str:
+        normalized_message = self._issue_draft_message.replace("\r\n", "\n").replace("\r", "\n")
+        if not normalized_message.strip():
+            return "Message: Not set"
+        first_line = next((line.strip() for line in normalized_message.split("\n") if line.strip()), "")
+        if not first_line:
+            first_line = "Blank lines only"
+        preview = first_line if len(first_line) <= 56 else f"{first_line[:53].rstrip()}..."
+        line_count = len(normalized_message.split("\n"))
+        return f"Message: {preview}   {len(normalized_message)}/{ISSUE_MESSAGE_LIMIT} chars   {line_count} lines"
+
+    def _issue_draft_preview_lines(self) -> tuple[str, ...]:
+        normalized_message = self._issue_draft_message.replace("\r\n", "\n").replace("\r", "\n")
+        if not normalized_message:
+            return ("No message written yet.",)
+        lines: list[str] = []
+        for raw_line in normalized_message.split("\n")[:5]:
+            wrapped = textwrap.wrap(raw_line if raw_line else " ", width=62) or [" "]
+            lines.extend(wrapped[:2])
+            if len(lines) >= 5:
+                break
+        return tuple(lines[:5]) or ("No message written yet.",)
+
+    def _issue_cache_is_fresh(self) -> bool:
+        if self._issue_cache_loaded_at <= 0:
+            return False
+        if self._issue_entries:
+            return (time.monotonic() - self._issue_cache_loaded_at) <= ISSUE_CACHE_TTL_SECONDS
+        return self._issue_total_reports == 0 and (time.monotonic() - self._issue_cache_loaded_at) <= ISSUE_CACHE_TTL_SECONDS
+
+    def _refresh_issue_menu(self) -> None:
+        total = max(self._issue_total_reports, len(self._issue_entries))
+        self.issue_menu.title = f"Report a Bug   {len(self._issue_entries)}/{total}"
+        items = [
+            MenuItem("Report an Issue", "issue_submit"),
+            MenuItem(self._issue_filter_option_label(), "issue_cycle_status"),
+        ]
+        if self._issue_entries:
+            items.extend(
+                MenuItem(self._issue_report_summary_label(entry), f"issue_report:{entry['report_id']}")
+                for entry in self._issue_entries
+            )
+        else:
+            items.append(MenuItem("No bug reports were found for the current filter.", "issue_info"))
+        items.extend(
+            [
+                MenuItem(self._issue_page_info_label(), "issue_page_info"),
+                MenuItem("Previous Page", "issue_prev_page"),
+                MenuItem("Next Page", "issue_next_page"),
+                MenuItem("Refresh", "issue_refresh"),
+                MenuItem("Back", "back"),
+            ]
+        )
+        self.issue_menu.items = items
+        self.issue_menu.index = min(self.issue_menu.index, len(self.issue_menu.items) - 1)
+
+    def _refresh_issue_compose_menu(self) -> None:
+        self.issue_compose_menu.title = "Report a Bug   Compose"
+        self.issue_compose_menu.items = [
+            MenuItem(self._issue_draft_title_label(), "issue_edit_title"),
+            MenuItem(self._issue_draft_message_label(), "issue_edit_message"),
+            MenuItem("Submit Report", "issue_submit_confirm"),
+            MenuItem("Back", "back"),
+        ]
+        self.issue_compose_menu.index = min(self.issue_compose_menu.index, len(self.issue_compose_menu.items) - 1)
+
+    def _open_issue_compose_menu(self) -> None:
+        self._refresh_issue_compose_menu()
+        self._set_active_menu(self.issue_compose_menu)
+
+    def _open_issue_reports(self, force_refresh: bool = False) -> None:
+        if (self._issue_entries or self._issue_total_reports == 0) and self._issue_cache_loaded_at > 0 and not force_refresh:
+            self._refresh_issue_menu()
+            self._set_active_menu(self.issue_menu)
+            if not self._issue_cache_is_fresh():
+                self._request_issue_refresh("issue_refresh", return_menu=self.issue_menu, show_status=False)
+            return
+        self._request_issue_refresh(
+            "issue_connect",
+            return_menu=self.main_menu,
+            show_status=self._issue_cache_loaded_at <= 0,
+        )
+
+    def _request_issue_refresh(self, operation: str, return_menu: Menu, show_status: bool) -> bool:
+        issue_offset = self._issue_offset
+        issue_filter = self._issue_status_filter
+
+        def worker() -> dict[str, object]:
+            just_connected = self.leaderboard_client.connect()
+            result = self.leaderboard_client.fetch_issue_reports(
+                offset=issue_offset,
+                limit=ISSUE_REPORT_PAGE_SIZE,
+                status=issue_filter,
+            )
+            result["just_connected"] = just_connected
+            return result
+
+        return self._start_leaderboard_operation(
+            operation,
+            "Server",
+            "Loading bug reports..." if operation != "issue_submit" else "Submitting bug report...",
+            worker,
+            return_menu=return_menu,
+            show_status=show_status,
+        )
+
+    def _cycle_issue_status_filter(self) -> None:
+        current_index = ISSUE_STATUS_ORDER.index(self._issue_status_filter)
+        self._issue_status_filter = ISSUE_STATUS_ORDER[(current_index + 1) % len(ISSUE_STATUS_ORDER)]
+        self._issue_offset = 0
+        self._issue_cache_loaded_at = 0.0
+        self._refresh_issue_menu()
+        self._set_active_menu(self.issue_menu, start_index=self._menu_index_for_action(self.issue_menu, "issue_cycle_status"))
+        self._request_issue_refresh("issue_refresh", return_menu=self.issue_menu, show_status=False)
+
+    def _change_issue_page(self, direction: int) -> None:
+        if direction not in (-1, 1):
+            return
+        current_page = self._issue_current_page()
+        total_pages = self._issue_total_pages()
+        next_page = current_page + direction
+        if next_page < 1 or next_page > total_pages:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("No more pages in that direction.", interrupt=True)
+            return
+        self._issue_offset = (next_page - 1) * ISSUE_REPORT_PAGE_SIZE
+        self._issue_cache_loaded_at = 0.0
+        self._refresh_issue_menu()
+        target_action = "issue_prev_page" if direction < 0 else "issue_next_page"
+        self._set_active_menu(self.issue_menu, start_index=self._menu_index_for_action(self.issue_menu, target_action))
+        self._request_issue_refresh("issue_refresh", return_menu=self.issue_menu, show_status=False)
+
+    def _open_issue_report_detail(self, report_id: str) -> None:
+        selected_id = str(report_id or "").strip()
+
+        def worker() -> dict[str, object]:
+            just_connected = self.leaderboard_client.connect()
+            result = self.leaderboard_client.fetch_issue_report_detail(selected_id)
+            result["just_connected"] = just_connected
+            return result
+
+        self._start_leaderboard_operation(
+            "issue_detail",
+            "Server",
+            "Loading bug report...",
+            worker,
+            return_menu=self.issue_menu,
+        )
+
+    def _set_issue_detail_content(self, report: dict[str, object]) -> None:
+        self._selected_issue_report = dict(report)
+        message_lines = str(report.get("message") or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        created_at = str(report.get("created_at") or "").replace("T", " ")[:19]
+        lines = [
+            f"Title: {str(report.get('title') or 'Untitled issue')}",
+            f"Status: {issue_status_display_label(report.get('status'))}",
+            f"Created: {created_at or 'Unknown date'}",
+            "Message:",
+            *[(line if line else " ") for line in message_lines],
+        ]
+        content = InfoDialogContent(title="Bug Report", lines=tuple(lines))
+        self._selected_issue_detail_content = content
+        self.issue_detail_menu.title = content.title
+        self.issue_detail_menu.items = [MenuItem(line, "copy_info_line") for line in content.lines] + [
+            MenuItem("Copy All", "copy_info_all"),
+            MenuItem("Back", "back"),
+        ]
+
+    def _begin_issue_submission(self) -> None:
+        if not self._leaderboard_is_authenticated():
+            if self._leaderboard_has_publish_identity():
+                self._prompt_and_authenticate_leaderboard_account(
+                    return_menu=self.issue_menu,
+                    publish_after_auth=False,
+                    submit_issue_after_auth=True,
+                )
+                return
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("Sign in from Options, Set User Name, before submitting a bug report.", interrupt=True)
+            return
+        self._open_issue_compose_menu()
+
+    def _edit_issue_draft_field(self, field_name: str) -> None:
+        field_key = str(field_name or "").strip().lower()
+        if field_key == "title":
+            current_value = self._issue_draft_title
+            caption = "Bug Report Title"
+            multiline = False
+            text_limit = ISSUE_TITLE_LIMIT
+        elif field_key == "message":
+            current_value = self._issue_draft_message
+            caption = "Bug Report Message"
+            multiline = True
+            text_limit = ISSUE_MESSAGE_LIMIT
+        else:
+            return
+        try:
+            result = prompt_for_inline_issue_text(
+                caption=caption,
+                text_hint=current_value,
+                multiline=multiline,
+                text_limit=text_limit,
+            )
+        except IssueDialogCancelled:
+            self._reset_input_after_native_modal()
+            self.audio.play("menuclose", channel="ui")
+            self.speaker.speak("Editing cancelled.", interrupt=True)
+            return
+        except NativeIssueDialogError as exc:
+            self._reset_input_after_native_modal()
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(str(exc), interrupt=True)
+            return
+        self._reset_input_after_native_modal()
+        if field_key == "title":
+            self._issue_draft_title = result
+            target_action = "issue_edit_title"
+        else:
+            self._issue_draft_message = result
+            target_action = "issue_edit_message"
+        self.audio.play("confirm", channel="ui")
+        self._refresh_issue_compose_menu()
+        self.issue_compose_menu.index = self._menu_index_for_action(self.issue_compose_menu, target_action)
+        self.speaker.speak(self.issue_compose_menu.items[self.issue_compose_menu.index].label, interrupt=True)
+
+    def _submit_issue_draft(self) -> None:
+        normalized_title = " ".join(self._issue_draft_title.strip().split())
+        normalized_message = self._issue_draft_message.replace("\r\n", "\n").replace("\r", "\n")
+        if not normalized_title:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("Issue title is required.", interrupt=True)
+            self.issue_compose_menu.index = self._menu_index_for_action(self.issue_compose_menu, "issue_edit_title")
+            return
+        if not normalized_message.strip():
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("Issue message is required.", interrupt=True)
+            self.issue_compose_menu.index = self._menu_index_for_action(self.issue_compose_menu, "issue_edit_message")
+            return
+
+        def worker() -> dict[str, object]:
+            just_connected = self.leaderboard_client.connect()
+            result = self.leaderboard_client.submit_issue_report(
+                title=normalized_title,
+                message=normalized_message,
+            )
+            result["just_connected"] = just_connected
+            return result
+
+        self._start_leaderboard_operation(
+            "issue_submit",
+            "Server",
+            "Submitting bug report...",
+            worker,
+            return_menu=self.issue_compose_menu,
+        )
 
     def _publish_latest_game_over_run(self) -> None:
         if not self._leaderboard_is_authenticated():
@@ -5818,6 +6338,13 @@ class SubwayBlindGame:
                 for line_index, line in enumerate(description_lines):
                     line_surface = self.font.render(line, True, (180, 180, 180))
                     self.screen.blit(line_surface, (40, description_top + 32 + (line_index * 26)))
+        elif menu == self.issue_compose_menu:
+            description_top = min(height - 180, y_position + 18)
+            prompt_surface = self.font.render("Edit title and message here. Windows text input opens inside this game window.", True, (205, 205, 205))
+            self.screen.blit(prompt_surface, (40, description_top))
+            for line_index, line in enumerate(self._issue_draft_preview_lines()):
+                line_surface = self.font.render(line, True, (180, 180, 180))
+                self.screen.blit(line_surface, (40, description_top + 32 + (line_index * 26)))
         elif menu in {self.options_menu, self.sapi_menu, self.announcements_menu}:
             hint_text = f"{self._menu_navigation_hint()} {self._option_adjustment_hint()}"
         elif menu in {self.keyboard_bindings_menu, self.controller_bindings_menu} and self._binding_capture is not None:

@@ -63,7 +63,8 @@ from subway_blind.item_upgrades import (
 )
 from subway_blind.menu import Menu, MenuItem
 from subway_blind.models import Obstacle, lane_name
-from subway_blind.native_windows_credentials import CredentialPromptResult
+from subway_blind.native_windows_credentials import CredentialPromptCancelled, CredentialPromptResult
+from subway_blind.native_windows_issue_dialog import IssueDialogCancelled
 from subway_blind.quests import daily_quests
 from subway_blind.spatial_audio import SpatialThreatAudio
 from subway_blind.spawn import PATTERNS, PatternEntry, RoutePattern, SpawnDirector
@@ -1512,6 +1513,7 @@ class GameTests(unittest.TestCase):
                 "Me",
                 "Shop",
                 "Leaderboard",
+                "Report a Bug",
                 "What's New",
                 "Options",
                 "How to Play",
@@ -1544,6 +1546,198 @@ class GameTests(unittest.TestCase):
             speaker.messages[-1][0],
             "Sign in from Options, Set User Name, before opening the leaderboard.",
         )
+
+    def test_issue_reports_open_without_login_and_request_server_refresh(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.main_menu
+
+        with patch.object(game, "_start_leaderboard_operation", return_value=True) as start_operation:
+            result = game._handle_menu_action("issue_reports")
+
+        self.assertTrue(result)
+        self.assertEqual(start_operation.call_args.args[0], "issue_connect")
+        self.assertIs(start_operation.call_args.kwargs["return_menu"], game.main_menu)
+
+    def test_issue_submission_requires_username_before_prompting(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.issue_menu
+
+        result = game._handle_menu_action("issue_submit")
+
+        self.assertTrue(result)
+        self.assertIn(("menuedge", "ui", False), audio.played)
+        self.assertEqual(
+            speaker.messages[-1][0],
+            "Sign in from Options, Set User Name, before submitting a bug report.",
+        )
+
+    def test_issue_submission_requests_auth_for_remembered_username(self):
+        game, _, _ = self.make_game()
+        game._leaderboard_username = "runner01"
+        game.settings["leaderboard_username"] = "runner01"
+        game.active_menu = game.issue_menu
+
+        with patch(
+            "subway_blind.game.prompt_for_credentials",
+            return_value=CredentialPromptResult(username="runner01", password="secret"),
+        ), patch.object(game, "_start_leaderboard_operation", return_value=True) as start_operation:
+            game._handle_menu_action("issue_submit")
+
+        self.assertTrue(game._issue_submit_after_leaderboard_auth)
+        self.assertEqual(start_operation.call_args.args[0], "leaderboard_auth")
+        self.assertIs(start_operation.call_args.kwargs["return_menu"], game.issue_menu)
+
+    def test_issue_submission_opens_compose_menu_for_authenticated_player(self):
+        game, speaker, _ = self.make_game()
+        game.leaderboard_client.auth_token = "token"
+        game.leaderboard_client.principal_username = "runner01"
+        game.active_menu = game.issue_menu
+
+        result = game._handle_menu_action("issue_submit")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.issue_compose_menu)
+        self.assertEqual(game.issue_compose_menu.items[0].label, "Title: Not set")
+        self.assertEqual(speaker.messages[-1], ("Report a Bug   Compose. Title: Not set", True))
+
+    def test_issue_compose_title_edit_updates_menu_without_popup_window(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.issue_compose_menu
+        game._refresh_issue_compose_menu()
+
+        with patch("subway_blind.game.prompt_for_inline_issue_text", return_value="Focus breaks on submit"), patch.object(
+            game,
+            "_reset_input_after_native_modal",
+        ) as reset_input:
+            result = game._handle_menu_action("issue_edit_title")
+
+        self.assertTrue(result)
+        self.assertEqual(game._issue_draft_title, "Focus breaks on submit")
+        self.assertEqual(game.issue_compose_menu.items[0].label, "Title: Focus breaks on submit")
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1], ("Title: Focus breaks on submit", True))
+        reset_input.assert_called_once()
+
+    def test_issue_compose_message_edit_updates_menu_and_preview(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.issue_compose_menu
+        game._refresh_issue_compose_menu()
+
+        with patch(
+            "subway_blind.game.prompt_for_inline_issue_text",
+            return_value="Open the bug menu.\nPress Enter.\nFocus stops.",
+        ), patch.object(game, "_reset_input_after_native_modal") as reset_input:
+            result = game._handle_menu_action("issue_edit_message")
+
+        self.assertTrue(result)
+        self.assertEqual(game._issue_draft_message, "Open the bug menu.\nPress Enter.\nFocus stops.")
+        self.assertIn("3 lines", game.issue_compose_menu.items[1].label)
+        self.assertEqual(game._issue_draft_preview_lines()[0], "Open the bug menu.")
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][1], True)
+        reset_input.assert_called_once()
+
+    def test_issue_compose_cancel_resets_native_modal_input_state(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.issue_compose_menu
+        game._refresh_issue_compose_menu()
+
+        with patch(
+            "subway_blind.game.prompt_for_inline_issue_text",
+            side_effect=IssueDialogCancelled(),
+        ), patch.object(game, "_reset_input_after_native_modal") as reset_input:
+            result = game._handle_menu_action("issue_edit_message")
+
+        self.assertTrue(result)
+        self.assertIn(("menuclose", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1], ("Editing cancelled.", True))
+        reset_input.assert_called_once()
+
+    def test_reset_input_after_native_modal_clears_repeat_and_key_events(self):
+        game, _, _ = self.make_game()
+        game._menu_repeat_key = pygame.K_RETURN
+        game._menu_repeat_delay_remaining = 0.2
+
+        with patch("pygame.event.pump") as pump_events, patch("pygame.event.clear") as clear_events, patch(
+            "pygame.key.set_mods"
+        ) as set_mods:
+            game._reset_input_after_native_modal()
+
+        self.assertIsNone(game._menu_repeat_key)
+        self.assertEqual(game._menu_repeat_delay_remaining, 0.0)
+        pump_events.assert_called_once()
+        set_mods.assert_called_once_with(0)
+        clear_events.assert_any_call(pygame.KEYDOWN)
+        clear_events.assert_any_call(pygame.KEYUP)
+        clear_events.assert_any_call(pygame.ACTIVEEVENT)
+
+    def test_prompt_for_leaderboard_credentials_resets_input_after_success(self):
+        game, _, _ = self.make_game()
+
+        with patch(
+            "subway_blind.game.prompt_for_credentials",
+            return_value=CredentialPromptResult(username="runner01", password="secret"),
+        ), patch.object(game, "_reset_input_after_native_modal") as reset_input:
+            credentials = game._prompt_for_leaderboard_credentials()
+
+        self.assertEqual(credentials, ("runner01", "secret"))
+        reset_input.assert_called_once()
+
+    def test_prompt_for_leaderboard_credentials_resets_input_after_cancel(self):
+        game, _, _ = self.make_game()
+
+        with patch(
+            "subway_blind.game.prompt_for_credentials",
+            side_effect=CredentialPromptCancelled(),
+        ), patch.object(game, "_reset_input_after_native_modal") as reset_input:
+            credentials = game._prompt_for_leaderboard_credentials()
+
+        self.assertIsNone(credentials)
+        reset_input.assert_called_once()
+
+    def test_issue_compose_submit_requires_title_and_message(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.issue_compose_menu
+        game._refresh_issue_compose_menu()
+
+        result = game._handle_menu_action("issue_submit_confirm")
+
+        self.assertTrue(result)
+        self.assertIn(("menuedge", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1], ("Issue title is required.", True))
+        self.assertEqual(game.issue_compose_menu.index, 0)
+
+    def test_issue_compose_submit_starts_server_operation(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.issue_compose_menu
+        game._issue_draft_title = "Focus breaks on submit"
+        game._issue_draft_message = "Open the bug menu.\nPress Enter.\nFocus stops."
+        game._refresh_issue_compose_menu()
+
+        with patch.object(game, "_start_leaderboard_operation", return_value=True) as start_operation:
+            result = game._handle_menu_action("issue_submit_confirm")
+
+        self.assertTrue(result)
+        self.assertEqual(start_operation.call_args.args[0], "issue_submit")
+        self.assertIs(start_operation.call_args.kwargs["return_menu"], game.issue_compose_menu)
+
+    def test_leaderboard_auth_success_continues_pending_issue_submission(self):
+        game, _, _ = self.make_game()
+        game._issue_submit_after_leaderboard_auth = True
+
+        with patch.object(game, "_begin_issue_submission") as begin_issue_submission:
+            game._handle_leaderboard_success(
+                "leaderboard_auth",
+                {
+                    "just_connected": False,
+                    "username": "runner01",
+                    "status": "logged_in",
+                    "account_sync": {},
+                },
+            )
+
+        self.assertFalse(game._issue_submit_after_leaderboard_auth)
+        begin_issue_submission.assert_called_once()
 
     def test_game_over_opens_publish_prompt_for_authenticated_player(self):
         game, speaker, _ = self.make_game()
@@ -1762,6 +1956,83 @@ class GameTests(unittest.TestCase):
         self.assertIs(game.active_menu, game.leaderboard_menu)
         self.assertFalse(any("leaderboard loaded" in text.lower() for text, _ in speaker.messages))
 
+    def test_issue_connect_populates_issue_menu_and_plays_connect_sound(self):
+        game, _, audio = self.make_game()
+        game.active_menu = game.main_menu
+
+        game._handle_leaderboard_success(
+            "issue_connect",
+            {
+                "just_connected": True,
+                "status": "investigating",
+                "offset": 0,
+                "total_reports": 1,
+                "entries": [
+                    {
+                        "report_id": "a" * 32,
+                        "reporter_username": "runner01",
+                        "title": "Menu focus jumps unexpectedly",
+                        "status": "investigating",
+                        "created_at": "2026-04-01T12:34:56+00:00",
+                    }
+                ],
+            },
+        )
+
+        self.assertIs(game.active_menu, game.issue_menu)
+        self.assertIn(("connect", "ui", False), audio.played)
+        self.assertEqual(game.issue_menu.items[0].label, "Report an Issue")
+        self.assertEqual(
+            game.issue_menu.items[2].label,
+            "runner01: Menu focus jumps unexpectedly: Investigating: 2026-04-01 12:34:56",
+        )
+
+    def test_issue_submit_success_refreshes_menu_and_announces_remaining_count(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.issue_menu
+
+        with patch.object(game, "_request_issue_refresh", return_value=True) as refresh_mock:
+            game._handle_leaderboard_success(
+                "issue_submit",
+                {
+                    "just_connected": True,
+                    "report_id": "a" * 32,
+                    "status": "investigating",
+                    "submissions_remaining_today": 2,
+                },
+            )
+
+        self.assertIs(game.active_menu, game.issue_menu)
+        self.assertIn(("connect", "ui", False), audio.played)
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(
+            speaker.messages[-1],
+            ("Bug report submitted. Status: Investigating. 2 submissions remaining today.", True),
+        )
+        refresh_mock.assert_called_once()
+
+    def test_issue_detail_menu_preserves_multiline_message_lines(self):
+        game, _, _ = self.make_game()
+
+        game._handle_leaderboard_success(
+            "issue_detail",
+            {
+                "just_connected": False,
+                "report_id": "a" * 32,
+                "title": "Crash on startup",
+                "status": "investigating",
+                "created_at": "2026-04-01T12:34:56+00:00",
+                "message": "Open the game.\nPress Enter.\nThe game closes.",
+            },
+        )
+
+        self.assertIs(game.active_menu, game.issue_detail_menu)
+        self.assertEqual(game.issue_detail_menu.items[0].label, "Title: Crash on startup")
+        self.assertEqual(game.issue_detail_menu.items[3].label, "Message:")
+        self.assertEqual(game.issue_detail_menu.items[4].label, "Open the game.")
+        self.assertEqual(game.issue_detail_menu.items[5].label, "Press Enter.")
+        self.assertEqual(game.issue_detail_menu.items[6].label, "The game closes.")
+
     def test_leaderboard_period_cycle_refreshes_without_status_screen(self):
         game, _, _ = self.make_game()
         game.active_menu = game.leaderboard_menu
@@ -1876,7 +2147,7 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.main_menu)
-        self.assertEqual(game.main_menu.index, 11)
+        self.assertEqual(game.main_menu.index, 12)
 
     def test_exit_confirmation_yes_closes_game(self):
         game, _, _ = self.make_game()
@@ -2364,7 +2635,20 @@ class GameTests(unittest.TestCase):
         game, _, _ = self.make_game()
         game.settings["mission_multiplier_bonus"] = 4
 
-        game.start_run()
+        with patch(
+            "subway_blind.game.event_runtime_profile",
+            return_value={
+                "event": None,
+                "featured_character_key": "",
+                "featured_character_active": False,
+                "featured_multiplier_bonus": 0,
+                "super_box_bonus": 0.0,
+                "word_bonus": 0.0,
+                "box_bonus": 0.0,
+                "jackpot_bonus": False,
+            },
+        ):
+            game.start_run()
 
         self.assertEqual(game.state.multiplier, 5)
 
@@ -3396,7 +3680,20 @@ class GameTests(unittest.TestCase):
         game.settings["character_progress"]["yutani"] = {"unlocked": True, "level": 2}
         game._sync_character_progress()
 
-        game.start_run()
+        with patch(
+            "subway_blind.game.event_runtime_profile",
+            return_value={
+                "event": None,
+                "featured_character_key": "",
+                "featured_character_active": False,
+                "featured_multiplier_bonus": 0,
+                "super_box_bonus": 0.0,
+                "word_bonus": 0.0,
+                "box_bonus": 0.0,
+                "jackpot_bonus": False,
+            },
+        ):
+            game.start_run()
 
         self.assertEqual(game.state.multiplier, 3)
 

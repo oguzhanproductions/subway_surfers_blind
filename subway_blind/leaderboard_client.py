@@ -29,6 +29,7 @@ from subway_blind.server_config import load_server_config
 from subway_blind.version import APP_VERSION
 
 CLIENT_CONNECTION_MAX_IDLE_SECONDS = 480.0
+ISSUE_REPORT_PAGE_SIZE = 50
 
 
 class LeaderboardClientError(RuntimeError):
@@ -202,6 +203,39 @@ class LeaderboardClient:
                 "username": str(username or ""),
                 "history_offset": int(history_offset),
                 "history_limit": int(history_limit),
+            },
+        )
+
+    def fetch_issue_reports(
+        self,
+        *,
+        offset: int = 0,
+        limit: int = ISSUE_REPORT_PAGE_SIZE,
+        status: str = "all",
+    ) -> dict[str, Any]:
+        return self._request(
+            "fetch_issue_reports",
+            {
+                "offset": max(0, int(offset)),
+                "limit": max(1, min(ISSUE_REPORT_PAGE_SIZE, int(limit))),
+                "status": str(status or "all"),
+            },
+        )
+
+    def fetch_issue_report_detail(self, report_id: str) -> dict[str, Any]:
+        return self._request(
+            "fetch_issue_report_detail",
+            {
+                "report_id": str(report_id or ""),
+            },
+        )
+
+    def submit_issue_report(self, *, title: str, message: str) -> dict[str, Any]:
+        return self._request(
+            "submit_issue_report",
+            {
+                "title": str(title or ""),
+                "message": str(message or ""),
             },
         )
 

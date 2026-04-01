@@ -122,6 +122,42 @@ class LeaderboardClientTests(unittest.TestCase):
             },
         )
 
+    def test_fetch_issue_reports_sends_pagination_and_status(self):
+        with mock.patch.object(self.client, "_request", return_value={"entries": []}) as request_mock:
+            self.client.fetch_issue_reports(offset=50, limit=50, status="resolved")
+
+        request_mock.assert_called_once_with(
+            "fetch_issue_reports",
+            {
+                "offset": 50,
+                "limit": 50,
+                "status": "resolved",
+            },
+        )
+
+    def test_fetch_issue_report_detail_sends_report_id(self):
+        with mock.patch.object(self.client, "_request", return_value={"report_id": "issue-1"}) as request_mock:
+            self.client.fetch_issue_report_detail("issue-1")
+
+        request_mock.assert_called_once_with(
+            "fetch_issue_report_detail",
+            {
+                "report_id": "issue-1",
+            },
+        )
+
+    def test_submit_issue_report_sends_title_and_message(self):
+        with mock.patch.object(self.client, "_request", return_value={"report_id": "issue-1"}) as request_mock:
+            self.client.submit_issue_report(title="Crash on launch", message="The game crashes\nwhen I press Enter.")
+
+        request_mock.assert_called_once_with(
+            "submit_issue_report",
+            {
+                "title": "Crash on launch",
+                "message": "The game crashes\nwhen I press Enter.",
+            },
+        )
+
     def test_submit_score_includes_extended_run_metadata(self):
         with mock.patch.object(self.client, "_request", return_value={"high_score": True}) as request_mock:
             self.client.submit_score(
@@ -288,6 +324,54 @@ class LeaderboardIntegrationTests(unittest.TestCase):
         self.assertEqual(profile["best_run"]["clean_escapes"], 6)
         self.assertEqual(profile["summary"]["published_runs_total"], 1)
         resumed_client.close()
+
+    def test_live_server_supports_issue_submission_listing_and_detail(self):
+        self.server_process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "server",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(self.port),
+                "--runtime-dir",
+                str(self.runtime_directory),
+            ],
+            cwd=str(PROJECT_ROOT),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        public_key = self._wait_for_public_key()
+        connection_config = ServerConnectionConfig(
+            host="127.0.0.1",
+            port=self.port,
+            server_public_key=public_key,
+            connect_timeout_ms=1000,
+            request_timeout_ms=2000,
+            page_size=20,
+        )
+
+        client = LeaderboardClient(connection_config)
+        client.login("runner01", "secret123")
+
+        submit_result = client.submit_issue_report(
+            title="Menu focus jumps unexpectedly",
+            message="Open the shop.\nMove down twice.\nFocus returns to the top item.",
+        )
+        self.assertEqual(submit_result["status"], "investigating")
+
+        reports = client.fetch_issue_reports(status="investigating", limit=50)
+        self.assertEqual(reports["total_reports"], 1)
+        self.assertEqual(reports["entries"][0]["title"], "Menu focus jumps unexpectedly")
+
+        detail = client.fetch_issue_report_detail(reports["entries"][0]["report_id"])
+        self.assertEqual(detail["status"], "investigating")
+        self.assertIn("Focus returns to the top item.", detail["message"])
+        client.close()
 
     def _wait_for_public_key(self) -> str:
         public_key_path = self.runtime_directory / "server_public_key.b64"

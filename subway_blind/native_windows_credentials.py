@@ -49,10 +49,12 @@ def prompt_for_credentials(
     credui = ctypes.windll.credui
     ole32 = ctypes.windll.ole32
     kernel32 = ctypes.windll.kernel32
+    user32 = ctypes.windll.user32
+    parent_hwnd_value = int(pygame.display.get_wm_info().get("window", 0) or 0)
 
     prompt_info = CREDUI_INFO()
     prompt_info.cbSize = ctypes.sizeof(CREDUI_INFO)
-    prompt_info.hwndParent = wintypes.HWND(int(pygame.display.get_wm_info().get("window", 0) or 0))
+    prompt_info.hwndParent = wintypes.HWND(parent_hwnd_value)
     prompt_info.pszCaptionText = ctypes.c_wchar_p(str(caption))
     prompt_info.pszMessageText = ctypes.c_wchar_p(str(message))
     prompt_info.hbmBanner = None
@@ -119,6 +121,7 @@ def prompt_for_credentials(
         _secure_zero_string_buffer(kernel32, password_buffer)
         if in_buffer is not None:
             _secure_zero_buffer(kernel32, in_buffer, len(in_buffer))
+        _restore_parent_window(user32, parent_hwnd_value)
 
 
 def _unpack_credential_field(credui, auth_buffer, auth_buffer_size: int, field: str) -> str:
@@ -190,3 +193,22 @@ def _secure_zero_buffer(kernel32, buffer, size: int) -> None:
             ctypes.memset(buffer, 0, int(size))
         except Exception:
             pass
+
+
+def _restore_parent_window(user32, parent_hwnd_value: int) -> None:
+    if int(parent_hwnd_value or 0) <= 0:
+        return
+    hwnd = wintypes.HWND(int(parent_hwnd_value))
+    try:
+        if not user32.IsWindow(hwnd):
+            return
+    except Exception:
+        return
+    for method_name in ("BringWindowToTop", "SetForegroundWindow", "SetActiveWindow", "SetFocus"):
+        method = getattr(user32, method_name, None)
+        if method is None:
+            continue
+        try:
+            method(hwnd)
+        except Exception:
+            continue

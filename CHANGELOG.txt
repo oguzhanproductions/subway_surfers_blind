@@ -6,6 +6,7 @@ Version: 1.1.4
 
 Update Summary
 - Updated the game version to 1.1.4.
+- Added an in-game bug reporting system with server-backed issue submission and browsing.
 - Added a weekly seasonal leaderboard system with automatic season rollover, season countdowns, and season-specific rewards.
 - Added fixed custom season names for every 2026 leaderboard week through the end of the year.
 - Fixed mission and quest progress tracking so progression keeps updating even when quest announcements are disabled.

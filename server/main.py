@@ -19,6 +19,8 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from server.database import LeaderboardDatabase
+from server.issues.database import IssueDatabase
+from server.issues.service import ISSUE_PAGE_SIZE, IssueService
 from server.security import SecurityValidationError, TokenBucket
 from server.service import LeaderboardService, ServiceError, SessionPrincipal
 from subway_blind.leaderboard_protocol import (
@@ -71,7 +73,9 @@ class LeaderboardServer:
         self.runtime_directory = Path(runtime_directory)
         self.runtime_directory.mkdir(parents=True, exist_ok=True)
         self.database = LeaderboardDatabase(self.runtime_directory / "leaderboard.sqlite3")
+        self.issue_database = IssueDatabase(self.runtime_directory / "issues" / "issue_reports.sqlite3")
         self.service = LeaderboardService(self.database)
+        self.issue_service = IssueService(self.issue_database)
         self.identity_private_key = self._load_or_create_identity()
         self.public_key_text = export_public_key(self.identity_private_key)
         self._write_public_key_file()
@@ -104,6 +108,7 @@ class LeaderboardServer:
                 self.host_socket.flush()
         finally:
             self._disconnect_all_peers()
+            self.issue_database.close()
             self.database.close()
         if self.reboot_requested:
             raise AdminRebootRequested()
@@ -255,6 +260,28 @@ class LeaderboardServer:
                 powerup_usage=payload.get("powerup_usage") if isinstance(payload.get("powerup_usage"), dict) else None,
             )
             return {"ok": True, "type": "submit_result", "payload": result}
+        if request_type == "fetch_issue_reports":
+            result = self.issue_service.fetch_issue_reports(
+                status=str(payload.get("status") or "all"),
+                offset=int(payload.get("offset", 0) or 0),
+                limit=int(payload.get("limit", ISSUE_PAGE_SIZE) or ISSUE_PAGE_SIZE),
+            )
+            return {"ok": True, "type": "issue_reports_result", "payload": result}
+        if request_type == "fetch_issue_report_detail":
+            result = self.issue_service.fetch_issue_report_detail(
+                report_id=str(payload.get("report_id") or ""),
+            )
+            return {"ok": True, "type": "issue_report_detail_result", "payload": result}
+        if request_type == "submit_issue_report":
+            if peer_state.principal is None:
+                raise ServiceError("authentication_required", "Sign in before submitting a bug report.")
+            peer_state.principal = self.service.revalidate_principal(peer_state.principal)
+            result = self.issue_service.submit_issue_report(
+                principal=peer_state.principal,
+                title=str(payload.get("title") or ""),
+                message=str(payload.get("message") or ""),
+            )
+            return {"ok": True, "type": "submit_issue_report_result", "payload": result}
         if request_type == "logout":
             peer_state.principal = None
             return {"ok": True, "type": "logout_result", "payload": {}}
