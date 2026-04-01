@@ -100,6 +100,34 @@ class IssueServiceTests(unittest.TestCase):
 
         self.assertEqual(context.exception.code, "invalid_issue_report")
 
+    def test_resolve_issue_report_marks_report_resolved(self):
+        with patch.object(self.service, "utcnow", return_value=datetime(2026, 4, 1, 9, 0, tzinfo=UTC)):
+            created = self.service.submit_issue_report(
+                self.principal,
+                title="Dialog refuses to close",
+                message="Press Escape.\nThe dialog stays open.",
+            )
+        with patch.object(self.service, "utcnow", return_value=datetime(2026, 4, 1, 9, 5, tzinfo=UTC)):
+            resolved = self.service.resolve_issue_report(created["report_id"])
+
+        self.assertEqual(resolved["status"], "resolved")
+        self.assertEqual(resolved["resolved_at"], "2026-04-01T09:05:00+00:00")
+
+    def test_submit_issue_report_notifies_submission_listeners(self):
+        received_reports: list[dict] = []
+        self.service.add_submission_listener(received_reports.append)
+
+        with patch.object(self.service, "utcnow", return_value=datetime(2026, 4, 1, 10, 0, tzinfo=UTC)):
+            created = self.service.submit_issue_report(
+                self.principal,
+                title="Menu label is wrong",
+                message="Open options.\nLabel is missing.",
+            )
+
+        self.assertEqual(len(received_reports), 1)
+        self.assertEqual(received_reports[0]["report_id"], created["report_id"])
+        self.assertEqual(received_reports[0]["reporter_username"], "runner01")
+
 
 if __name__ == "__main__":
     unittest.main()

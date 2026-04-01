@@ -19,6 +19,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from server.database import LeaderboardDatabase
+from server.issues.bot import TelegramIssueAdminBot, TelegramIssueBotConfigStore
 from server.issues.database import IssueDatabase
 from server.issues.service import ISSUE_PAGE_SIZE, IssueService
 from server.security import SecurityValidationError, TokenBucket
@@ -76,6 +77,10 @@ class LeaderboardServer:
         self.issue_database = IssueDatabase(self.runtime_directory / "issues" / "issue_reports.sqlite3")
         self.service = LeaderboardService(self.database)
         self.issue_service = IssueService(self.issue_database)
+        self.issue_bot = TelegramIssueAdminBot(
+            self.issue_service,
+            TelegramIssueBotConfigStore(self.runtime_directory / "issues" / "telegram_bot.json"),
+        )
         self.identity_private_key = self._load_or_create_identity()
         self.public_key_text = export_public_key(self.identity_private_key)
         self._write_public_key_file()
@@ -95,6 +100,7 @@ class LeaderboardServer:
 
     def serve_forever(self) -> None:
         self.admin_thread.start()
+        self.issue_bot.start()
         print(f"Leaderboard server listening on {self.host}:{self.port}")
         print(f"Server public key: {self.public_key_text}")
         print("Type help for commands.")
@@ -108,6 +114,7 @@ class LeaderboardServer:
                 self.host_socket.flush()
         finally:
             self._disconnect_all_peers()
+            self.issue_bot.stop()
             self.issue_database.close()
             self.database.close()
         if self.reboot_requested:

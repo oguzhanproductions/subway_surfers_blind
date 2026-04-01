@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import uuid
+from typing import Callable
 
 from server.issues.database import IssueDatabase
 from server.service import ServiceError, SessionPrincipal
@@ -19,10 +20,15 @@ ISSUE_DAILY_SUBMISSION_LIMIT = 3
 class IssueService:
     def __init__(self, database: IssueDatabase):
         self.database = database
+        self._submission_listeners: list[Callable[[dict], None]] = []
 
     @staticmethod
     def utcnow() -> datetime:
         return datetime.now(UTC)
+
+    def add_submission_listener(self, listener: Callable[[dict], None]) -> None:
+        if listener not in self._submission_listeners:
+            self._submission_listeners.append(listener)
 
     def submit_issue_report(self, principal: SessionPrincipal, title: str, message: str) -> dict:
         normalized_title = self._normalize_title(title)
@@ -82,15 +88,19 @@ class IssueService:
                 now_epoch,
             ),
         )
-        return {
+        created_report = {
             "report_id": report_id,
+            "reporter_username": principal.username,
             "title": normalized_title,
             "message": normalized_message,
             "status": ISSUE_STATUS_INVESTIGATING,
             "created_at": now_text,
             "updated_at": now_text,
+            "resolved_at": None,
             "submissions_remaining_today": max(0, ISSUE_DAILY_SUBMISSION_LIMIT - (report_count + 1)),
         }
+        self._notify_submission_listeners(created_report)
+        return created_report
 
     def fetch_issue_reports(self, *, status: str = ISSUE_STATUS_ALL, offset: int = 0, limit: int = ISSUE_PAGE_SIZE) -> dict:
         normalized_status = self._normalize_status_filter(status)
@@ -129,37 +139,37 @@ class IssueService:
         }
 
     def fetch_issue_report_detail(self, report_id: str) -> dict:
-        normalized_report_id = str(report_id or "").strip().lower()
-        if len(normalized_report_id) != 32:
-            raise ServiceError("invalid_issue_report", "Issue report identifier is invalid.")
-        row = self.database.fetchone(
+        row = self._fetch_issue_row(report_id)
+        return self._serialize_detail_row(row)
+
+    def resolve_issue_report(self, report_id: str) -> dict:
+        row = self._fetch_issue_row(report_id)
+        if str(row["status"]) == ISSUE_STATUS_RESOLVED:
+            return self._serialize_detail_row(row)
+        now = self.utcnow()
+        now_text = now.isoformat()
+        now_epoch = int(now.timestamp())
+        self.database.execute(
             """
-            SELECT
-                id,
-                reporter_username,
-                title,
-                message,
-                status,
-                created_at,
-                updated_at,
-                resolved_at
-            FROM issue_reports
+            UPDATE issue_reports
+            SET
+                status = ?,
+                updated_at = ?,
+                updated_at_epoch = ?,
+                resolved_at = ?,
+                resolved_at_epoch = ?
             WHERE id = ?
             """,
-            (normalized_report_id,),
+            (
+                ISSUE_STATUS_RESOLVED,
+                now_text,
+                now_epoch,
+                now_text,
+                now_epoch,
+                str(row["id"]),
+            ),
         )
-        if row is None:
-            raise ServiceError("issue_not_found", "Issue report could not be found.")
-        return {
-            "report_id": str(row["id"]),
-            "reporter_username": str(row["reporter_username"]),
-            "title": str(row["title"]),
-            "message": str(row["message"]),
-            "status": str(row["status"]),
-            "created_at": str(row["created_at"]),
-            "updated_at": str(row["updated_at"]),
-            "resolved_at": str(row["resolved_at"]) if row["resolved_at"] is not None else None,
-        }
+        return self.fetch_issue_report_detail(str(row["id"]))
 
     def _normalize_title(self, title: str) -> str:
         normalized = " ".join(str(title or "").strip().split())
@@ -190,6 +200,19 @@ class IssueService:
         return normalized
 
     @staticmethod
+    def _serialize_detail_row(row) -> dict:
+        return {
+            "report_id": str(row["id"]),
+            "reporter_username": str(row["reporter_username"]),
+            "title": str(row["title"]),
+            "message": str(row["message"]),
+            "status": str(row["status"]),
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+            "resolved_at": str(row["resolved_at"]) if row["resolved_at"] is not None else None,
+        }
+
+    @staticmethod
     def _serialize_summary_row(row) -> dict:
         return {
             "report_id": str(row["id"]),
@@ -198,3 +221,34 @@ class IssueService:
             "status": str(row["status"]),
             "created_at": str(row["created_at"]),
         }
+
+    def _fetch_issue_row(self, report_id: str):
+        normalized_report_id = str(report_id or "").strip().lower()
+        if len(normalized_report_id) != 32:
+            raise ServiceError("invalid_issue_report", "Issue report identifier is invalid.")
+        row = self.database.fetchone(
+            """
+            SELECT
+                id,
+                reporter_username,
+                title,
+                message,
+                status,
+                created_at,
+                updated_at,
+                resolved_at
+            FROM issue_reports
+            WHERE id = ?
+            """,
+            (normalized_report_id,),
+        )
+        if row is None:
+            raise ServiceError("issue_not_found", "Issue report could not be found.")
+        return row
+
+    def _notify_submission_listeners(self, report: dict) -> None:
+        for listener in tuple(self._submission_listeners):
+            try:
+                listener(dict(report))
+            except Exception:
+                continue
