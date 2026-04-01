@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+from pathlib import Path
 from PyInstaller.utils.hooks import collect_dynamic_libs
 from PyInstaller.utils.hooks import collect_submodules
 
@@ -8,11 +9,24 @@ binaries += collect_dynamic_libs('pyopenalsoft')
 hiddenimports += collect_submodules('accessible_output2.outputs')
 
 
+def collect_project_asset_files(asset_root: str) -> list[tuple[str, str]]:
+    root = Path(asset_root)
+    return [
+        (str(path), str(Path(asset_root) / path.relative_to(root).parent))
+        for path in root.rglob('*')
+        if path.is_file()
+    ]
+
+
+datas = [('server.json', '.')]
+datas += collect_project_asset_files('assets')
+
+
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=binaries,
-    datas=[('assets', 'assets'), ('server.json', '.')],
+    datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
