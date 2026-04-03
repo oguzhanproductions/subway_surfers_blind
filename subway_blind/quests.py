@@ -52,6 +52,14 @@ QUEST_METER_REWARDS: tuple[dict[str, int | str], ...] = (
     {"kind": "headstart", "amount": 1},
     {"kind": "super_box", "amount": 1},
 )
+PRACTICE_LANE_DAILY_QUEST = QuestDefinition(
+    key="daily:practice_lane_complete",
+    scope="daily",
+    metric="practice_runs_completed",
+    label="Complete Practice Lane once",
+    target=1,
+    sneaker_reward=6,
+)
 
 
 def default_quest_state() -> dict[str, object]:
@@ -138,6 +146,7 @@ def quests_for_scope(scope: str, today: date | None = None) -> tuple[QuestDefini
                     sneaker_reward=template.sneaker_reward + scale,
                 )
             )
+        definitions.append(PRACTICE_LANE_DAILY_QUEST)
         return tuple(definitions)
 
     rng = random.Random(int(season_identifier(current_day).replace("-q", "")) * 6421)

@@ -83,6 +83,13 @@ class MetaSystemTests(unittest.TestCase):
         self.assertIsNotNone(claimed)
         self.assertEqual(quest_sneakers(settings, today), quest.sneaker_reward)
 
+    def test_daily_quests_include_practice_lane_training_quest(self):
+        today = date(2026, 3, 29)
+
+        quests = daily_quests(today)
+
+        self.assertTrue(any(quest.metric == "practice_runs_completed" and quest.target == 1 for quest in quests))
+
     def test_quest_meter_reward_unlocks_at_threshold(self):
         settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
         today = date(2026, 3, 29)
@@ -100,7 +107,8 @@ class MetaSystemTests(unittest.TestCase):
         settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
         today = date(2026, 3, 29)
         ensure_quest_state(settings, today)
-        first_quest, second_quest, _ = daily_quests(today)
+        regular_daily_quests = [quest for quest in daily_quests(today) if quest.metric != "practice_runs_completed"]
+        first_quest, second_quest = regular_daily_quests[:2]
         settings["quest_state"]["daily_progress"][first_quest.key] = first_quest.target - 1
         settings["quest_state"]["daily_progress"][second_quest.key] = second_quest.target
         settings["quest_state"]["daily_claimed"] = [second_quest.key]

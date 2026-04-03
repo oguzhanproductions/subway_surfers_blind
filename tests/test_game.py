@@ -66,7 +66,7 @@ from subway_blind.menu import Menu, MenuItem
 from subway_blind.models import Obstacle, lane_name
 from subway_blind.native_windows_credentials import CredentialPromptCancelled, CredentialPromptResult
 from subway_blind.native_windows_issue_dialog import IssueDialogCancelled
-from subway_blind.quests import daily_quests
+from subway_blind.quests import daily_quests, quest_claimed, quest_completed
 from subway_blind.spatial_audio import SpatialThreatAudio
 from subway_blind.spawn import PATTERNS, PatternEntry, RoutePattern, SpawnDirector
 from subway_blind.updater import (
@@ -4525,6 +4525,18 @@ class GameTests(unittest.TestCase):
         game._game_over_summary = {"score": 900, "coins": 40, "play_time_seconds": 32, "death_reason": "Hit train"}
 
         self.assertFalse(game._should_offer_publish_prompt())
+
+    def test_practice_lane_completion_marks_training_quest_ready(self):
+        game, speaker, _ = self.make_game()
+        game.settings["quest_changes_enabled"] = True
+        game.start_run(practice_mode=True)
+
+        game._complete_practice_lane_run()
+
+        training_quest = next(quest for quest in daily_quests() if quest.metric == "practice_runs_completed")
+        self.assertTrue(quest_completed(game.settings, training_quest))
+        self.assertFalse(quest_claimed(game.settings, training_quest))
+        self.assertTrue(any(f"Quest ready: {training_quest.label}." == text for text, _ in speaker.messages))
 
     def test_practice_lane_publish_request_is_rejected_even_when_confirmed(self):
         game, speaker, audio = self.make_game()

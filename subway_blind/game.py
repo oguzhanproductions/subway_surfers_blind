@@ -5840,6 +5840,12 @@ class SubwayBlindGame:
     def _complete_practice_lane_run(self) -> None:
         if not self.state.running:
             return
+        for quest in record_quest_metric(self.settings, "practice_runs_completed", 1):
+            if self._quest_changes_enabled():
+                self.audio.play("mission_reward", channel="ui3")
+                self.speaker.speak(f"Quest ready: {quest.label}.", interrupt=False)
+        self._refresh_quest_menu_labels()
+        self._refresh_missions_hub_menu_labels()
         self.state.paused = False
         self._stop_spatial_audio()
         self.audio.play("mission_reward", channel="ui")
