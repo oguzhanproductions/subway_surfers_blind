@@ -1509,6 +1509,7 @@ class GameTests(unittest.TestCase):
             [item.label for item in game.main_menu.items],
             [
                 "Start Game",
+                "Practice Lane",
                 "Events",
                 "Missions",
                 "Me",
@@ -2765,6 +2766,17 @@ class GameTests(unittest.TestCase):
         self.assertIs(game.active_menu, game.loadout_menu)
         self.assertEqual(game.loadout_menu.title, "Run Setup")
 
+    def test_practice_lane_action_starts_obstacle_training_mode(self):
+        game, speaker, _ = self.make_game()
+
+        game._handle_menu_action("practice_lane")
+
+        self.assertIsNone(game.active_menu)
+        self.assertTrue(game.state.running)
+        self.assertTrue(game._practice_mode_active)
+        self.assertEqual(game.state.speed, 16.0)
+        self.assertIn("Practice Lane started.", speaker.messages[-1][0])
+
     def test_learn_sounds_action_opens_sound_menu(self):
         game, _, _ = self.make_game()
 
@@ -2937,6 +2949,70 @@ class GameTests(unittest.TestCase):
         game._spawn_things(0.016)
 
         self.assertAlmostEqual(game.state.next_spawn, 0.3)
+
+    def test_practice_lane_spawn_things_only_creates_hazard_patterns(self):
+        game, _, _ = self.make_game()
+        game.start_run(practice_mode=True)
+        game.state.next_spawn = 0.0
+        game.state.next_coinline = 0.0
+        game.state.next_support = 0.0
+
+        with patch.object(game, "_choose_playable_pattern", return_value=(PATTERNS[4], 32.0)), patch.object(
+            game.spawn_director,
+            "base_spawn_distance",
+            return_value=29.0,
+        ):
+            game._spawn_things(0.016)
+
+        self.assertTrue(game.obstacles)
+        self.assertTrue(all(obstacle.kind in {"train", "low", "high", "bush"} for obstacle in game.obstacles))
+
+    def test_practice_lane_commit_run_rewards_does_not_change_progression_or_bank(self):
+        game, _, _ = self.make_game()
+        game.start_run(practice_mode=True)
+        game.settings["bank_coins"] = 1234
+        game.settings["mission_metrics"] = {
+            "coins": 9,
+            "jumps": 7,
+            "rolls": 6,
+            "dodges": 5,
+            "powerups": 4,
+            "boxes": 3,
+        }
+        game.state.coins = 120
+        game.state.distance = 640
+
+        game._commit_run_rewards()
+
+        self.assertEqual(game.settings["bank_coins"], 1234)
+        self.assertEqual(
+            game.settings["mission_metrics"],
+            {
+                "coins": 9,
+                "jumps": 7,
+                "rolls": 6,
+                "dodges": 5,
+                "powerups": 4,
+                "boxes": 3,
+            },
+        )
+
+    def test_practice_lane_update_does_not_increase_score(self):
+        game, _, _ = self.make_game()
+        game.start_run(practice_mode=True)
+
+        game._update_game(1.0)
+
+        self.assertEqual(game.state.score, 0)
+
+    def test_practice_lane_collect_coin_is_ignored(self):
+        game, _, _ = self.make_game()
+        game.start_run(practice_mode=True)
+        obstacle = Obstacle(kind="coin", lane=0, z=1.0, value=1)
+
+        game._collect_coin(obstacle)
+
+        self.assertEqual(game.state.coins, 0)
 
     def test_adjust_selected_option_changes_sfx_with_right_arrow(self):
         game, speaker, audio = self.make_game()
@@ -4428,6 +4504,44 @@ class GameTests(unittest.TestCase):
         self.assertIsNone(game.active_menu)
         self.assertTrue(game.state.running)
         self.assertGreaterEqual(audio.music_started, 1)
+
+    def test_game_over_retry_keeps_practice_lane_mode(self):
+        game, _, _ = self.make_game()
+        game._practice_mode_active = True
+        game._game_over_summary = {"score": 12, "coins": 0, "play_time_seconds": 18, "death_reason": "Hit low obstacle"}
+        game._refresh_game_over_menu()
+        game.active_menu = game.game_over_menu
+
+        game._handle_menu_action("game_over_retry")
+
+        self.assertTrue(game.state.running)
+        self.assertTrue(game._practice_mode_active)
+
+    def test_practice_lane_never_offers_publish_prompt(self):
+        game, _, _ = self.make_game()
+        game._practice_mode_active = True
+        game.leaderboard_client.auth_token = "token"
+        game.leaderboard_client.principal_username = "runner01"
+        game._game_over_summary = {"score": 900, "coins": 40, "play_time_seconds": 32, "death_reason": "Hit train"}
+
+        self.assertFalse(game._should_offer_publish_prompt())
+
+    def test_practice_lane_publish_request_is_rejected_even_when_confirmed(self):
+        game, speaker, audio = self.make_game()
+        game._practice_mode_active = True
+        game.leaderboard_client.auth_token = "token"
+        game.leaderboard_client.principal_username = "runner01"
+        game.active_menu = game.publish_confirm_menu
+
+        with patch.object(game, "_start_leaderboard_operation", return_value=True) as start_operation:
+            game._publish_latest_game_over_run()
+
+        start_operation.assert_not_called()
+        self.assertIn(("menuedge", "ui", False), audio.played)
+        self.assertIn(
+            "Practice Lane runs cannot be published to the leaderboard.",
+            [message for message, _ in speaker.messages],
+        )
 
     def test_game_over_menu_main_menu_returns_to_main_menu(self):
         game, _, _ = self.make_game()

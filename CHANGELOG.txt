@@ -7,6 +7,8 @@ Version: 1.1.5
 Update Summary
 - Added richer Shop item labels that now report both owned inventory and the maximum amount that can be bought with current banked coins.
 - Added max-buy reporting for Mystery Box entries so players can hear how many 500-coin box opens they can currently afford.
+- Added a new Practice Lane mode in the main menu with fixed speed, obstacle-only training flow, and a short clear-target session for onboarding.
+- Locked Practice Lane as a pure training mode: no coins, no item/powerup usage, no progression gain, and no leaderboard publishing even when publish confirmation is forced.
 
 Audio or UI Updates
 - Shop labels now refresh with live max-buy affordability after purchases and coin changes, improving spending clarity before confirming an item.

@@ -223,6 +223,10 @@ MIN_WINDOW_WIDTH = 640
 MIN_WINDOW_HEIGHT = 360
 ISSUE_REPORT_PAGE_SIZE = 50
 ISSUE_CACHE_TTL_SECONDS = 20.0
+PRACTICE_BASE_SPEED = 16.0
+PRACTICE_TARGET_HAZARDS = 24
+PRACTICE_PROGRESS_STEP = 6
+PRACTICE_HAZARD_KINDS = {"train", "low", "high", "bush"}
 
 
 @dataclass(frozen=True)
@@ -679,6 +683,10 @@ class SubwayBlindGame:
         self._active_run_stats = self._empty_run_stats()
         self._game_over_summary = self._empty_game_over_summary()
         self._last_death_reason = "Run ended."
+        self._practice_mode_active = False
+        self._practice_hazards_cleared = 0
+        self._practice_hazard_target = PRACTICE_TARGET_HAZARDS
+        self._practice_next_progress_announcement = PRACTICE_PROGRESS_STEP
         self._pending_menu_announcement: Optional[tuple[Menu, float, bool]] = None
         self._magnet_loop_active = False
         self._jetpack_loop_active = False
@@ -1538,6 +1546,8 @@ class SubwayBlindGame:
             return
         current_value = int(self._active_run_stats.get(metric, 0) or 0)
         self._active_run_stats[metric] = current_value + int(amount)
+        if self._practice_mode_active:
+            return
         for quest in record_quest_metric(self.settings, metric, amount):
             if self._quest_changes_enabled():
                 self.audio.play("mission_reward", channel="ui")
@@ -2049,6 +2059,11 @@ class SubwayBlindGame:
                 "Set your loadout, then launch a new run when you are ready to hit the tracks.",
             ),
             MenuItem(
+                "Practice Lane",
+                "practice_lane",
+                "Run a short obstacle-only training session with fixed speed and no economy pressure.",
+            ),
+            MenuItem(
                 "Events",
                 "events",
                 "Open the live event hub for Daily High Score, Coin Meter, the login calendar, and daily rewards.",
@@ -2390,6 +2405,8 @@ class SubwayBlindGame:
         }
 
     def _should_offer_publish_prompt(self) -> bool:
+        if self._practice_mode_active:
+            return False
         if not self._leaderboard_has_publish_identity():
             return False
         summary = self._game_over_summary
@@ -2477,6 +2494,8 @@ class SubwayBlindGame:
         ensure_progression_state(self.settings)
         if self.state.running and amount > 0:
             self._record_run_metric(metric, amount)
+        if self._practice_mode_active:
+            return
         achievement_metric = {
             "jumps": "total_jumps",
             "rolls": "total_rolls",
@@ -3026,6 +3045,8 @@ class SubwayBlindGame:
         if self._run_rewards_committed or not self.state.running:
             return
         self._run_rewards_committed = True
+        if self._practice_mode_active:
+            return
         saved_coins = int(self.state.coins)
         character_bonus = int(saved_coins * self._active_character_bonuses.banked_coin_bonus_ratio)
         total_saved_coins = saved_coins + character_bonus
@@ -3290,6 +3311,8 @@ class SubwayBlindGame:
 
     def _add_run_coins(self, amount: int) -> None:
         if amount <= 0:
+            return
+        if self._practice_mode_active:
             return
         self.state.coins += amount
         self._record_achievement_metric("total_coins_collected", amount)
@@ -3588,6 +3611,9 @@ class SubwayBlindGame:
                 self.selected_score_boosters = 0
                 self._refresh_loadout_menu_labels()
                 self._set_active_menu(self.loadout_menu)
+                return True
+            if action == "practice_lane":
+                self.start_run(practice_mode=True)
                 return True
             if action == "events":
                 self._refresh_events_menu_labels()
@@ -4357,7 +4383,7 @@ class SubwayBlindGame:
 
         if self.active_menu == self.game_over_menu:
             if action == "game_over_retry":
-                self.start_run()
+                self.start_run(practice_mode=self._practice_mode_active)
                 return True
             if action == "game_over_main_menu":
                 if self._game_over_publish_state != "published" and self._should_offer_publish_prompt():
@@ -5216,6 +5242,11 @@ class SubwayBlindGame:
         )
 
     def _publish_latest_game_over_run(self) -> None:
+        if self._practice_mode_active:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("Practice Lane runs cannot be published to the leaderboard.", interrupt=True)
+            self._set_active_menu(self.game_over_menu)
+            return
         if not self._leaderboard_is_authenticated():
             if self._leaderboard_has_publish_identity():
                 self._prompt_and_authenticate_leaderboard_account(
@@ -5469,20 +5500,36 @@ class SubwayBlindGame:
             )
             return
 
-    def start_run(self) -> None:
+    def start_run(self, practice_mode: bool = False) -> None:
         ensure_progression_state(self.settings)
         self._sync_character_progress()
+        self._practice_mode_active = bool(practice_mode)
+        self._practice_hazards_cleared = 0
+        self._practice_hazard_target = PRACTICE_TARGET_HAZARDS
+        self._practice_next_progress_announcement = PRACTICE_PROGRESS_STEP
         self.state = RunState(running=True)
         self._set_active_menu(None)
         self.player = Player()
         self.player.hoverboards = int(self.settings.get("hoverboards", 0))
         self.obstacles = []
-        self.speed_profile = speed_profile_for_difficulty(str(self.settings["difficulty"]))
+        if self._practice_mode_active:
+            self.speed_profile = SpeedProfile(
+                base_speed=PRACTICE_BASE_SPEED,
+                max_speed=PRACTICE_BASE_SPEED,
+                cap_seconds=1.0,
+                spawn_gap_start=1.28,
+                spawn_gap_end=1.28,
+            )
+        else:
+            self.speed_profile = speed_profile_for_difficulty(str(self.settings["difficulty"]))
         self.spatial_audio.reset()
         self.spawn_director.reset()
-        self.state.multiplier = 1 + int(self.settings.get("mission_multiplier_bonus", 0)) + score_booster_bonus(
-            self.selected_score_boosters
-        ) + self._active_character_bonuses.starting_multiplier_bonus + int(self._active_event_profile.get("featured_multiplier_bonus", 0) or 0)
+        if self._practice_mode_active:
+            self.state.multiplier = 1
+        else:
+            self.state.multiplier = 1 + int(self.settings.get("mission_multiplier_bonus", 0)) + score_booster_bonus(
+                self.selected_score_boosters
+            ) + self._active_character_bonuses.starting_multiplier_bonus + int(self._active_event_profile.get("featured_multiplier_bonus", 0) or 0)
         self.state.speed = self.speed_profile.base_speed
         self._active_run_stats = self._empty_run_stats()
         self._footstep_timer = 0.0
@@ -5499,13 +5546,13 @@ class SubwayBlindGame:
         active_character = selected_character_definition(self.settings)
         active_board = selected_board_definition(self.settings)
 
-        if self.selected_headstarts > 0:
+        if not self._practice_mode_active and self.selected_headstarts > 0:
             self.settings["headstarts"] = max(0, int(self.settings.get("headstarts", 0)) - self.selected_headstarts)
             self.player.headstart = headstart_duration_for_uses(self.selected_headstarts)
             self.player.y = 2.8
             self.player.vy = 0.0
             self._start_headstart_audio()
-        if self.selected_score_boosters > 0:
+        if not self._practice_mode_active and self.selected_score_boosters > 0:
             self.settings["score_boosters"] = max(
                 0,
                 int(self.settings.get("score_boosters", 0)) - self.selected_score_boosters,
@@ -5524,13 +5571,18 @@ class SubwayBlindGame:
         self.audio.music_start("gameplay")
         event = self._active_event_profile.get("event")
         event_message = ""
-        if event is not None:
+        if not self._practice_mode_active and event is not None:
             event_label = str(getattr(event, "label", "") or "").strip()
             if self._active_event_profile.get("featured_character_active"):
                 event_message = f" {event_label} active with bonus multiplier."
             elif event_label:
                 event_message = f" {event_label} active."
-        if self.selected_headstarts > 0:
+        if self._practice_mode_active:
+            self.speaker.speak(
+                f"Practice Lane started. {active_character.name} active. Fixed speed. Clear {self._practice_hazard_target} hazards to complete.",
+                interrupt=True,
+            )
+        elif self.selected_headstarts > 0:
             self.speaker.speak(
                 f"Run started. {active_character.name} active. {active_board.name} board selected.{event_message} Headstart active for {self.selected_headstarts} charge{'s' if self.selected_headstarts != 1 else ''}.",
                 interrupt=True,
@@ -5658,6 +5710,10 @@ class SubwayBlindGame:
         self.audio.play("roll", pan=lane_to_pan(self.player.lane), channel="act")
 
     def _try_hoverboard(self) -> None:
+        if self._practice_mode_active:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("Hoverboard is disabled in Practice Lane.", interrupt=False)
+            return
         if self.player.hover_active > 0:
             return
         if int(self.state.hoverboards_used) >= HOVERBOARD_MAX_USES_PER_RUN:
@@ -5687,15 +5743,19 @@ class SubwayBlindGame:
     def _update_game(self, delta_time: float) -> None:
         self.player.lane = normalize_lane(self.player.lane)
         self.state.time += delta_time
-        base_speed = self.speed_profile.speed_for_elapsed(self.state.time)
+        if self._practice_mode_active:
+            base_speed = self.speed_profile.base_speed
+        else:
+            base_speed = self.speed_profile.speed_for_elapsed(self.state.time)
         self.state.speed = base_speed + HEADSTART_SPEED_BONUS if self.player.headstart > 0 else base_speed
         active_board = selected_board_definition(self.settings)
         if self.player.hover_active > 0 and active_board.power_key == "super_speed":
             self.state.speed += 3.0
-        speed_factor = self.speed_profile.progress(self.state.time)
+        speed_factor = 0.0 if self._practice_mode_active else self.speed_profile.progress(self.state.time)
         self.speaker.set_speed_factor(speed_factor)
         self.state.distance += self.state.speed * delta_time
-        self.state.score += (self.state.speed * delta_time) * self._score_multiplier()
+        if not self._practice_mode_active:
+            self.state.score += (self.state.speed * delta_time) * self._score_multiplier()
 
         if self.player.jetpack <= 0 and self.player.y <= 0.01 and self.player.rolling <= 0:
             self._footstep_timer -= delta_time
@@ -5739,6 +5799,7 @@ class SubwayBlindGame:
             self.spatial_audio.update(delta_time, self.player.lane, self.state.speed, self.obstacles, self.audio, self.speaker)
 
         self._handle_obstacles()
+        self._update_practice_lane_progress()
         self.obstacles = [obstacle for obstacle in self.obstacles if obstacle.z > -5]
 
         milestone = int(self.state.distance // 250)
@@ -5752,6 +5813,50 @@ class SubwayBlindGame:
         if self.player.mult2x > 0:
             multiplier *= 2
         return multiplier
+
+    def _update_practice_lane_progress(self) -> None:
+        if not self._practice_mode_active or not self.state.running:
+            return
+        cleared = 0
+        for obstacle in self.obstacles:
+            if obstacle.kind not in PRACTICE_HAZARD_KINDS:
+                continue
+            if -900 < obstacle.z <= -5:
+                cleared += 1
+        if cleared <= 0:
+            return
+        self._practice_hazards_cleared += cleared
+        if self._practice_hazards_cleared >= self._practice_hazard_target:
+            self._complete_practice_lane_run()
+            return
+        if self._practice_hazards_cleared >= self._practice_next_progress_announcement:
+            remaining = max(0, self._practice_hazard_target - self._practice_hazards_cleared)
+            self.speaker.speak(
+                f"Practice progress {self._practice_hazards_cleared} of {self._practice_hazard_target}. {remaining} hazards left.",
+                interrupt=False,
+            )
+            self._practice_next_progress_announcement += PRACTICE_PROGRESS_STEP
+
+    def _complete_practice_lane_run(self) -> None:
+        if not self.state.running:
+            return
+        self.state.paused = False
+        self._stop_spatial_audio()
+        self.audio.play("mission_reward", channel="ui")
+        self.audio.play("unlock", channel="ui2")
+        self.speaker.speak(
+            f"Practice Lane complete. Cleared {self._practice_hazard_target} hazards.",
+            interrupt=True,
+        )
+        self._commit_run_rewards()
+        self.audio.stop("loop_guard")
+        self.audio.stop("loop_magnet")
+        self.audio.stop("loop_jetpack")
+        self._stop_spatial_audio()
+        self.spatial_audio.reset()
+        self._open_game_over_dialog(
+            f"Practice complete. Hazards cleared: {self._practice_hazard_target}."
+        )
 
     def _tick_powerups(self, delta_time: float) -> None:
         def decay(attribute: str) -> None:
@@ -5826,8 +5931,12 @@ class SubwayBlindGame:
         self.state.next_spawn -= delta_time
         self.state.next_coinline -= delta_time
         self.state.next_support -= delta_time
-        progress = self.speed_profile.progress(self.state.time)
-        difficulty = self._difficulty_key()
+        if self._practice_mode_active:
+            progress = 0.0
+            difficulty = "easy"
+        else:
+            progress = self.speed_profile.progress(self.state.time)
+            difficulty = self._difficulty_key()
 
         if self.state.next_spawn <= 0:
             if self.spawn_director.should_delay_spawn(self.obstacles):
@@ -5845,7 +5954,7 @@ class SubwayBlindGame:
                         self.spawn_director.next_encounter_gap(progress, difficulty=difficulty),
                     )
 
-        if self.state.next_coinline <= 0:
+        if not self._practice_mode_active and self.state.next_coinline <= 0:
             lane = self.spawn_director.choose_coin_lane(self.player.lane)
             self._spawn_coin_line(
                 lane,
@@ -5858,7 +5967,7 @@ class SubwayBlindGame:
             )
             self.state.next_coinline = max(1.55, self.spawn_director.next_coin_gap(progress, difficulty=difficulty))
 
-        if self.state.next_support <= 0:
+        if not self._practice_mode_active and self.state.next_support <= 0:
             kind = self._choose_support_spawn_kind()
             lane = self.spawn_director.support_lane(self.player.lane)
             distance = self.spawn_director.base_spawn_distance(
@@ -5871,6 +5980,8 @@ class SubwayBlindGame:
 
     def _spawn_pattern(self, pattern: RoutePattern, base_distance: float) -> None:
         for entry in pattern.entries:
+            if self._practice_mode_active and entry.kind not in PRACTICE_HAZARD_KINDS:
+                continue
             self.obstacles.append(Obstacle(kind=entry.kind, lane=entry.lane, z=base_distance + entry.z_offset))
 
     def _choose_playable_pattern(self, progress: float, difficulty: str | None = None) -> Optional[tuple[RoutePattern, float]]:
@@ -6138,6 +6249,9 @@ class SubwayBlindGame:
             self.speaker.speak(message, interrupt=False)
 
     def _queue_revive_or_finish(self) -> None:
+        if self._practice_mode_active:
+            self._finish_run_loss()
+            return
         if int(self.state.revives_used) >= REVIVE_MAX_USES_PER_RUN:
             self._finish_run_loss()
             return
@@ -6471,6 +6585,9 @@ class SubwayBlindGame:
             hud += "   [2x]"
         if self.player.super_sneakers > 0:
             hud += "   [Super Sneakers]"
+        if self._practice_mode_active:
+            remaining_hazards = max(0, self._practice_hazard_target - self._practice_hazards_cleared)
+            hud += f"   [Practice Lane {self._practice_hazards_cleared}/{self._practice_hazard_target}   Left: {remaining_hazards}]"
         hud_surface = self.font.render(hud, True, (230, 230, 230))
         self.screen.blit(hud_surface, (15, 10))
 
