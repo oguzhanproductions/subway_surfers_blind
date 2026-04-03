@@ -675,6 +675,7 @@ class SubwayBlindGame:
         self._issue_draft_title = ""
         self._issue_draft_message = ""
         self._meta_return_menu: Menu | None = None
+        self._options_return_menu: Menu | None = None
         self._publish_confirm_return_menu: Menu | None = None
         self._publish_confirm_return_index = 0
         self._publish_after_leaderboard_auth = False
@@ -698,6 +699,7 @@ class SubwayBlindGame:
             [
                 MenuItem("Resume", "resume"),
                 MenuItem("Return to Main Menu", "to_main"),
+                MenuItem("Options", "pause_options"),
             ],
         )
         self.pause_confirm_menu = Menu(
@@ -3482,6 +3484,11 @@ class SubwayBlindGame:
                 self._refresh_options_menu_labels()
                 self._set_active_menu(self.options_menu, start_index=self._update_option_index("opt_controls"))
                 return True
+            if self.active_menu == self.options_menu:
+                return_menu = self._options_return_menu or self.main_menu
+                start_index = self._menu_index_for_action(self.pause_menu, "pause_options") if return_menu == self.pause_menu else 0
+                self._set_active_menu(return_menu, start_index=start_index)
+                return True
             if self.active_menu == self.sapi_menu:
                 self._refresh_options_menu_labels()
                 self._set_active_menu(self.options_menu, start_index=self._update_option_index("opt_sapi_menu"))
@@ -3504,7 +3511,7 @@ class SubwayBlindGame:
                 self.speaker.speak("Resume", interrupt=True)
                 return True
             if self.active_menu == self.pause_confirm_menu:
-                self._set_active_menu(self.pause_menu, start_index=1)
+                self._set_active_menu(self.pause_menu, start_index=self._menu_index_for_action(self.pause_menu, "to_main"))
                 return True
             if self.active_menu == self.leaderboard_logout_confirm_menu:
                 self._refresh_options_menu_labels()
@@ -3643,6 +3650,7 @@ class SubwayBlindGame:
                 self._open_issue_reports()
                 return True
             if action == "options":
+                self._options_return_menu = self.main_menu
                 self._refresh_options_menu_labels()
                 self._set_active_menu(self.options_menu)
                 return True
@@ -3840,7 +3848,9 @@ class SubwayBlindGame:
                 return True
             if action == "back":
                 self.audio.play("menuclose", channel="ui")
-                self._set_active_menu(self.main_menu)
+                return_menu = self._options_return_menu or self.main_menu
+                start_index = self._menu_index_for_action(self.pause_menu, "pause_options") if return_menu == self.pause_menu else 0
+                self._set_active_menu(return_menu, start_index=start_index)
                 return True
             return True
 
@@ -4333,6 +4343,11 @@ class SubwayBlindGame:
                 self._set_active_menu(None)
                 self.speaker.speak("Resume", interrupt=True)
                 return True
+            if action == "pause_options":
+                self._options_return_menu = self.pause_menu
+                self._refresh_options_menu_labels()
+                self._set_active_menu(self.options_menu)
+                return True
             if action == "to_main":
                 self._set_active_menu(self.pause_confirm_menu)
                 return True
@@ -4342,7 +4357,7 @@ class SubwayBlindGame:
                 self.end_run(to_menu=True)
                 return True
             if action == "cancel_to_main":
-                self._set_active_menu(self.pause_menu, start_index=1)
+                self._set_active_menu(self.pause_menu, start_index=self._menu_index_for_action(self.pause_menu, "to_main"))
                 return True
 
         if self.active_menu == self.leaderboard_logout_confirm_menu:
