@@ -1057,6 +1057,13 @@ class SubwayBlindGame:
     def _shop_coins_label(self) -> str:
         return f"Coins: {int(self.settings.get('bank_coins', 0))}"
 
+    def _shop_max_purchasable(self, item_key: str) -> int:
+        coins = int(self.settings.get("bank_coins", 0))
+        cost = int(SHOP_PRICES.get(item_key, 0))
+        if cost <= 0:
+            return 0
+        return max(0, coins // cost)
+
     def _music_option_label(self) -> str:
         return f"Music Volume: {int(float(self.settings['music_volume']) * 100)}"
 
@@ -1150,24 +1157,34 @@ class SubwayBlindGame:
         return f"Use {cost} key{'s' if cost != 1 else ''} to revive   Owned: {owned}"
 
     def _shop_hoverboard_label(self) -> str:
+        max_buy = self._shop_max_purchasable("hoverboard")
         return (
             f"Buy Hoverboard   Cost: {SHOP_PRICES['hoverboard']} Coins   "
-            f"Owned: {int(self.settings.get('hoverboards', 0))}"
+            f"Owned: {int(self.settings.get('hoverboards', 0))}   "
+            f"Max Buy: {max_buy}"
         )
 
     def _shop_box_label(self) -> str:
-        return f"Open Mystery Box   Cost: {SHOP_PRICES['mystery_box']} Coins"
+        max_buy = self._shop_max_purchasable("mystery_box")
+        return (
+            f"Open Mystery Box   Cost: {SHOP_PRICES['mystery_box']} Coins   "
+            f"Max Buy: {max_buy}"
+        )
 
     def _shop_headstart_label(self) -> str:
+        max_buy = self._shop_max_purchasable("headstart")
         return (
             f"Buy Headstart   Cost: {SHOP_PRICES['headstart']} Coins   "
-            f"Owned: {int(self.settings.get('headstarts', 0))}"
+            f"Owned: {int(self.settings.get('headstarts', 0))}   "
+            f"Max Buy: {max_buy}"
         )
 
     def _shop_score_booster_label(self) -> str:
+        max_buy = self._shop_max_purchasable("score_booster")
         return (
             f"Buy Score Booster   Cost: {SHOP_PRICES['score_booster']} Coins   "
-            f"Owned: {int(self.settings.get('score_boosters', 0))}"
+            f"Owned: {int(self.settings.get('score_boosters', 0))}   "
+            f"Max Buy: {max_buy}"
         )
 
     def _shop_item_upgrade_label(self) -> str:

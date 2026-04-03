@@ -2257,16 +2257,39 @@ class GameTests(unittest.TestCase):
         self.assertEqual(
             [item.label for item in game.shop_menu.items],
             [
-                f"Buy Hoverboard   Cost: {SHOP_PRICES['hoverboard']} Coins   Owned: 3",
-                f"Open Mystery Box   Cost: {SHOP_PRICES['mystery_box']} Coins",
-                f"Buy Headstart   Cost: {SHOP_PRICES['headstart']} Coins   Owned: 2",
-                f"Buy Score Booster   Cost: {SHOP_PRICES['score_booster']} Coins   Owned: 3",
+                f"Buy Hoverboard   Cost: {SHOP_PRICES['hoverboard']} Coins   Owned: 3   Max Buy: 0",
+                f"Open Mystery Box   Cost: {SHOP_PRICES['mystery_box']} Coins   Max Buy: 0",
+                f"Buy Headstart   Cost: {SHOP_PRICES['headstart']} Coins   Owned: 2   Max Buy: 0",
+                f"Buy Score Booster   Cost: {SHOP_PRICES['score_booster']} Coins   Owned: 3   Max Buy: 0",
                 "Free Daily Gift   Available",
                 "Item Upgrades   Maxed: 0/4",
                 "Character Upgrades   Active: Jake",
                 "Back",
             ],
         )
+
+    def test_shop_menu_labels_show_dynamic_max_buy_counts(self):
+        game, _, _ = self.make_game()
+        game.settings["bank_coins"] = 6200
+        game._refresh_shop_menu_labels()
+
+        self.assertEqual(
+            game.shop_menu.items[0].label,
+            f"Buy Hoverboard   Cost: {SHOP_PRICES['hoverboard']} Coins   Owned: 3   Max Buy: 20",
+        )
+        self.assertEqual(
+            game.shop_menu.items[1].label,
+            f"Open Mystery Box   Cost: {SHOP_PRICES['mystery_box']} Coins   Max Buy: 12",
+        )
+        self.assertEqual(
+            game.shop_menu.items[2].label,
+            f"Buy Headstart   Cost: {SHOP_PRICES['headstart']} Coins   Owned: 2   Max Buy: 3",
+        )
+        self.assertEqual(
+            game.shop_menu.items[3].label,
+            f"Buy Score Booster   Cost: {SHOP_PRICES['score_booster']} Coins   Owned: 3   Max Buy: 2",
+        )
+        self.assertNotIn("Owned:", game.shop_menu.items[1].label)
 
     def test_claim_daily_gift_updates_shop_and_events_labels(self):
         game, _, audio = self.make_game()

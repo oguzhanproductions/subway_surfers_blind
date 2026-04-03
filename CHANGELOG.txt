@@ -1,6 +1,18 @@
 Subway Surfers Blind Edition
 Changelog
 
+Date: 2026-04-03
+Version: 1.1.5
+
+Update Summary
+- Added richer Shop item labels that now report both owned inventory and the maximum amount that can be bought with current banked coins.
+- Added max-buy reporting for Mystery Box entries so players can hear how many 500-coin box opens they can currently afford.
+
+Audio or UI Updates
+- Shop labels now refresh with live max-buy affordability after purchases and coin changes, improving spending clarity before confirming an item.
+
+------------------------------------------------------------
+
 Date: 2026-03-30
 Version: 1.1.4
 
