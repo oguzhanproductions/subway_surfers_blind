@@ -427,7 +427,7 @@ UPGRADE_HELP_TOPICS: dict[str, tuple[HelpTopic, ...]] = {
     ),
 }
 def step_volume(value: float, direction: int) -> float:
-    stepped = round(float(value) + (0.01 * direction), 2)
+    stepped = round(float(value) + (0.05 * direction), 2)
     return max(0.0, min(1.0, stepped))
 
 

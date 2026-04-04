@@ -14,6 +14,7 @@ Update Summary
 Audio or UI Updates
 - Shop labels now refresh with live max-buy affordability after purchases and coin changes, improving spending clarity before confirming an item.
 - Added an Options entry to the in-run pause menu so players can open Options directly while paused and return to the pause flow after closing it.
+- Changed Options SFX and Music volume adjustment to move by 5 per step instead of 1.
 
 ------------------------------------------------------------
 
