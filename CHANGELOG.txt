@@ -15,6 +15,8 @@ Audio or UI Updates
 - Shop labels now refresh with live max-buy affordability after purchases and coin changes, improving spending clarity before confirming an item.
 - Added an Options entry to the in-run pause menu so players can open Options directly while paused and return to the pause flow after closing it.
 - Changed Options SFX and Music volume adjustment to move by 5 per step instead of 1.
+- Added a new Options toggle for Menu Wrap so menu navigation can loop from the end back to the start.
+- Added dedicated wrap feedback audio that now plays when Menu Wrap sends the cursor from the last item to the first item or vice versa.
 
 ------------------------------------------------------------
 
