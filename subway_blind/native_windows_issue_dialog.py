@@ -11,6 +11,7 @@ ISSUE_TITLE_LIMIT: Final[int] = 250
 ISSUE_MESSAGE_LIMIT: Final[int] = 1500
 WM_KEYDOWN: Final[int] = 0x0100
 WM_KEYUP: Final[int] = 0x0101
+WM_CHAR: Final[int] = 0x0102
 WM_DESTROY: Final[int] = 0x0002
 WM_NCDESTROY: Final[int] = 0x0082
 WM_SETFONT: Final[int] = 0x0030
@@ -20,6 +21,7 @@ DEFAULT_GUI_FONT: Final[int] = 17
 VK_SHIFT: Final[int] = 0x10
 VK_ESCAPE: Final[int] = 0x1B
 VK_RETURN: Final[int] = 0x0D
+VK_BACK: Final[int] = 0x08
 WS_CHILD: Final[int] = 0x40000000
 WS_VISIBLE: Final[int] = 0x10000000
 WS_BORDER: Final[int] = 0x00800000
@@ -46,6 +48,7 @@ class IssueDialogCancelled(RuntimeError):
 class _InlineTextInputState:
     parent_hwnd: int
     multiline: bool
+    numeric_only: bool = False
     edit_handle: int = 0
     controls: list[int] = field(default_factory=list)
     result: str | None = None
@@ -55,7 +58,8 @@ class _InlineTextInputState:
 
 
 _LONG_PTR = ctypes.c_ssize_t
-_WNDPROC = ctypes.WINFUNCTYPE(_LONG_PTR, wintypes.HWND, ctypes.c_uint, wintypes.WPARAM, wintypes.LPARAM)
+_WINDOWS_CALLBACK_FACTORY = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)
+_WNDPROC = _WINDOWS_CALLBACK_FACTORY(_LONG_PTR, wintypes.HWND, ctypes.c_uint, wintypes.WPARAM, wintypes.LPARAM)
 _USER32 = ctypes.windll.user32
 _GDI32 = ctypes.windll.gdi32
 _KERNEL32 = ctypes.windll.kernel32
@@ -73,11 +77,16 @@ def prompt_for_inline_issue_text(
     text_hint: str = "",
     multiline: bool,
     text_limit: int,
+    numeric_only: bool = False,
 ) -> str:
     parent_hwnd = int(pygame.display.get_wm_info().get("window", 0) or 0)
     if parent_hwnd <= 0:
         raise NativeIssueDialogError("Windows text input is not available in the current display mode.")
-    state = _InlineTextInputState(parent_hwnd=parent_hwnd, multiline=bool(multiline))
+    state = _InlineTextInputState(
+        parent_hwnd=parent_hwnd,
+        multiline=bool(multiline),
+        numeric_only=bool(numeric_only),
+    )
     try:
         try:
             _create_inline_controls(
@@ -143,6 +152,8 @@ def _create_inline_controls(
         if state.multiline
         else "Enter submits. Escape cancels."
     )
+    if state.numeric_only:
+        hint_text = "Only numbers are allowed. Enter submits. Escape cancels."
     hint_handle = _create_static(
         parent_handle,
         hint_text,
@@ -281,6 +292,13 @@ def _return_key_pressed() -> bool:
     return bool(_USER32.GetKeyState(VK_RETURN) & 0x8000)
 
 
+def _is_allowed_numeric_char(char_code: int) -> bool:
+    value = int(char_code)
+    if value < 32:
+        return True
+    return 48 <= value <= 57
+
+
 def _should_submit_inline_text(*, multiline: bool, key: int, shift_pressed: bool) -> bool:
     if int(key) != VK_RETURN:
         return False
@@ -318,6 +336,9 @@ def _finalize_inline_input(state: _InlineTextInputState, *, cancelled: bool) -> 
 def _INLINE_EDIT_WNDPROC(hwnd: wintypes.HWND, message: int, wparam: wintypes.WPARAM, lparam: wintypes.LPARAM) -> int:
     state = _INLINE_STATES.get(int(hwnd))
     original_window_proc = _ORIGINAL_EDIT_PROCS.get(int(hwnd))
+    if state is not None and int(message) == WM_CHAR and state.numeric_only:
+        if not _is_allowed_numeric_char(int(wparam)):
+            return 0
     if state is not None and int(message) == WM_KEYDOWN:
         key = int(wparam)
         if key == VK_RETURN and state.submit_key_blocked:

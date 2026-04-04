@@ -2773,8 +2773,56 @@ class GameTests(unittest.TestCase):
 
         self.assertIs(game.active_menu, game.loadout_menu)
         self.assertEqual(game.loadout_menu.title, "Practice Setup")
+        self.assertEqual(game.loadout_menu.items[0].label, "Practice Hazard Target: 24")
         self.assertFalse(game.state.running)
         self.assertFalse(game._practice_mode_active)
+
+    def test_practice_setup_hazard_target_edit_updates_setting(self):
+        game, speaker, audio = self.make_game()
+        game._handle_menu_action("practice_lane")
+
+        with patch("subway_blind.game.prompt_for_inline_issue_text", return_value="321"), patch.object(
+            game,
+            "_reset_input_after_native_modal",
+        ) as reset_input:
+            result = game._handle_menu_action("edit_practice_hazard_target")
+
+        self.assertTrue(result)
+        self.assertEqual(game.settings["practice_hazard_target"], 321)
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(game.loadout_menu.items[0].label, "Practice Hazard Target: 321")
+        self.assertEqual(speaker.messages[-1], ("Practice Hazard Target: 321", True))
+        reset_input.assert_called_once()
+
+    def test_practice_setup_hazard_target_edit_calls_numeric_only_prompt(self):
+        game, _, _ = self.make_game()
+        game._handle_menu_action("practice_lane")
+
+        with patch("subway_blind.game.prompt_for_inline_issue_text", return_value="24") as prompt_input, patch.object(
+            game,
+            "_reset_input_after_native_modal",
+        ):
+            game._handle_menu_action("edit_practice_hazard_target")
+
+        _, kwargs = prompt_input.call_args
+        self.assertTrue(kwargs["numeric_only"])
+        self.assertEqual(kwargs["text_limit"], 5)
+
+    def test_practice_setup_hazard_target_edit_rejects_out_of_range_values(self):
+        game, speaker, audio = self.make_game()
+        game._handle_menu_action("practice_lane")
+        game.settings["practice_hazard_target"] = 24
+
+        with patch("subway_blind.game.prompt_for_inline_issue_text", return_value="10001"), patch.object(
+            game,
+            "_reset_input_after_native_modal",
+        ):
+            result = game._handle_menu_action("edit_practice_hazard_target")
+
+        self.assertTrue(result)
+        self.assertEqual(game.settings["practice_hazard_target"], 24)
+        self.assertIn(("menuedge", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1], ("Hazard target must be between 1 and 10000.", True))
 
     def test_learn_sounds_action_opens_sound_menu(self):
         game, _, _ = self.make_game()

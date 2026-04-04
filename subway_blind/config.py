@@ -60,6 +60,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "quest_changes_enabled": False,
     "pause_on_focus_loss_enabled": True,
     "practice_speed_scaling_enabled": False,
+    "practice_hazard_target": 24,
     "main_menu_descriptions_enabled": True,
     "confirm_exit_enabled": True,
     "leaderboard_username": "",

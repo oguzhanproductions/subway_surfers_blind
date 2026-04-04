@@ -227,6 +227,8 @@ PRACTICE_BASE_SPEED = 16.0
 PRACTICE_SCALING_MAX_SPEED = 23.0
 PRACTICE_SCALING_CAP_SECONDS = 95.0
 PRACTICE_TARGET_HAZARDS = 24
+PRACTICE_TARGET_HAZARDS_MIN = 1
+PRACTICE_TARGET_HAZARDS_MAX = 10000
 PRACTICE_PROGRESS_STEP = 6
 PRACTICE_HAZARD_KINDS = {"train", "low", "high", "bush"}
 
@@ -690,7 +692,7 @@ class SubwayBlindGame:
         self._practice_speed_scaling_active = False
         self._pending_practice_setup = False
         self._practice_hazards_cleared = 0
-        self._practice_hazard_target = PRACTICE_TARGET_HAZARDS
+        self._practice_hazard_target = self._practice_hazard_target_setting()
         self._practice_next_progress_announcement = PRACTICE_PROGRESS_STEP
         self._pending_menu_announcement: Optional[tuple[Menu, float, bool]] = None
         self._magnet_loop_active = False
@@ -1223,9 +1225,13 @@ class SubwayBlindGame:
     def _practice_speed_scaling_option_label(self) -> str:
         return f"Practice Speed Scaling: {'On' if self._practice_speed_scaling_enabled() else 'Off'}"
 
+    def _practice_hazard_target_option_label(self) -> str:
+        return f"Practice Hazard Target: {self._practice_hazard_target_setting()}"
+
     def _build_loadout_menu_items(self) -> list[MenuItem]:
         if self._pending_practice_setup:
             return [
+                MenuItem(self._practice_hazard_target_option_label(), "edit_practice_hazard_target"),
                 MenuItem(self._practice_speed_scaling_option_label(), "toggle_practice_speed_scaling"),
                 MenuItem("Begin Practice", "begin_run"),
                 MenuItem("Back", "back"),
@@ -2076,6 +2082,13 @@ class SubwayBlindGame:
 
     def _practice_speed_scaling_enabled(self) -> bool:
         return bool(self.settings.get("practice_speed_scaling_enabled", False))
+
+    def _practice_hazard_target_setting(self) -> int:
+        try:
+            target_value = int(self.settings.get("practice_hazard_target", PRACTICE_TARGET_HAZARDS))
+        except (TypeError, ValueError):
+            target_value = PRACTICE_TARGET_HAZARDS
+        return max(PRACTICE_TARGET_HAZARDS_MIN, min(PRACTICE_TARGET_HAZARDS_MAX, target_value))
 
     def _main_menu_descriptions_enabled(self) -> bool:
         return bool(self.settings.get("main_menu_descriptions_enabled", True))
@@ -3746,6 +3759,9 @@ class SubwayBlindGame:
                     interrupt=True,
                 )
                 return True
+            if action == "edit_practice_hazard_target":
+                self._edit_practice_hazard_target()
+                return True
             if action == "toggle_practice_speed_scaling":
                 self.settings["practice_speed_scaling_enabled"] = not self._practice_speed_scaling_enabled()
                 self.audio.play("confirm", channel="ui")
@@ -5279,6 +5295,43 @@ class SubwayBlindGame:
         self.issue_compose_menu.index = self._menu_index_for_action(self.issue_compose_menu, target_action)
         self.speaker.speak(self.issue_compose_menu.items[self.issue_compose_menu.index].label, interrupt=True)
 
+    def _edit_practice_hazard_target(self) -> None:
+        current_target = self._practice_hazard_target_setting()
+        try:
+            result = prompt_for_inline_issue_text(
+                caption="Practice Hazard Target",
+                text_hint=str(current_target),
+                multiline=False,
+                text_limit=5,
+                numeric_only=True,
+            )
+        except IssueDialogCancelled:
+            self._reset_input_after_native_modal()
+            self.audio.play("menuclose", channel="ui")
+            self.speaker.speak("Editing cancelled.", interrupt=True)
+            return
+        except NativeIssueDialogError as exc:
+            self._reset_input_after_native_modal()
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(str(exc), interrupt=True)
+            return
+        self._reset_input_after_native_modal()
+        normalized_value = str(result or "").strip()
+        if not normalized_value.isdigit():
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("Enter a number between 1 and 10000.", interrupt=True)
+            return
+        target_value = int(normalized_value)
+        if target_value < PRACTICE_TARGET_HAZARDS_MIN or target_value > PRACTICE_TARGET_HAZARDS_MAX:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("Hazard target must be between 1 and 10000.", interrupt=True)
+            return
+        self.settings["practice_hazard_target"] = target_value
+        self.audio.play("confirm", channel="ui")
+        self._refresh_loadout_menu_labels()
+        self.loadout_menu.index = self._menu_index_for_action(self.loadout_menu, "edit_practice_hazard_target")
+        self.speaker.speak(self.loadout_menu.items[self.loadout_menu.index].label, interrupt=True)
+
     def _submit_issue_draft(self) -> None:
         normalized_title = " ".join(self._issue_draft_title.strip().split())
         normalized_message = self._issue_draft_message.replace("\r\n", "\n").replace("\r", "\n")
@@ -5582,7 +5635,11 @@ class SubwayBlindGame:
         practice_speed_scaling_enabled = self._practice_speed_scaling_enabled() if self._practice_mode_active else False
         self._practice_speed_scaling_active = practice_speed_scaling_enabled
         self._practice_hazards_cleared = 0
-        self._practice_hazard_target = PRACTICE_TARGET_HAZARDS
+        self._practice_hazard_target = (
+            self._practice_hazard_target_setting()
+            if self._practice_mode_active
+            else PRACTICE_TARGET_HAZARDS
+        )
         self._practice_next_progress_announcement = PRACTICE_PROGRESS_STEP
         self.state = RunState(running=True)
         self._set_active_menu(None)
