@@ -59,6 +59,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "coin_counters_enabled": False,
     "quest_changes_enabled": False,
     "pause_on_focus_loss_enabled": True,
+    "practice_speed_scaling_enabled": False,
     "main_menu_descriptions_enabled": True,
     "confirm_exit_enabled": True,
     "leaderboard_username": "",

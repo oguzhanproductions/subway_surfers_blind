@@ -224,6 +224,8 @@ MIN_WINDOW_HEIGHT = 360
 ISSUE_REPORT_PAGE_SIZE = 50
 ISSUE_CACHE_TTL_SECONDS = 20.0
 PRACTICE_BASE_SPEED = 16.0
+PRACTICE_SCALING_MAX_SPEED = 23.0
+PRACTICE_SCALING_CAP_SECONDS = 95.0
 PRACTICE_TARGET_HAZARDS = 24
 PRACTICE_PROGRESS_STEP = 6
 PRACTICE_HAZARD_KINDS = {"train", "low", "high", "bush"}
@@ -685,6 +687,8 @@ class SubwayBlindGame:
         self._game_over_summary = self._empty_game_over_summary()
         self._last_death_reason = "Run ended."
         self._practice_mode_active = False
+        self._practice_speed_scaling_active = False
+        self._pending_practice_setup = False
         self._practice_hazards_cleared = 0
         self._practice_hazard_target = PRACTICE_TARGET_HAZARDS
         self._practice_next_progress_announcement = PRACTICE_PROGRESS_STEP
@@ -771,13 +775,7 @@ class SubwayBlindGame:
             self.speaker,
             self.audio,
             "Run Setup",
-            [
-                MenuItem(self._loadout_board_label(), "loadout_board_info"),
-                MenuItem(self._headstart_option_label(), "toggle_headstart"),
-                MenuItem(self._score_booster_option_label(), "toggle_score_booster"),
-                MenuItem("Begin Run", "begin_run"),
-                MenuItem("Back", "back"),
-            ],
+            [],
         )
         self.events_menu = Menu(
             self.speaker,
@@ -1219,6 +1217,27 @@ class SubwayBlindGame:
         board = selected_board_definition(self.settings)
         return f"Board: {board.name}   Power: {board.power_label}"
 
+    def _loadout_title(self) -> str:
+        return "Practice Setup" if self._pending_practice_setup else "Run Setup"
+
+    def _practice_speed_scaling_option_label(self) -> str:
+        return f"Practice Speed Scaling: {'On' if self._practice_speed_scaling_enabled() else 'Off'}"
+
+    def _build_loadout_menu_items(self) -> list[MenuItem]:
+        if self._pending_practice_setup:
+            return [
+                MenuItem(self._practice_speed_scaling_option_label(), "toggle_practice_speed_scaling"),
+                MenuItem("Begin Practice", "begin_run"),
+                MenuItem("Back", "back"),
+            ]
+        return [
+            MenuItem(self._loadout_board_label(), "loadout_board_info"),
+            MenuItem(self._headstart_option_label(), "toggle_headstart"),
+            MenuItem(self._score_booster_option_label(), "toggle_score_booster"),
+            MenuItem("Begin Run", "begin_run"),
+            MenuItem("Back", "back"),
+        ]
+
     def _events_menu_title(self) -> str:
         event = current_daily_event()
         event_coins = int(self.settings.get("event_state", {}).get("event_coins", 0) or 0)
@@ -1505,9 +1524,13 @@ class SubwayBlindGame:
         self.sapi_menu.items[4].label = self._sapi_pitch_option_label()
 
     def _refresh_loadout_menu_labels(self) -> None:
-        self.loadout_menu.items[0].label = self._loadout_board_label()
-        self.loadout_menu.items[1].label = self._headstart_option_label()
-        self.loadout_menu.items[2].label = self._score_booster_option_label()
+        selected_action = ""
+        if self.loadout_menu.items:
+            selected_action = self.loadout_menu.items[min(self.loadout_menu.index, len(self.loadout_menu.items) - 1)].action
+        self.loadout_menu.title = self._loadout_title()
+        self.loadout_menu.items = self._build_loadout_menu_items()
+        if selected_action:
+            self.loadout_menu.index = self._menu_index_for_action(self.loadout_menu, selected_action)
 
     def _refresh_revive_menu_label(self) -> None:
         self.revive_menu.items[0].label = self._revive_option_label()
@@ -2051,6 +2074,9 @@ class SubwayBlindGame:
     def _pause_on_focus_loss_enabled(self) -> bool:
         return bool(self.settings.get("pause_on_focus_loss_enabled", True))
 
+    def _practice_speed_scaling_enabled(self) -> bool:
+        return bool(self.settings.get("practice_speed_scaling_enabled", False))
+
     def _main_menu_descriptions_enabled(self) -> bool:
         return bool(self.settings.get("main_menu_descriptions_enabled", True))
 
@@ -2067,7 +2093,7 @@ class SubwayBlindGame:
             MenuItem(
                 "Practice Lane",
                 "practice_lane",
-                "Run a short obstacle-only training session with fixed speed and no economy pressure.",
+                "Open Practice Setup, then run obstacle-only training with optional speed scaling and no economy pressure.",
             ),
             MenuItem(
                 "Events",
@@ -3618,13 +3644,18 @@ class SubwayBlindGame:
 
         if self.active_menu == self.main_menu:
             if action == "start":
+                self._pending_practice_setup = False
                 self.selected_headstarts = 0
                 self.selected_score_boosters = 0
                 self._refresh_loadout_menu_labels()
                 self._set_active_menu(self.loadout_menu)
                 return True
             if action == "practice_lane":
-                self.start_run(practice_mode=True)
+                self._pending_practice_setup = True
+                self.selected_headstarts = 0
+                self.selected_score_boosters = 0
+                self._refresh_loadout_menu_labels()
+                self._set_active_menu(self.loadout_menu)
                 return True
             if action == "events":
                 self._refresh_events_menu_labels()
@@ -3680,6 +3711,8 @@ class SubwayBlindGame:
 
         if self.active_menu == self.loadout_menu:
             if action == "back":
+                self._pending_practice_setup = False
+                self._refresh_loadout_menu_labels()
                 self._set_active_menu(self.main_menu)
                 return True
             if action == "loadout_board_info":
@@ -3694,7 +3727,10 @@ class SubwayBlindGame:
                 self.selected_headstarts = (self.selected_headstarts + 1) % (clamp_headstart_uses(owned) + 1)
                 self.audio.play("confirm", channel="ui")
                 self._refresh_loadout_menu_labels()
-                self.speaker.speak(self.loadout_menu.items[1].label, interrupt=True)
+                self.speaker.speak(
+                    self.loadout_menu.items[self._menu_index_for_action(self.loadout_menu, "toggle_headstart")].label,
+                    interrupt=True,
+                )
                 return True
             if action == "toggle_score_booster":
                 owned = int(self.settings.get("score_boosters", 0))
@@ -3705,10 +3741,24 @@ class SubwayBlindGame:
                 self.selected_score_boosters = (self.selected_score_boosters + 1) % (min(3, owned) + 1)
                 self.audio.play("confirm", channel="ui")
                 self._refresh_loadout_menu_labels()
-                self.speaker.speak(self.loadout_menu.items[2].label, interrupt=True)
+                self.speaker.speak(
+                    self.loadout_menu.items[self._menu_index_for_action(self.loadout_menu, "toggle_score_booster")].label,
+                    interrupt=True,
+                )
+                return True
+            if action == "toggle_practice_speed_scaling":
+                self.settings["practice_speed_scaling_enabled"] = not self._practice_speed_scaling_enabled()
+                self.audio.play("confirm", channel="ui")
+                self._refresh_loadout_menu_labels()
+                self.speaker.speak(
+                    self.loadout_menu.items[
+                        self._menu_index_for_action(self.loadout_menu, "toggle_practice_speed_scaling")
+                    ].label,
+                    interrupt=True,
+                )
                 return True
             if action == "begin_run":
-                self.start_run()
+                self.start_run(practice_mode=self._pending_practice_setup)
                 return True
 
         if self.active_menu == self.events_menu:
@@ -5529,6 +5579,8 @@ class SubwayBlindGame:
         ensure_progression_state(self.settings)
         self._sync_character_progress()
         self._practice_mode_active = bool(practice_mode)
+        practice_speed_scaling_enabled = self._practice_speed_scaling_enabled() if self._practice_mode_active else False
+        self._practice_speed_scaling_active = practice_speed_scaling_enabled
         self._practice_hazards_cleared = 0
         self._practice_hazard_target = PRACTICE_TARGET_HAZARDS
         self._practice_next_progress_announcement = PRACTICE_PROGRESS_STEP
@@ -5540,10 +5592,10 @@ class SubwayBlindGame:
         if self._practice_mode_active:
             self.speed_profile = SpeedProfile(
                 base_speed=PRACTICE_BASE_SPEED,
-                max_speed=PRACTICE_BASE_SPEED,
-                cap_seconds=1.0,
+                max_speed=PRACTICE_SCALING_MAX_SPEED if practice_speed_scaling_enabled else PRACTICE_BASE_SPEED,
+                cap_seconds=PRACTICE_SCALING_CAP_SECONDS if practice_speed_scaling_enabled else 1.0,
                 spawn_gap_start=1.28,
-                spawn_gap_end=1.28,
+                spawn_gap_end=1.0 if practice_speed_scaling_enabled else 1.28,
             )
         else:
             self.speed_profile = speed_profile_for_difficulty(str(self.settings["difficulty"]))
@@ -5603,8 +5655,9 @@ class SubwayBlindGame:
             elif event_label:
                 event_message = f" {event_label} active."
         if self._practice_mode_active:
+            speed_behavior = "speed scaling on" if practice_speed_scaling_enabled else "fixed speed"
             self.speaker.speak(
-                f"Practice Lane started. {active_character.name} active. Fixed speed. Clear {self._practice_hazard_target} hazards to complete.",
+                f"Practice Lane started. {speed_behavior}. Clear {self._practice_hazard_target} hazards to complete.",
                 interrupt=True,
             )
         elif self.selected_headstarts > 0:
@@ -5620,6 +5673,7 @@ class SubwayBlindGame:
 
         self.selected_headstarts = 0
         self.selected_score_boosters = 0
+        self._pending_practice_setup = False
         self._refresh_loadout_menu_labels()
 
     def end_run(self, to_menu: bool = True) -> None:
@@ -5768,7 +5822,7 @@ class SubwayBlindGame:
     def _update_game(self, delta_time: float) -> None:
         self.player.lane = normalize_lane(self.player.lane)
         self.state.time += delta_time
-        if self._practice_mode_active:
+        if self._practice_mode_active and not self._practice_speed_scaling_active:
             base_speed = self.speed_profile.base_speed
         else:
             base_speed = self.speed_profile.speed_for_elapsed(self.state.time)
@@ -5776,7 +5830,11 @@ class SubwayBlindGame:
         active_board = selected_board_definition(self.settings)
         if self.player.hover_active > 0 and active_board.power_key == "super_speed":
             self.state.speed += 3.0
-        speed_factor = 0.0 if self._practice_mode_active else self.speed_profile.progress(self.state.time)
+        speed_factor = (
+            0.0
+            if self._practice_mode_active and not self._practice_speed_scaling_active
+            else self.speed_profile.progress(self.state.time)
+        )
         self.speaker.set_speed_factor(speed_factor)
         self.state.distance += self.state.speed * delta_time
         if not self._practice_mode_active:
@@ -5963,7 +6021,7 @@ class SubwayBlindGame:
         self.state.next_coinline -= delta_time
         self.state.next_support -= delta_time
         if self._practice_mode_active:
-            progress = 0.0
+            progress = self.speed_profile.progress(self.state.time) if self._practice_speed_scaling_active else 0.0
             difficulty = "easy"
         else:
             progress = self.speed_profile.progress(self.state.time)

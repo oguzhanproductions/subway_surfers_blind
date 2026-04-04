@@ -2766,16 +2766,15 @@ class GameTests(unittest.TestCase):
         self.assertIs(game.active_menu, game.loadout_menu)
         self.assertEqual(game.loadout_menu.title, "Run Setup")
 
-    def test_practice_lane_action_starts_obstacle_training_mode(self):
-        game, speaker, _ = self.make_game()
+    def test_practice_lane_action_opens_practice_setup_menu(self):
+        game, _, _ = self.make_game()
 
         game._handle_menu_action("practice_lane")
 
-        self.assertIsNone(game.active_menu)
-        self.assertTrue(game.state.running)
-        self.assertTrue(game._practice_mode_active)
-        self.assertEqual(game.state.speed, 16.0)
-        self.assertIn("Practice Lane started.", speaker.messages[-1][0])
+        self.assertIs(game.active_menu, game.loadout_menu)
+        self.assertEqual(game.loadout_menu.title, "Practice Setup")
+        self.assertFalse(game.state.running)
+        self.assertFalse(game._practice_mode_active)
 
     def test_learn_sounds_action_opens_sound_menu(self):
         game, _, _ = self.make_game()
