@@ -2766,6 +2766,32 @@ class GameTests(unittest.TestCase):
         self.assertIs(game.active_menu, game.loadout_menu)
         self.assertEqual(game.loadout_menu.title, "Run Setup")
 
+    def test_options_back_restores_main_menu_focus(self):
+        game, _, _ = self.make_game()
+        options_index = game._menu_index_for_action(game.main_menu, "options")
+        game.main_menu.index = options_index
+        game.active_menu = game.main_menu
+
+        game._handle_menu_action("options")
+        result = game._handle_menu_action("back")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertEqual(game.main_menu.index, options_index)
+
+    def test_options_escape_restores_main_menu_focus(self):
+        game, _, _ = self.make_game()
+        options_index = game._menu_index_for_action(game.main_menu, "options")
+        game.main_menu.index = options_index
+        game.active_menu = game.main_menu
+        game._handle_menu_action("options")
+
+        result = game._handle_active_menu_key(pygame.K_ESCAPE)
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.main_menu)
+        self.assertEqual(game.main_menu.index, options_index)
+
     def test_practice_lane_action_opens_practice_setup_menu(self):
         game, _, _ = self.make_game()
 

@@ -21,6 +21,7 @@ Audio or UI Updates
 - Added dedicated wrap feedback audio that now plays when Menu Wrap sends the cursor from the last item to the first item or vice versa.
 - Added a Practice Setup toggle for Practice Speed Scaling so players can choose fixed training speed or progressive speed increase before launching Practice Lane.
 - Practice Setup hazard target now opens an inline Windows text input that accepts numeric values only, with a maximum of 10000.
+- Fixed menu focus restoration so returning from submenus now keeps the previously focused parent menu item instead of jumping back to the first entry.
 
 ------------------------------------------------------------
 

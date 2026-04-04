@@ -695,6 +695,7 @@ class SubwayBlindGame:
         self._practice_hazard_target = self._practice_hazard_target_setting()
         self._practice_next_progress_announcement = PRACTICE_PROGRESS_STEP
         self._pending_menu_announcement: Optional[tuple[Menu, float, bool]] = None
+        self._menu_last_indices: dict[int, int] = {}
         self._magnet_loop_active = False
         self._jetpack_loop_active = False
 
@@ -3143,12 +3144,20 @@ class SubwayBlindGame:
             except Exception:
                 continue
 
-    def _set_active_menu(self, menu: Optional[Menu], start_index: int = 0, play_sound: bool = True) -> None:
+    def _set_active_menu(self, menu: Optional[Menu], start_index: int | None = None, play_sound: bool = True) -> None:
         self._clear_menu_repeat()
         self._stop_learn_sound_preview()
+        if self.active_menu is not None:
+            self._menu_last_indices[id(self.active_menu)] = int(self.active_menu.index)
         self.active_menu = menu
         if menu is not None:
-            menu.open(start_index=start_index, play_sound=play_sound)
+            if start_index is None:
+                remembered_index = self._menu_last_indices.get(id(menu))
+                target_index = int(remembered_index) if remembered_index is not None else 0
+            else:
+                target_index = int(start_index)
+            menu.open(start_index=target_index, play_sound=play_sound)
+            self._menu_last_indices[id(menu)] = int(menu.index)
             if menu == self.learn_sounds_menu:
                 self._refresh_learn_sound_description()
         self._sync_music_context()
@@ -3529,7 +3538,11 @@ class SubwayBlindGame:
                 return True
             if self.active_menu == self.options_menu:
                 return_menu = self._options_return_menu or self.main_menu
-                start_index = self._menu_index_for_action(self.pause_menu, "pause_options") if return_menu == self.pause_menu else 0
+                start_index = (
+                    self._menu_index_for_action(self.pause_menu, "pause_options")
+                    if return_menu == self.pause_menu
+                    else None
+                )
                 self._set_active_menu(return_menu, start_index=start_index)
                 return True
             if self.active_menu == self.sapi_menu:
@@ -3919,7 +3932,11 @@ class SubwayBlindGame:
             if action == "back":
                 self.audio.play("menuclose", channel="ui")
                 return_menu = self._options_return_menu or self.main_menu
-                start_index = self._menu_index_for_action(self.pause_menu, "pause_options") if return_menu == self.pause_menu else 0
+                start_index = (
+                    self._menu_index_for_action(self.pause_menu, "pause_options")
+                    if return_menu == self.pause_menu
+                    else None
+                )
                 self._set_active_menu(return_menu, start_index=start_index)
                 return True
             return True
