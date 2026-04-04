@@ -8,6 +8,7 @@ Update Summary
 - Added richer Shop item labels that now report both owned inventory and the maximum amount that can be bought with current banked coins.
 - Added max-buy reporting for Mystery Box entries so players can hear how many 500-coin box opens they can currently afford.
 - Added a new Practice Lane mode in the main menu with fixed speed, obstacle-only training flow, and a short clear-target session for onboarding.
+- Updated Practice Lane flow to open a dedicated Practice Setup menu before starting the run.
 - Locked Practice Lane as a pure training mode: no coins, no item/powerup usage, no progression gain, and no leaderboard publishing even when publish confirmation is forced.
 - Added a dedicated daily quest for Practice Lane that completes when training is cleared and awards sneakers.
 
@@ -17,6 +18,7 @@ Audio or UI Updates
 - Changed Options SFX and Music volume adjustment to move by 5 per step instead of 1.
 - Added a new Options toggle for Menu Wrap so menu navigation can loop from the end back to the start.
 - Added dedicated wrap feedback audio that now plays when Menu Wrap sends the cursor from the last item to the first item or vice versa.
+- Added a Practice Setup toggle for Practice Speed Scaling so players can choose fixed training speed or progressive speed increase before launching Practice Lane.
 
 ------------------------------------------------------------
 
