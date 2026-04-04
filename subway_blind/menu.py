@@ -85,15 +85,30 @@ class Menu:
             return
         self.speaker.speak(self._current_announcement_text(), interrupt=True)
 
+    def _wrapping_enabled(self) -> bool:
+        try:
+            return bool(self.audio.settings.get("menu_wrap_enabled", False))
+        except Exception:
+            return False
+
     def _move_to_index(self, target_index: int) -> None:
         if not self.items:
             self._play_menu_sound("menuedge", index=0)
             return
-        clamped_index = max(0, min(int(target_index), len(self.items) - 1))
-        if clamped_index == self.index:
+        last_index = len(self.items) - 1
+        requested_index = int(target_index)
+        if requested_index < 0 or requested_index > last_index:
+            if self._wrapping_enabled() and last_index > 0:
+                self.index = last_index if requested_index < 0 else 0
+                self._play_menu_sound("menuwrap")
+                self._announce_current()
+                return
             self._play_menu_sound("menuedge")
             return
-        self.index = clamped_index
+        if requested_index == self.index:
+            self._play_menu_sound("menuedge")
+            return
+        self.index = requested_index
         self._play_menu_sound("menumove")
         self._announce_current()
 

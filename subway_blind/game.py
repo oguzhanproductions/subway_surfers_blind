@@ -1098,6 +1098,9 @@ class SubwayBlindGame:
     def _menu_sound_hrtf_option_label(self) -> str:
         return f"Menu Sound HRTF: {'On' if self.settings['menu_sound_hrtf'] else 'Off'}"
 
+    def _menu_wrap_option_label(self) -> str:
+        return f"Menu Wrap: {'On' if self.settings.get('menu_wrap_enabled', False) else 'Off'}"
+
     def _sapi_voice_option_label(self) -> str:
         voice_name = self.speaker.current_sapi_voice_display_name()
         return f"SAPI Voice: {voice_name}"
@@ -1469,6 +1472,7 @@ class SubwayBlindGame:
             MenuItem(self._updates_option_label(), "opt_updates"),
             MenuItem(self._audio_output_option_label(), "opt_output"),
             MenuItem(self._menu_sound_hrtf_option_label(), "opt_menu_hrtf"),
+            MenuItem(self._menu_wrap_option_label(), "opt_menu_wrap"),
             MenuItem(self._speech_option_label(), "opt_speech"),
             MenuItem(self._sapi_menu_entry_label(), "opt_sapi_menu"),
             MenuItem(self._difficulty_option_label(), "opt_diff"),
@@ -5375,6 +5379,12 @@ class SubwayBlindGame:
             self._play_menu_feedback("confirm")
             self._refresh_options_menu_labels()
             self.speaker.speak(self.options_menu.items[self._update_option_index("opt_menu_hrtf")].label, interrupt=True)
+            return
+        if selected_action == "opt_menu_wrap":
+            self.settings["menu_wrap_enabled"] = direction > 0
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_menu_wrap")].label, interrupt=True)
             return
         if selected_action == "opt_speech":
             self._play_menu_feedback("confirm")

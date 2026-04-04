@@ -71,6 +71,7 @@ CHANNEL_FALLBACK_OVERRIDES = {
 FORCED_MONO_SOUND_KEYS = {
     "menumove",
     "menuedge",
+    "menuwrap",
     "menuopen",
     "menuclose",
     "confirm",
@@ -574,6 +575,7 @@ class Audio:
 
         self._load_sound("menumove", self._pick_menu_sound("menumove"))
         self._load_sound("menuedge", self._pick_menu_sound("menuedge"))
+        self._load_sound("menuwrap", self._pick_menu_sound("menuwrap"))
         self._load_sound("menuopen", self._pick_menu_sound("menuopen"))
         self._load_sound("menuclose", self._pick_menu_sound("menuclose"))
         self._load_sound("confirm", self._pick_menu_sound("confirm"))
@@ -839,7 +841,7 @@ class Audio:
             x = clamped_pan * 2.6
             y = -0.08
             pitch = 0.9
-        elif key in {"warning", "menumove", "menuedge", "menuopen", "menuclose", "confirm"}:
+        elif key in {"warning", "menumove", "menuedge", "menuwrap", "menuopen", "menuclose", "confirm"}:
             z = -0.8
             relative = True
         elif key in ANNOUNCER_SOUND_KEYS:

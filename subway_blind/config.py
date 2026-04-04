@@ -43,6 +43,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "music_volume": 0.6,
     "audio_output_device": "",
     "menu_sound_hrtf": True,
+    "menu_wrap_enabled": False,
     "speech_enabled": True,
     "sapi_speech_enabled": False,
     "sapi_voice_id": "",
