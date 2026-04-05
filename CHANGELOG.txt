@@ -25,6 +25,7 @@ Audio or UI Updates
 - Changed Options SFX and Music volume adjustment to move by 5 per step instead of 1.
 - Added a new Options toggle for Menu Wrap so menu navigation can loop from the end back to the start.
 - Added dedicated wrap feedback audio that now plays when Menu Wrap sends the cursor from the last item to the first item or vice versa.
+- Updated Menu Wrap feedback so the wrap sound and the normal menu move sound now play together during wrap transitions.
 - Added a Practice Setup toggle for Practice Speed Scaling so players can choose fixed training speed or progressive speed increase before launching Practice Lane.
 - Practice Setup hazard target now opens an inline Windows text input that accepts numeric values only, with a maximum of 10000.
 - Fixed menu focus restoration so returning from submenus now keeps the previously focused parent menu item instead of jumping back to the first entry.
