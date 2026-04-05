@@ -2301,7 +2301,42 @@ class GameTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertIn(("mystery_box_open", "ui", False), audio.played)
         self.assertEqual(game.shop_menu.items[4].label, "Free Daily Gift   Claimed Today")
-        self.assertIn("Claimed Today", game.events_menu.items[6].label)
+        self.assertIn("Claimed Today", game.events_menu.items[7].label)
+
+    def test_event_shop_opens_from_events_menu(self):
+        game, _, _ = self.make_game()
+        game.active_menu = game.events_menu
+
+        result = game._handle_menu_action("open_event_shop")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.event_shop_menu)
+        self.assertIn("Event Coins", game.event_shop_menu.title)
+
+    def test_event_shop_purchase_spends_event_coins_for_key(self):
+        game, _, _ = self.make_game()
+        game.settings["event_state"]["event_coins"] = 25
+        starting_keys = int(game.settings["keys"])
+        game.active_menu = game.event_shop_menu
+        game._refresh_event_shop_menu_labels()
+
+        result = game._handle_menu_action("event_shop_buy_key")
+
+        self.assertTrue(result)
+        self.assertEqual(game.settings["event_state"]["event_coins"], 7)
+        self.assertEqual(game.settings["keys"], starting_keys + 1)
+
+    def test_super_mystery_box_jetpack_reward_outside_run_falls_back_to_coins(self):
+        game, _, audio = self.make_game()
+        game.state.running = False
+        game.player.jetpack = 0.0
+        game.settings["bank_coins"] = 0
+        with patch("subway_blind.game.pick_super_mystery_box_reward", return_value="jetpack"):
+            game._open_super_mystery_box("Daily Login reward")
+
+        self.assertEqual(game.player.jetpack, 0.0)
+        self.assertGreater(game.settings["bank_coins"], 0)
+        self.assertFalse(any(call["key"] == "jetpack_loop" and bool(call["loop"]) for call in audio.play_calls))
 
     def test_events_info_action_speaks_selected_label(self):
         game, speaker, _ = self.make_game()
@@ -2320,10 +2355,10 @@ class GameTests(unittest.TestCase):
         game._refresh_character_menu_labels()
 
         labels = [item.label for item in game.character_menu.items[:-1]]
-        self.assertEqual(
-            [label.split("   ")[0] for label in labels],
-            ["Jake", "Tricky", "Fresh", "Yutani", "Spike", "Dino", "Boombot"],
-        )
+        names = [label.split("   ")[0] for label in labels]
+        self.assertEqual(names[:7], ["Jake", "Tricky", "Fresh", "Yutani", "Spike", "Dino", "Lucy"])
+        for expected_name in ("Prince K", "Brody", "Tasha", "Ella", "Ninja", "Boombot"):
+            self.assertIn(expected_name, names)
 
     def test_achievements_menu_shows_progress_and_unlocks(self):
         game, speaker, _ = self.make_game()

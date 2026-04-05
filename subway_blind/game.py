@@ -231,6 +231,12 @@ PRACTICE_TARGET_HAZARDS_MIN = 1
 PRACTICE_TARGET_HAZARDS_MAX = 10000
 PRACTICE_PROGRESS_STEP = 6
 PRACTICE_HAZARD_KINDS = {"train", "low", "high", "bush"}
+EVENT_CHARACTER_OFFER_KEYS = ("lucy", "prince_k", "brody", "tasha", "ella", "ninja")
+EVENT_SHOP_KEY_COST = 18
+EVENT_SHOP_HOVERBOARD_PACK_COST = 16
+EVENT_SHOP_HEADSTART_COST = 20
+EVENT_SHOP_SCORE_BOOSTER_COST = 24
+EVENT_SHOP_SUPER_BOX_COST = 30
 
 
 @dataclass(frozen=True)
@@ -786,6 +792,12 @@ class SubwayBlindGame:
             "Events",
             [],
         )
+        self.event_shop_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Event Shop",
+            [],
+        )
         self.missions_hub_menu = Menu(
             self.speaker,
             self.audio,
@@ -1249,6 +1261,88 @@ class SubwayBlindGame:
         event = current_daily_event()
         event_coins = int(self.settings.get("event_state", {}).get("event_coins", 0) or 0)
         return f"Events   {event.label}   Event Coins: {event_coins}"
+
+    def _event_shop_title(self) -> str:
+        return f"Event Shop   Event Coins: {self._event_coin_balance()}"
+
+    def _event_coin_balance(self) -> int:
+        return int(self.settings.get("event_state", {}).get("event_coins", 0) or 0)
+
+    def _event_shop_character_offer_key(self) -> str | None:
+        event_candidates = [
+            definition
+            for definition in character_definitions()
+            if definition.key in EVENT_CHARACTER_OFFER_KEYS and not character_unlocked(self.settings, definition.key)
+        ]
+        if event_candidates:
+            return event_candidates[date.today().toordinal() % len(event_candidates)].key
+        featured_key = featured_character_key()
+        if not character_unlocked(self.settings, featured_key):
+            return featured_key
+        locked = [definition for definition in character_definitions() if not character_unlocked(self.settings, definition.key)]
+        if not locked:
+            return None
+        return locked[date.today().toordinal() % len(locked)].key
+
+    def _event_shop_board_offer_key(self) -> str | None:
+        seasonal_rotation = [definition for definition in board_definitions() if definition.unlock_cost > 0]
+        if not seasonal_rotation:
+            return None
+        seasonal_key = seasonal_rotation[date.today().toordinal() % len(seasonal_rotation)].key
+        if not board_unlocked(self.settings, seasonal_key):
+            return seasonal_key
+        locked = [definition for definition in seasonal_rotation if not board_unlocked(self.settings, definition.key)]
+        if not locked:
+            return None
+        return locked[date.today().toordinal() % len(locked)].key
+
+    def _event_shop_character_offer_cost(self, key: str) -> int:
+        return max(20, int(round(character_definition(key).unlock_cost / 130)))
+
+    def _event_shop_board_offer_cost(self, key: str) -> int:
+        return max(18, int(round(board_definition(key).unlock_cost / 120)))
+
+    def _event_shop_character_label(self) -> str:
+        key = self._event_shop_character_offer_key()
+        if key is None:
+            return "Season Character   All unlocked"
+        definition = character_definition(key)
+        cost = self._event_shop_character_offer_cost(key)
+        status = "Owned" if character_unlocked(self.settings, key) else f"Cost: {cost} Event Coins"
+        return f"Season Character: {definition.name}   {status}"
+
+    def _event_shop_board_label(self) -> str:
+        key = self._event_shop_board_offer_key()
+        if key is None:
+            return "Season Board   All unlocked"
+        definition = board_definition(key)
+        cost = self._event_shop_board_offer_cost(key)
+        status = "Owned" if board_unlocked(self.settings, key) else f"Cost: {cost} Event Coins"
+        return f"Season Board: {definition.name}   {status}"
+
+    def _event_shop_key_label(self) -> str:
+        return f"Buy Key   Cost: {EVENT_SHOP_KEY_COST} Event Coins   Owned: {int(self.settings.get('keys', 0))}"
+
+    def _event_shop_hoverboard_label(self) -> str:
+        return (
+            f"Buy Hoverboard Pack (2)   Cost: {EVENT_SHOP_HOVERBOARD_PACK_COST} Event Coins   "
+            f"Owned: {int(self.settings.get('hoverboards', 0))}"
+        )
+
+    def _event_shop_headstart_label(self) -> str:
+        return (
+            f"Buy Headstart   Cost: {EVENT_SHOP_HEADSTART_COST} Event Coins   "
+            f"Owned: {int(self.settings.get('headstarts', 0))}"
+        )
+
+    def _event_shop_score_booster_label(self) -> str:
+        return (
+            f"Buy Score Booster   Cost: {EVENT_SHOP_SCORE_BOOSTER_COST} Event Coins   "
+            f"Owned: {int(self.settings.get('score_boosters', 0))}"
+        )
+
+    def _event_shop_super_box_label(self) -> str:
+        return f"Open Super Mystery Box   Cost: {EVENT_SHOP_SUPER_BOX_COST} Event Coins"
 
     def _daily_event_info_label(self) -> str:
         event = current_daily_event()
@@ -1721,6 +1815,7 @@ class SubwayBlindGame:
         self.events_menu.title = self._events_menu_title()
         self.events_menu.items = [
             MenuItem(self._daily_event_info_label(), "event_info"),
+            MenuItem("Open Event Shop", "open_event_shop"),
             MenuItem(self._daily_high_score_status_label(), "event_info"),
             MenuItem(self._daily_high_score_action_label(), "claim_daily_high_score"),
             MenuItem(self._coin_meter_status_label(), "event_info"),
@@ -1733,6 +1828,98 @@ class SubwayBlindGame:
             MenuItem(self._season_hunt_status_label(), "event_info"),
             MenuItem("Back", "back"),
         ]
+        self._refresh_event_shop_menu_labels()
+
+    def _refresh_event_shop_menu_labels(self) -> None:
+        self.event_shop_menu.title = self._event_shop_title()
+        self.event_shop_menu.items = [
+            MenuItem(self._event_shop_character_label(), "event_shop_buy_character"),
+            MenuItem(self._event_shop_board_label(), "event_shop_buy_board"),
+            MenuItem(self._event_shop_key_label(), "event_shop_buy_key"),
+            MenuItem(self._event_shop_hoverboard_label(), "event_shop_buy_hoverboards"),
+            MenuItem(self._event_shop_headstart_label(), "event_shop_buy_headstart"),
+            MenuItem(self._event_shop_score_booster_label(), "event_shop_buy_score_booster"),
+            MenuItem(self._event_shop_super_box_label(), "event_shop_buy_super_box"),
+            MenuItem("Back", "back"),
+        ]
+
+    def _spend_event_coins(self, cost: int) -> bool:
+        ensure_event_state(self.settings)
+        safe_cost = max(1, int(cost))
+        current = self._event_coin_balance()
+        if current < safe_cost:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(
+                f"Not enough Event Coins. {safe_cost} needed, {current} available.",
+                interrupt=True,
+            )
+            return False
+        self.settings["event_state"]["event_coins"] = current - safe_cost
+        self.audio.play("gui_cash", channel="ui")
+        return True
+
+    def _buy_event_shop_character(self) -> None:
+        offer_key = self._event_shop_character_offer_key()
+        if offer_key is None:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("All season character offers are already unlocked.", interrupt=True)
+            return
+        definition = character_definition(offer_key)
+        if character_unlocked(self.settings, offer_key):
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(f"{definition.name} is already unlocked.", interrupt=True)
+            return
+        cost = self._event_shop_character_offer_cost(offer_key)
+        if not self._spend_event_coins(cost):
+            return
+        previous_completed = completed_collection_keys(self.settings)
+        self.settings["character_progress"][definition.key]["unlocked"] = True
+        self._sync_character_progress()
+        self._refresh_character_menu_labels()
+        self._refresh_character_detail_menu_labels(definition.key)
+        self._refresh_collection_menu_labels()
+        self._refresh_me_menu_labels()
+        self._refresh_shop_menu_labels()
+        self._refresh_events_menu_labels()
+        self._persist_settings()
+        self.audio.play("unlock", channel="ui3")
+        self.speaker.speak(f"{definition.name} unlocked with Event Coins.", interrupt=True)
+        self._announce_collection_unlocks(previous_completed)
+
+    def _buy_event_shop_board(self) -> None:
+        offer_key = self._event_shop_board_offer_key()
+        if offer_key is None:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("All season board offers are already unlocked.", interrupt=True)
+            return
+        definition = board_definition(offer_key)
+        if board_unlocked(self.settings, offer_key):
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(f"{definition.name} is already unlocked.", interrupt=True)
+            return
+        cost = self._event_shop_board_offer_cost(offer_key)
+        if not self._spend_event_coins(cost):
+            return
+        previous_completed = completed_collection_keys(self.settings)
+        self.settings["board_progress"][definition.key]["unlocked"] = True
+        self._sync_character_progress()
+        self._refresh_board_menu_labels()
+        self._refresh_board_detail_menu_labels(definition.key)
+        self._refresh_collection_menu_labels()
+        self._refresh_me_menu_labels()
+        self._refresh_events_menu_labels()
+        self._persist_settings()
+        self.audio.play("unlock", channel="ui3")
+        self.speaker.speak(f"{definition.name} unlocked with Event Coins.", interrupt=True)
+        self._announce_collection_unlocks(previous_completed)
+
+    def _buy_event_shop_reward(self, cost: int, reward: dict[str, object], source: str) -> None:
+        if not self._spend_event_coins(cost):
+            return
+        if self._apply_meta_reward(reward, source):
+            self._refresh_events_menu_labels()
+            self._refresh_shop_menu_labels()
+            self._persist_settings()
 
     def _refresh_missions_hub_menu_labels(self) -> None:
         ensure_quest_state(self.settings)
@@ -2605,8 +2792,14 @@ class SubwayBlindGame:
             return
         if reward == "jetpack":
             self.audio.play("unlock", channel="ui3")
-            self._apply_power_reward("jetpack", from_headstart=False)
-            self.speaker.speak(f"{source}: Super Mystery Box. Jetpack.", interrupt=True)
+            if self.state.running:
+                self._apply_power_reward("jetpack", from_headstart=False)
+                self.speaker.speak(f"{source}: Super Mystery Box. Jetpack.", interrupt=True)
+                return
+            gain = random.randint(450, 1100)
+            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + gain
+            self.audio.play("gui_cash", channel="ui3")
+            self.speaker.speak(f"{source}: Super Mystery Box. {gain} coins saved.", interrupt=True)
             return
         if reward == "keys":
             gain = random.randint(1, 2)
@@ -3588,6 +3781,10 @@ class SubwayBlindGame:
             if self.active_menu == self.events_menu:
                 self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "events"))
                 return True
+            if self.active_menu == self.event_shop_menu:
+                self._refresh_events_menu_labels()
+                self._set_active_menu(self.events_menu, start_index=self._menu_index_for_action(self.events_menu, "open_event_shop"))
+                return True
             if self.active_menu == self.missions_hub_menu:
                 self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "missions_hub"))
                 return True
@@ -3796,6 +3993,10 @@ class SubwayBlindGame:
                     item = self.events_menu.items[min(self.events_menu.index, len(self.events_menu.items) - 1)]
                     self.speaker.speak(item.label, interrupt=True)
                 return True
+            if action == "open_event_shop":
+                self._refresh_event_shop_menu_labels()
+                self._set_active_menu(self.event_shop_menu)
+                return True
             if action == "claim_daily_high_score":
                 if self._apply_meta_reward(claim_daily_high_score_reward(self.settings), "Daily High Score reward"):
                     self.audio.play("mission_reward", channel="ui")
@@ -3825,6 +4026,54 @@ class SubwayBlindGame:
                 return True
             if action == "back":
                 self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "events"))
+                return True
+            return True
+
+        if self.active_menu == self.event_shop_menu:
+            if action == "event_shop_buy_character":
+                self._buy_event_shop_character()
+                return True
+            if action == "event_shop_buy_board":
+                self._buy_event_shop_board()
+                return True
+            if action == "event_shop_buy_key":
+                self._buy_event_shop_reward(
+                    EVENT_SHOP_KEY_COST,
+                    {"kind": "key", "amount": 1},
+                    "Event Shop",
+                )
+                return True
+            if action == "event_shop_buy_hoverboards":
+                self._buy_event_shop_reward(
+                    EVENT_SHOP_HOVERBOARD_PACK_COST,
+                    {"kind": "hoverboard", "amount": 2},
+                    "Event Shop",
+                )
+                return True
+            if action == "event_shop_buy_headstart":
+                self._buy_event_shop_reward(
+                    EVENT_SHOP_HEADSTART_COST,
+                    {"kind": "headstart", "amount": 1},
+                    "Event Shop",
+                )
+                return True
+            if action == "event_shop_buy_score_booster":
+                self._buy_event_shop_reward(
+                    EVENT_SHOP_SCORE_BOOSTER_COST,
+                    {"kind": "score_booster", "amount": 1},
+                    "Event Shop",
+                )
+                return True
+            if action == "event_shop_buy_super_box":
+                self._buy_event_shop_reward(
+                    EVENT_SHOP_SUPER_BOX_COST,
+                    {"kind": "super_box", "amount": 1},
+                    "Event Shop",
+                )
+                return True
+            if action == "back":
+                self._refresh_events_menu_labels()
+                self._set_active_menu(self.events_menu, start_index=self._menu_index_for_action(self.events_menu, "open_event_shop"))
                 return True
             return True
 
@@ -6386,7 +6635,7 @@ class SubwayBlindGame:
         self.player.jetpack = max(self.player.jetpack, float(duration))
         self.player.y = 2.0
         self.player.vy = 0.0
-        if was_inactive:
+        if was_inactive and self.state.running and not self.state.paused:
             self.audio.play("jetpack_loop", loop=True, channel="loop_jetpack")
 
     def _character_adjusted_power_duration(self, duration: float) -> float:

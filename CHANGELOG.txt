@@ -13,6 +13,11 @@ Update Summary
 - Locked Practice Lane as a pure training mode: no coins, no item/powerup usage, no progression gain, and no leaderboard publishing even when publish confirmation is forced.
 - Added a dedicated daily quest for Practice Lane that completes when training is cleared and awards sneakers.
 - Fixed a Daily Login Calendar rollover bug that could reopen reward claiming on the same day immediately after claiming Day 7.
+- Added a full Event Shop flow under Events so Event Coins can now be spent on seasonal offers and utility rewards.
+- Added seasonal Event Coin offers for unlockable characters and boards, plus repeatable Event Coin purchases for Keys, Hoverboards, Headstarts, Score Boosters, and Super Mystery Boxes.
+- Expanded the playable roster with event-style characters (Lucy, Prince K, Brody, Tasha, Ella, and Ninja), including full selection, perk, and upgrade support in Character menus.
+- Fixed Super Mystery Box jetpack rewards opened outside a run so they no longer grant a non-persistent runtime power-up and now resolve to a persistent economy reward path.
+- Fixed a jetpack loop audio edge case where menu-side reward handling could leave jetpack loop behavior in an invalid non-run state.
 
 Audio or UI Updates
 - Shop labels now refresh with live max-buy affordability after purchases and coin changes, improving spending clarity before confirming an item.
@@ -24,6 +29,7 @@ Audio or UI Updates
 - Practice Setup hazard target now opens an inline Windows text input that accepts numeric values only, with a maximum of 10000.
 - Fixed menu focus restoration so returning from submenus now keeps the previously focused parent menu item instead of jumping back to the first entry.
 - Fixed Events menu info rows so pressing Enter now announces the selected event status line instead of triggering a silent no-op.
+- Added an Event Shop entry inside Events and surfaced live Event Coin balance directly in Event Shop labels and title.
 
 ------------------------------------------------------------
 
