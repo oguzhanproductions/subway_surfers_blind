@@ -129,9 +129,11 @@ def ensure_event_state(settings: dict, today: date | None = None) -> None:
     if not cycle_start:
         cycle_start = today_iso
     if claimed_days >= len(LOGIN_CALENDAR_REWARDS):
-        cycle_start = today_iso
-        claimed_days = 0
-        state["login_calendar_last_claimed_on"] = ""
+        last_claimed = str(state.get("login_calendar_last_claimed_on") or "")
+        if last_claimed != today_iso:
+            cycle_start = today_iso
+            claimed_days = 0
+            state["login_calendar_last_claimed_on"] = ""
 
     state["event_coins"] = max(0, int(state.get("event_coins", 0) or 0))
     state["daily_high_score_total"] = max(0, int(state.get("daily_high_score_total", 0) or 0))

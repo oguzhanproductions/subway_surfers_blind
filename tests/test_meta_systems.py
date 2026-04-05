@@ -62,6 +62,22 @@ class MetaSystemTests(unittest.TestCase):
         self.assertIsNone(second_reward)
         self.assertFalse(login_calendar_available(settings, today))
 
+    def test_login_calendar_final_day_does_not_reopen_same_day(self):
+        settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
+        today = date(2026, 4, 5)
+        ensure_event_state(settings, today)
+        settings["event_state"]["login_calendar_claimed_days"] = 6
+        settings["event_state"]["login_calendar_last_claimed_on"] = "2026-04-04"
+
+        first_reward = claim_login_calendar_reward(settings, today)
+        ensure_event_state(settings, today)
+        second_reward = claim_login_calendar_reward(settings, today)
+
+        self.assertIsNotNone(first_reward)
+        self.assertIsNone(second_reward)
+        self.assertEqual(settings["event_state"]["login_calendar_last_claimed_on"], today.isoformat())
+        self.assertFalse(login_calendar_available(settings, today))
+
     def test_wordy_weekend_uses_selected_character_name(self):
         settings = copy.deepcopy(config_module.DEFAULT_SETTINGS)
         settings["character_progress"]["tricky"]["unlocked"] = True

@@ -3791,6 +3791,11 @@ class SubwayBlindGame:
                 return True
 
         if self.active_menu == self.events_menu:
+            if action == "event_info":
+                if self.events_menu.items:
+                    item = self.events_menu.items[min(self.events_menu.index, len(self.events_menu.items) - 1)]
+                    self.speaker.speak(item.label, interrupt=True)
+                return True
             if action == "claim_daily_high_score":
                 if self._apply_meta_reward(claim_daily_high_score_reward(self.settings), "Daily High Score reward"):
                     self.audio.play("mission_reward", channel="ui")

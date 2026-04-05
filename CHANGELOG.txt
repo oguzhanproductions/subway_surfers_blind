@@ -12,6 +12,7 @@ Update Summary
 - Added a Practice Setup hazard-target input so players can set how many hazards must be cleared to finish Practice Lane.
 - Locked Practice Lane as a pure training mode: no coins, no item/powerup usage, no progression gain, and no leaderboard publishing even when publish confirmation is forced.
 - Added a dedicated daily quest for Practice Lane that completes when training is cleared and awards sneakers.
+- Fixed a Daily Login Calendar rollover bug that could reopen reward claiming on the same day immediately after claiming Day 7.
 
 Audio or UI Updates
 - Shop labels now refresh with live max-buy affordability after purchases and coin changes, improving spending clarity before confirming an item.
@@ -22,6 +23,7 @@ Audio or UI Updates
 - Added a Practice Setup toggle for Practice Speed Scaling so players can choose fixed training speed or progressive speed increase before launching Practice Lane.
 - Practice Setup hazard target now opens an inline Windows text input that accepts numeric values only, with a maximum of 10000.
 - Fixed menu focus restoration so returning from submenus now keeps the previously focused parent menu item instead of jumping back to the first entry.
+- Fixed Events menu info rows so pressing Enter now announces the selected event status line instead of triggering a silent no-op.
 
 ------------------------------------------------------------
 

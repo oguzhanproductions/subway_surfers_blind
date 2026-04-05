@@ -2303,6 +2303,17 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.shop_menu.items[4].label, "Free Daily Gift   Claimed Today")
         self.assertIn("Claimed Today", game.events_menu.items[6].label)
 
+    def test_events_info_action_speaks_selected_label(self):
+        game, speaker, _ = self.make_game()
+        game.active_menu = game.events_menu
+        game.events_menu.index = 3
+        selected_label = game.events_menu.items[3].label
+
+        result = game._handle_menu_action("event_info")
+
+        self.assertTrue(result)
+        self.assertEqual(speaker.messages[-1][0], selected_label)
+
     def test_character_menu_lists_officially_added_characters(self):
         game, _, _ = self.make_game()
 
