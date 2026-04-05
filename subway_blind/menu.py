@@ -37,11 +37,11 @@ class Menu:
         progress = target_index / (len(self.items) - 1)
         return (progress * 1.6) - 0.8
 
-    def _play_menu_sound(self, key: str, index: int | None = None) -> None:
+    def _play_menu_sound(self, key: str, index: int | None = None, channel: str = "ui") -> None:
         if bool(self.audio.settings.get("menu_sound_hrtf", True)):
-            self.audio.play(key, channel="ui", pan=self._menu_pan_for_index(index))
+            self.audio.play(key, channel=channel, pan=self._menu_pan_for_index(index))
             return
-        self.audio.play(key, channel="ui")
+        self.audio.play(key, channel=channel)
 
     def play_feedback(self, key: str, index: int | None = None) -> None:
         self._play_menu_sound(key, index=index)
@@ -101,6 +101,7 @@ class Menu:
             if self._wrapping_enabled() and last_index > 0:
                 self.index = last_index if requested_index < 0 else 0
                 self._play_menu_sound("menuwrap")
+                self._play_menu_sound("menumove", channel="ui2")
                 self._announce_current()
                 return
             self._play_menu_sound("menuedge")

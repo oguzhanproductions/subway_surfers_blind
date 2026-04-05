@@ -405,6 +405,22 @@ class MenuTests(unittest.TestCase):
         menu.handle_key(pygame.K_DOWN)
         self.assertIsNone(audio.play_calls[-1]["pan"])
 
+    def test_menu_wrap_plays_wrap_and_move_feedback(self):
+        speaker = DummySpeaker()
+        audio = DummyAudio({"menu_wrap_enabled": True})
+        menu = Menu(
+            speaker,
+            audio,
+            "Main Menu",
+            [MenuItem("Start", "start"), MenuItem("Shop", "shop"), MenuItem("Quit", "quit")],
+        )
+
+        menu.open(start_index=2)
+        menu.handle_key(pygame.K_DOWN)
+
+        self.assertEqual(menu.index, 0)
+        self.assertEqual(audio.played[-2:], [("menuwrap", "ui", False), ("menumove", "ui2", False)])
+
 
 class ConfigTests(unittest.TestCase):
     def test_settings_round_trip_preserves_defaults(self):
