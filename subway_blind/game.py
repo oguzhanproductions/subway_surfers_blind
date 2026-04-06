@@ -6514,8 +6514,8 @@ class SubwayBlindGame:
         self._add_run_coins(1)
         self._record_mission_event("coins")
         self._coin_streak += 1
-        if self._coin_streak > 6:
-            self._coin_pitch_index += 1
+        if self._coin_streak % 7 == 0:
+            self._coin_pitch_index = min(self._coin_pitch_index + 1, 12)
         pitch = 1.0 + self._coin_pitch_index * 0.08
         self._coin_pitch_timer = 3.0
         self.audio.play("coin", pan=lane_to_pan(obstacle.lane), channel="coin", pitch=pitch)
