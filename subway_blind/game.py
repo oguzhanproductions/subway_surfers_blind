@@ -628,6 +628,9 @@ class SubwayBlindGame:
         self._run_rewards_committed = False
         self._near_miss_signatures: set[tuple[str, int]] = set()
         self._guard_loop_timer = 0.0
+        self._coin_pitch_index = 0
+        self._coin_pitch_timer = 0.0
+        self._coin_streak = 0
         self._menu_repeat_key: int | None = None
         self._menu_repeat_delay_remaining = 0.0
         self._learn_sound_entries_by_action = {
@@ -6198,6 +6201,12 @@ class SubwayBlindGame:
         self._tick_powerups(delta_time)
         self._spawn_things(delta_time)
 
+        if self._coin_pitch_timer > 0:
+            self._coin_pitch_timer = max(0.0, self._coin_pitch_timer - delta_time)
+            if self._coin_pitch_timer <= 0:
+                self._coin_pitch_index = 0
+                self._coin_streak = 0
+
         for obstacle in self.obstacles:
             obstacle.z -= self.state.speed * delta_time
 
@@ -6504,7 +6513,12 @@ class SubwayBlindGame:
     def _collect_coin(self, obstacle: Obstacle) -> None:
         self._add_run_coins(1)
         self._record_mission_event("coins")
-        self.audio.play("coin", pan=lane_to_pan(obstacle.lane), channel="coin")
+        self._coin_streak += 1
+        if self._coin_streak > 6:
+            self._coin_pitch_index += 1
+        pitch = 1.0 + self._coin_pitch_index * 0.08
+        self._coin_pitch_timer = 3.0
+        self.audio.play("coin", pan=lane_to_pan(obstacle.lane), channel="coin", pitch=pitch)
         announce_every = int(self.settings.get("announce_coins_every", 10) or 0)
         if self._coin_counters_enabled() and announce_every and self.state.coins % announce_every == 0:
             self.speaker.speak(f"{self.state.coins} coins", interrupt=False)

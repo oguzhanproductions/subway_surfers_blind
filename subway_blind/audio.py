@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import audioop
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -466,6 +467,7 @@ class Audio:
         self._music_pending_track: str | None = None
         self._music_fade_level = 0.0
         self._music_transition: str | None = None
+        self._pitched_sounds: dict[tuple[str, int], pygame.mixer.Sound] = {}
         self.hrtf = OpenALHrtfEngine(settings.get("sfx_volume", 1.0), self._output_device_name)
         self._load()
 
@@ -680,14 +682,16 @@ class Audio:
         loop: bool = False,
         channel: Optional[str] = None,
         gain: float = 1.0,
+        pitch: float = 1.0,
     ) -> None:
         gain = max(0.0, min(1.5, float(gain)))
+        pitch = max(0.5, min(2.0, float(pitch)))
         normalized_pan = self._normalize_pan_for_key(key, pan)
         sound_path = self.sound_paths.get(key)
         requested_channel = channel or f"sfx_{key}"
         target_channel = self._normalize_channel_for_key(key, requested_channel)
         if self._should_use_non_spatial_hrtf(key, target_channel) and sound_path is not None:
-            x, y, z, pitch, relative = self._hrtf_profile(key, target_channel, normalized_pan)
+            x, y, z, profile_pitch, relative = self._hrtf_profile(key, target_channel, normalized_pan)
             played = self.hrtf.play_sound(
                 key=key,
                 path=sound_path,
@@ -696,7 +700,7 @@ class Audio:
                 y=y,
                 z=z,
                 gain=gain,
-                pitch=pitch,
+                pitch=profile_pitch * pitch,
                 loop=loop,
                 relative=relative,
                 spatialize=False,
@@ -708,6 +712,8 @@ class Audio:
         sound = self.sounds.get(key)
         if sound is None:
             return
+        if abs(pitch - 1.0) >= 0.01:
+            sound = self._get_pitched_sound(key, sound, pitch)
         output_channel = self._get_channel(target_channel)
         if output_channel is None:
             return
@@ -861,6 +867,30 @@ class Audio:
             relative = True
 
         return x, y, z, pitch, relative
+
+    def _get_pitched_sound(
+        self, key: str, sound: pygame.mixer.Sound, pitch: float,
+    ) -> pygame.mixer.Sound:
+        pitch_key = round(pitch * 100)
+        cache_key = (key, pitch_key)
+        cached = self._pitched_sounds.get(cache_key)
+        if cached is not None:
+            return cached
+        mixer_info = pygame.mixer.get_init()
+        if mixer_info is None:
+            return sound
+        freq, size, channels = mixer_info
+        width = abs(size) // 8
+        raw = sound.get_raw()
+        try:
+            inrate = int(freq * pitch)
+            converted, _ = audioop.ratecv(raw, width, channels, inrate, freq, None)
+            pitched = pygame.mixer.Sound(buffer=converted)
+            pitched.set_volume(sound.get_volume())
+            self._pitched_sounds[cache_key] = pitched
+            return pitched
+        except Exception:
+            return sound
 
     def _should_use_non_spatial_hrtf(self, key: str, channel: str) -> bool:
         if not self.hrtf.available:

@@ -156,8 +156,8 @@ class DummyAudio:
         self.music_idle = False
         self._output_device_name = settings.get("audio_output_device") or None
 
-    def play(self, key: str, pan=None, loop: bool = False, channel: str | None = None, gain: float = 1.0) -> None:
-        self.play_calls.append({"key": key, "channel": channel, "loop": loop, "pan": pan, "gain": gain})
+    def play(self, key: str, pan=None, loop: bool = False, channel: str | None = None, gain: float = 1.0, pitch: float = 1.0) -> None:
+        self.play_calls.append({"key": key, "channel": channel, "loop": loop, "pan": pan, "gain": gain, "pitch": pitch})
         self.played.append((key, channel, loop))
 
     def stop(self, channel: str) -> None:
