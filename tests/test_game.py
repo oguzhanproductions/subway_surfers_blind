@@ -1835,9 +1835,9 @@ class GameTests(unittest.TestCase):
         game._refresh_options_menu_labels()
 
         labels = [item.label for item in game.options_menu.items]
-        self.assertIn("Set User Name", labels[9])
-        self.assertIn("Log Out", labels[10])
-        self.assertEqual(game.options_menu.items[10].action, "opt_leaderboard_logout")
+        self.assertTrue(any(label.startswith("Set User Name") for label in labels))
+        self.assertTrue(any(label.startswith("Log Out") for label in labels))
+        self.assertEqual(game.options_menu.items[game._update_option_index("opt_leaderboard_logout")].action, "opt_leaderboard_logout")
 
     def test_confirming_leaderboard_logout_clears_local_session(self):
         game, speaker, audio = self.make_game()
@@ -2181,7 +2181,7 @@ class GameTests(unittest.TestCase):
         game.main_menu.handle_key(pygame.K_DOWN)
 
         self.assertEqual(speaker.messages[0][0], f"Main Menu   Version: {APP_VERSION}. Start Game")
-        self.assertEqual(speaker.messages[-1][0], "Events")
+        self.assertEqual(speaker.messages[-1][0], "Practice Lane")
 
     def test_main_menu_exit_action_opens_desktop_confirmation(self):
         game, _, _ = self.make_game()
@@ -2212,7 +2212,7 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.main_menu)
-        self.assertEqual(game.main_menu.index, 12)
+        self.assertEqual(game.main_menu.index, 13)
 
     def test_exit_confirmation_yes_closes_game(self):
         game, _, _ = self.make_game()
@@ -2249,6 +2249,7 @@ class GameTests(unittest.TestCase):
             "Check for Updates on Startup: On",
             "Output Device: System Default",
             "Menu Sound HRTF: On",
+            "Menu Wrap: Off",
             "Speech: Off",
             "SAPI Settings",
             "Difficulty: Normal",
@@ -3157,10 +3158,10 @@ class GameTests(unittest.TestCase):
 
         game._adjust_selected_option(1)
 
-        self.assertEqual(game.settings["sfx_volume"], 0.41)
-        self.assertEqual(game.options_menu.items[0].label, "SFX Volume: 41")
+        self.assertEqual(game.settings["sfx_volume"], 0.45)
+        self.assertEqual(game.options_menu.items[0].label, "SFX Volume: 45")
         self.assertEqual(audio.refreshed, 1)
-        self.assertEqual(speaker.messages[-1][0], "SFX Volume: 41")
+        self.assertEqual(speaker.messages[-1][0], "SFX Volume: 45")
         self.assertIsNotNone(audio.play_calls[-1]["pan"])
 
     def test_adjust_selected_option_changes_music_with_left_arrow(self):
@@ -3171,10 +3172,10 @@ class GameTests(unittest.TestCase):
 
         game._adjust_selected_option(-1)
 
-        self.assertEqual(game.settings["music_volume"], 0.59)
-        self.assertEqual(game.options_menu.items[1].label, "Music Volume: 59")
+        self.assertEqual(game.settings["music_volume"], 0.55)
+        self.assertEqual(game.options_menu.items[1].label, "Music Volume: 55")
         self.assertEqual(audio.refreshed, 1)
-        self.assertEqual(speaker.messages[-1][0], "Music Volume: 59")
+        self.assertEqual(speaker.messages[-1][0], "Music Volume: 55")
 
     def test_adjust_selected_option_toggles_startup_update_checks(self):
         game, speaker, audio = self.make_game()
@@ -3215,7 +3216,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_on_back_only_plays_edge_feedback(self):
         game, _, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 13
+        game.options_menu.index = game._update_option_index("back")
 
         game._adjust_selected_option(1)
 
@@ -3225,7 +3226,7 @@ class GameTests(unittest.TestCase):
     def test_enter_on_back_returns_to_main_menu_from_options(self):
         game, _, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 13
+        game.options_menu.index = game._update_option_index("back")
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -3271,7 +3272,7 @@ class GameTests(unittest.TestCase):
     def test_options_controls_entry_opens_controls_menu(self):
         game, _, _ = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 11
+        game.options_menu.index = game._update_option_index("opt_controls")
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -3283,7 +3284,7 @@ class GameTests(unittest.TestCase):
         game, _, _ = self.make_game()
         self.attach_controller(game, family=PLAYSTATION_FAMILY, name="Wireless Controller")
         game.active_menu = game.options_menu
-        game.options_menu.index = 11
+        game.options_menu.index = game._update_option_index("opt_controls")
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -3294,7 +3295,7 @@ class GameTests(unittest.TestCase):
     def test_options_gameplay_announcements_entry_opens_submenu(self):
         game, _, _ = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 10
+        game.options_menu.index = game._update_option_index("opt_gameplay_announcements")
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -3326,7 +3327,7 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.options_menu)
-        self.assertEqual(game.options_menu.index, 10)
+        self.assertEqual(game.options_menu.index, game._update_option_index("opt_gameplay_announcements"))
 
     def test_controls_menu_can_switch_binding_profile_like_options(self):
         game, speaker, _ = self.make_game()
@@ -3401,7 +3402,7 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.settings["sfx_volume"], 0.4)
 
         game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_l}))
-        self.assertEqual(game.settings["sfx_volume"], 0.41)
+        self.assertEqual(game.settings["sfx_volume"], 0.45)
 
     def test_controller_binding_capture_updates_playstation_jump_label(self):
         game, speaker, _ = self.make_game()
@@ -3472,7 +3473,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_toggles_main_menu_descriptions_from_options(self):
         game, speaker, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 8
+        game.options_menu.index = game._update_option_index("opt_main_menu_descriptions")
 
         game._adjust_selected_option(-1)
 
@@ -3483,7 +3484,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_toggles_exit_confirmation_from_options(self):
         game, speaker, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 12
+        game.options_menu.index = game._update_option_index("opt_exit_confirmation")
 
         game._adjust_selected_option(-1)
 
@@ -3494,7 +3495,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_sets_speech_state_from_direction(self):
         game, speaker, _ = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 5
+        game.options_menu.index = game._update_option_index("opt_speech")
         game.settings["speech_enabled"] = True
         game.speaker.enabled = True
 
@@ -3521,7 +3522,7 @@ class GameTests(unittest.TestCase):
     def test_options_sapi_entry_opens_sapi_submenu(self):
         game, _, _ = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 6
+        game.options_menu.index = game._update_option_index("opt_sapi_menu")
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -3538,7 +3539,7 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.options_menu)
-        self.assertEqual(game.options_menu.index, 6)
+        self.assertEqual(game.options_menu.index, game._update_option_index("opt_sapi_menu"))
 
     def test_adjust_selected_option_changes_sapi_volume(self):
         game, speaker, audio = self.make_game()
@@ -3552,7 +3553,7 @@ class GameTests(unittest.TestCase):
         self.assertEqual(speaker.sapi_volume, 99)
         self.assertEqual(game.sapi_menu.items[1].label, "SAPI Volume: 99")
         self.assertIn(("confirm", "ui", False), audio.played)
-        self.assertEqual(game.options_menu.items[6].label, "SAPI Settings")
+        self.assertEqual(game.options_menu.items[game._update_option_index("opt_sapi_menu")].label, "SAPI Settings")
         self.assertEqual(speaker.messages[-1][0], "SAPI Volume: 99")
 
     def test_adjust_selected_option_cycles_sapi_voice(self):
@@ -3598,7 +3599,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_cycles_difficulty_backward(self):
         game, speaker, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 7
+        game.options_menu.index = game._update_option_index("opt_diff")
         game.settings["difficulty"] = "normal"
 
         game._adjust_selected_option(-1)
@@ -3651,7 +3652,7 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.main_menu.index, 3)
         self.assertEqual(
             speaker.messages[-1][0],
-            "Me. Manage your active runner, hoverboard, upgrades, and collection bonuses.",
+            "Missions. Review mission sets, quests, and achievement progress from a single progression hub.",
         )
 
     def test_menu_repeat_adjusts_option_values_while_holding_horizontal_arrow(self):
@@ -3663,9 +3664,9 @@ class GameTests(unittest.TestCase):
         game._prime_menu_repeat(pygame.K_RIGHT)
         game._update_menu_repeat(MENU_REPEAT_INITIAL_DELAY + MENU_REPEAT_INTERVAL)
 
-        self.assertEqual(game.settings["sfx_volume"], 0.42)
-        self.assertEqual(game.options_menu.items[0].label, "SFX Volume: 42")
-        self.assertEqual(speaker.messages[-1][0], "SFX Volume: 42")
+        self.assertEqual(game.settings["sfx_volume"], 0.5)
+        self.assertEqual(game.options_menu.items[0].label, "SFX Volume: 50")
+        self.assertEqual(speaker.messages[-1][0], "SFX Volume: 50")
 
     def test_pause_menu_close_resumes_run(self):
         game, speaker, audio = self.make_game()
@@ -4225,6 +4226,7 @@ class GameTests(unittest.TestCase):
 
     def test_collect_power_starts_jetpack_loop_when_reward_is_jetpack(self):
         game, speaker, audio = self.make_game()
+        game.state.running = True
 
         game._apply_power_reward("jetpack", from_headstart=False)
 
