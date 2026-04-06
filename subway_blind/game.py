@@ -5945,6 +5945,9 @@ class SubwayBlindGame:
         self._run_rewards_committed = False
         self._near_miss_signatures.clear()
         self._guard_loop_timer = 0.0
+        self._coin_pitch_index = 0
+        self._coin_pitch_timer = 0.0
+        self._coin_streak = 0
         self._last_death_reason = "Run ended."
         self._game_over_publish_state = "idle"
         self._game_over_summary = self._empty_game_over_summary()

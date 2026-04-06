@@ -468,25 +468,9 @@ class Audio:
         self._music_fade_level = 0.0
         self._music_transition: str | None = None
         self._pitched_sounds: dict[tuple[str, int], pygame.mixer.Sound] = {}
-        self._hrtf: OpenALHrtfEngine | None = None
         self.hrtf = OpenALHrtfEngine(settings.get("sfx_volume", 1.0), self._output_device_name)
         self._load()
 
-    def _clear_runtime_audio_caches(self) -> None:
-        self.sounds.clear()
-        self.channels.clear()
-        self._pitched_sounds.clear()
-        self._next_channel_index = 0
-
-    @property
-    def hrtf(self) -> OpenALHrtfEngine | None:
-        return self._hrtf
-
-    @hrtf.setter
-    def hrtf(self, engine: OpenALHrtfEngine) -> None:
-        if self._hrtf is not None and self._hrtf is not engine:
-            self._clear_runtime_audio_caches()
-        self._hrtf = engine
     def _load_sound(self, key: str, path: str) -> None:
         if not os.path.exists(path):
             return
