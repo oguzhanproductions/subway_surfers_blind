@@ -18,6 +18,7 @@ Update Summary
 - Expanded the playable roster with event-style characters (Lucy, Prince K, Brody, Tasha, Ella, and Ninja), including full selection, perk, and upgrade support in Character menus.
 - Fixed Super Mystery Box jetpack rewards opened outside a run so they no longer grant a non-persistent runtime power-up and now resolve to a persistent economy reward path.
 - Fixed a jetpack loop audio edge case where menu-side reward handling could leave jetpack loop behavior in an invalid non-run state.
+- Fixed magnet and jetpack loop state synchronization so active loop channels no longer re-trigger from a stale inactive flag after power activation.
 
 Audio or UI Updates
 - Shop labels now refresh with live max-buy affordability after purchases and coin changes, improving spending clarity before confirming an item.

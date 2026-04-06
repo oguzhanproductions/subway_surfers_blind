@@ -6629,6 +6629,7 @@ class SubwayBlindGame:
         self.player.magnet = max(self.player.magnet, float(duration))
         if was_inactive and self.player.jetpack <= 0 and self.player.headstart <= 0:
             self.audio.play("magnet_loop", loop=True, channel="loop_magnet")
+            self._magnet_loop_active = True
 
     def _activate_jetpack(self, duration: float) -> None:
         was_inactive = self.player.jetpack <= 0
@@ -6637,6 +6638,7 @@ class SubwayBlindGame:
         self.player.vy = 0.0
         if was_inactive and self.state.running and not self.state.paused:
             self.audio.play("jetpack_loop", loop=True, channel="loop_jetpack")
+            self._jetpack_loop_active = True
 
     def _character_adjusted_power_duration(self, duration: float) -> float:
         return float(duration) * self._active_character_bonuses.power_duration_multiplier
