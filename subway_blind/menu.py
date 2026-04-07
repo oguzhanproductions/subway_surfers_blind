@@ -130,6 +130,9 @@ class Menu:
             self._move_to_index(len(self.items) - 1)
             return None
         if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            if not self.items:
+                self._play_menu_sound("menuedge")
+                return None
             self._play_menu_sound("confirm")
             return self.items[self.index].action
         return None

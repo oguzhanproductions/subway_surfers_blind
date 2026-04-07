@@ -420,8 +420,7 @@ class LeaderboardServer:
     def _peer_address(peer: enet.Peer) -> str:
         address = getattr(peer, "address", None)
         host = getattr(address, "host", 0)
-        port = getattr(address, "port", 0)
-        return f"{host}:{port}"
+        return str(host)
 
 
 def build_argument_parser() -> argparse.ArgumentParser:

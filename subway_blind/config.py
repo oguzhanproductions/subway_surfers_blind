@@ -167,7 +167,7 @@ def ensure_storage_layout() -> None:
         try:
             shutil.copytree(legacy_data_directory, data_directory, dirs_exist_ok=True)
         except Exception:
-            break
+            continue
         else:
             return
     data_directory.mkdir(parents=True, exist_ok=True)

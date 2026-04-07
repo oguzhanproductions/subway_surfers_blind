@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import json
 import math
+import re
 import uuid
 
 from argon2 import PasswordHasher
@@ -34,6 +35,7 @@ LEADERBOARD_PERIODS = ("season",)
 LEADERBOARD_DIFFICULTY_FILTERS = ("all", "easy", "normal", "hard")
 RUN_DIFFICULTIES = tuple(sorted(SPEED_PROFILES.keys()))
 POWERUP_USAGE_KEYS = ("magnet", "jetpack", "mult2x", "sneakers", "pogo", "hoverboard")
+DEVICE_HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SEASON_REWARD_KINDS = ("coins", "hoverboard", "key", "headstart", "score_booster")
 SEASON_ITEM_REWARD_COUNTS = (5, 5, 4, 4, 3, 3, 2, 2, 1, 1)
 SEASON_COIN_REWARD_MULTIPLIERS = (3.0, 2.75, 2.5, 2.25, 2.0, 1.75, 1.5, 1.25, 1.1, 1.0)
@@ -850,7 +852,7 @@ class LeaderboardService:
     @staticmethod
     def _normalize_device_hash(device_hash: str) -> str:
         normalized = str(device_hash or "").strip().lower()
-        if len(normalized) < 32 or len(normalized) > 128:
+        if not DEVICE_HASH_PATTERN.fullmatch(normalized):
             raise ServiceError("invalid_device", "Invalid device identifier.")
         return normalized
 

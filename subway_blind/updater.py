@@ -26,6 +26,7 @@ REQUEST_HEADERS = {
 VERSION_PATTERN = re.compile(r"^\s*v?(?P<major>\d+)(?:\.(?P<minor>\d+))?(?:\.(?P<patch>\d+))?(?:[-+].*)?\s*$")
 DOWNLOAD_CHUNK_SIZE = 1024 * 256
 SAFE_PATH_TOKEN_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
+MAX_RESTART_COPY_RETRIES = 180
 
 
 @dataclass(frozen=True)
@@ -351,11 +352,15 @@ class GitHubReleaseUpdater:
             f"set STAGE={staging_directory}\n"
             f"set TARGET={install_directory}\n"
             f"set ARCHIVE={archive_path}\n"
+            "set RETRIES=0\n"
+            f"set MAX_RETRIES={MAX_RESTART_COPY_RETRIES}\n"
             ":retry\n"
             "powershell -NoProfile -ExecutionPolicy Bypass -Command \""
             "$ErrorActionPreference = 'Stop'; "
             "Copy-Item -LiteralPath '%STAGE%\\*' -Destination '%TARGET%' -Recurse -Force\" >nul 2>nul\n"
             "if errorlevel 1 (\n"
+            "  set /a RETRIES=%RETRIES%+1\n"
+            "  if %RETRIES% GEQ %MAX_RETRIES% exit /b 1\n"
             "  timeout /t 1 /nobreak >nul\n"
             "  goto retry\n"
             ")\n"
