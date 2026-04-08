@@ -69,6 +69,25 @@ CHANNEL_FALLBACK_OVERRIDES = {
     "headstart_reward": "player_reward",
 }
 
+CHANNEL_POLYPHONY = {
+    "player_pickup": 12,
+    "player_dodge": 4,
+    "player_footstep": 4,
+    "player_jump": 4,
+    "player_roll": 4,
+    "player_land": 4,
+    "player_action": 8,
+    "player_power": 4,
+    "player_powerdown": 4,
+    "player_box": 4,
+    "player_impact": 4,
+    "player_crash": 4,
+    "player_death": 4,
+    "player_guard": 2,
+    "player_kick": 2,
+    "player_reward": 4,
+}
+
 FORCED_MONO_SOUND_KEYS = {
     "menumove",
     "menuedge",
@@ -76,6 +95,9 @@ FORCED_MONO_SOUND_KEYS = {
     "menuopen",
     "menuclose",
     "confirm",
+    "binding_countdown",
+    "binding_done",
+    "binding_fail",
 }
 ANNOUNCER_SOUND_FILES = {
     "announcer_jump_now": "jump_now.mp3",
@@ -468,6 +490,7 @@ class Audio:
         self._music_fade_level = 0.0
         self._music_transition: str | None = None
         self._pitched_sounds: dict[tuple[str, int], pygame.mixer.Sound] = {}
+        self._channel_polyphony_index: dict[str, int] = {}
         self.hrtf = OpenALHrtfEngine(settings.get("sfx_volume", 1.0), self._output_device_name)
         self._load()
 
@@ -581,6 +604,9 @@ class Audio:
         self._load_sound("menuopen", self._pick_menu_sound("menuopen"))
         self._load_sound("menuclose", self._pick_menu_sound("menuclose"))
         self._load_sound("confirm", self._pick_menu_sound("confirm"))
+        self._load_sound("binding_countdown", resource_path("assets", "menu", "binding_countdown.wav"))
+        self._load_sound("binding_done", resource_path("assets", "menu", "binding_done.wav"))
+        self._load_sound("binding_fail", resource_path("assets", "menu", "binding_fail.wav"))
         for key, filename in ANNOUNCER_SOUND_FILES.items():
             self._load_sound(key, announcer_path(filename))
         self._music_catalog = self._discover_music_catalog()
@@ -638,6 +664,7 @@ class Audio:
         self.sound_channel_counts.clear()
         self.channels.clear()
         self._next_channel_index = 0
+        self._channel_polyphony_index.clear()
         self._load()
         self.refresh_volumes()
         if resume_music_track is not None:
@@ -654,6 +681,7 @@ class Audio:
             self._stop_music_immediately()
         self.channels.clear()
         self._next_channel_index = 0
+        self._channel_polyphony_index.clear()
         self.hrtf.shutdown()
 
     def has_sound(self, key: str) -> bool:
@@ -690,12 +718,13 @@ class Audio:
         sound_path = self.sound_paths.get(key)
         requested_channel = channel or f"sfx_{key}"
         target_channel = self._normalize_channel_for_key(key, requested_channel)
+        playback_channel = self._resolve_playback_channel(target_channel, loop)
         if self._should_use_non_spatial_hrtf(key, target_channel) and sound_path is not None:
-            x, y, z, profile_pitch, relative = self._hrtf_profile(key, target_channel, normalized_pan)
+            x, y, z, profile_pitch, relative = self._hrtf_profile(key, playback_channel, normalized_pan)
             played = self.hrtf.play_sound(
                 key=key,
                 path=sound_path,
-                channel=target_channel,
+                channel=playback_channel,
                 x=x,
                 y=y,
                 z=z,
@@ -714,7 +743,7 @@ class Audio:
             return
         if abs(pitch - 1.0) >= 0.01:
             sound = self._get_pitched_sound(key, sound, pitch)
-        output_channel = self._get_channel(target_channel)
+        output_channel = self._get_channel(playback_channel)
         if output_channel is None:
             return
         base_volume = float(self.settings["sfx_volume"]) * gain
@@ -847,7 +876,18 @@ class Audio:
             x = clamped_pan * 2.6
             y = -0.08
             pitch = 0.9
-        elif key in {"warning", "menumove", "menuedge", "menuwrap", "menuopen", "menuclose", "confirm"}:
+        elif key in {
+            "warning",
+            "menumove",
+            "menuedge",
+            "menuwrap",
+            "menuopen",
+            "menuclose",
+            "confirm",
+            "binding_countdown",
+            "binding_done",
+            "binding_fail",
+        }:
             z = -0.8
             relative = True
         elif key in ANNOUNCER_SOUND_KEYS:
@@ -917,6 +957,40 @@ class Audio:
         if key in KEY_CHANNEL_OVERRIDES:
             return KEY_CHANNEL_OVERRIDES[key]
         return CHANNEL_FALLBACK_OVERRIDES.get(channel, channel)
+
+    def _resolve_playback_channel(self, channel: str, loop: bool) -> str:
+        if loop:
+            return channel
+        polyphony = CHANNEL_POLYPHONY.get(channel, 1)
+        if polyphony <= 1:
+            return channel
+        index_map = getattr(self, "_channel_polyphony_index", None)
+        if index_map is None:
+            index_map = {}
+            self._channel_polyphony_index = index_map
+        next_index = index_map.get(channel, 0)
+        for offset in range(polyphony):
+            slot_index = (next_index + offset) % polyphony
+            candidate_channel = f"{channel}__{slot_index}"
+            if not self._is_channel_active(candidate_channel):
+                index_map[channel] = (slot_index + 1) % polyphony
+                return candidate_channel
+        fallback_channel = f"{channel}__{next_index}"
+        index_map[channel] = (next_index + 1) % polyphony
+        return fallback_channel
+
+    def _is_channel_active(self, channel: str) -> bool:
+        output_channel = self.channels.get(channel)
+        if output_channel is not None:
+            try:
+                if bool(output_channel.get_busy()):
+                    return True
+            except Exception:
+                pass
+        try:
+            return bool(self.hrtf.is_channel_playing(channel))
+        except Exception:
+            return False
 
     def _discover_music_catalog(self) -> dict[str, str]:
         catalog: dict[str, str] = {}

@@ -29,6 +29,7 @@ CONTROLLER_FAMILIES = (XBOX_FAMILY, PLAYSTATION_FAMILY, GENERIC_FAMILY)
 AXIS_CAPTURE_THRESHOLD = 0.7
 AXIS_RELEASE_THRESHOLD = 0.45
 UNASSIGNED_LABEL = "Unassigned"
+KEYBOARD_MODIFIER_MASK = pygame.KMOD_SHIFT | pygame.KMOD_CTRL | pygame.KMOD_ALT | pygame.KMOD_META
 BUFFER_JUMP_FIRST_KEY = -10001
 BUFFER_JUMP_LAST_KEY = -10002
 BUFFER_SHORTCUT_CANDIDATE_PAIRS: tuple[tuple[str, str], ...] = (
@@ -85,6 +86,9 @@ class KeyboardLayoutInfo:
     locale_label: str
     layout_code: str
     layout_label: str
+
+
+KeyboardBindingValue = int | dict[str, int] | None
 
 
 ACTION_DEFINITIONS: tuple[InputActionDefinition, ...] = (
@@ -400,7 +404,62 @@ def sync_keyboard_layout_settings(settings: dict[str, Any]) -> bool:
     return changed
 
 
-def default_keyboard_bindings() -> dict[str, int]:
+def _normalize_keyboard_modifier_mask(mask: Any) -> int:
+    try:
+        normalized = int(mask)
+    except Exception:
+        return 0
+    return normalized & int(KEYBOARD_MODIFIER_MASK)
+
+
+def _normalize_keyboard_binding_value(value: Any, fallback: int | None) -> KeyboardBindingValue:
+    if isinstance(value, int):
+        return value
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        key = value.get("key")
+        modifiers = value.get("modifiers")
+        if isinstance(key, int):
+            return {"key": key, "modifiers": _normalize_keyboard_modifier_mask(modifiers)}
+    return fallback
+
+
+def _keyboard_binding_matches(binding: KeyboardBindingValue, key: int, modifiers: int) -> bool:
+    if isinstance(binding, int):
+        return binding == key
+    if isinstance(binding, dict):
+        binding_key = binding.get("key")
+        binding_modifiers = _normalize_keyboard_modifier_mask(binding.get("modifiers"))
+        return isinstance(binding_key, int) and binding_key == key and binding_modifiers == _normalize_keyboard_modifier_mask(modifiers)
+    return False
+
+
+def keyboard_binding_label(binding: KeyboardBindingValue) -> str:
+    if binding is None:
+        return UNASSIGNED_LABEL
+    if isinstance(binding, int):
+        return keyboard_key_label(binding)
+    if isinstance(binding, dict):
+        key = binding.get("key")
+        if not isinstance(key, int):
+            return UNASSIGNED_LABEL
+        modifiers = _normalize_keyboard_modifier_mask(binding.get("modifiers"))
+        parts: list[str] = []
+        if modifiers & pygame.KMOD_CTRL:
+            parts.append("Ctrl")
+        if modifiers & pygame.KMOD_ALT:
+            parts.append("Alt")
+        if modifiers & pygame.KMOD_SHIFT:
+            parts.append("Shift")
+        if modifiers & pygame.KMOD_META:
+            parts.append("Meta")
+        parts.append(keyboard_key_label(key))
+        return " + ".join(parts)
+    return UNASSIGNED_LABEL
+
+
+def default_keyboard_bindings() -> dict[str, KeyboardBindingValue]:
     return {definition.key: definition.keyboard_default for definition in ACTION_DEFINITIONS}
 
 
@@ -409,14 +468,14 @@ def default_controller_bindings() -> dict[str, dict[str, str]]:
     return {family: copy.deepcopy(template) for family in CONTROLLER_FAMILIES}
 
 
-def ensure_keyboard_bindings(raw_bindings: Any) -> dict[str, int | None]:
+def ensure_keyboard_bindings(raw_bindings: Any) -> dict[str, KeyboardBindingValue]:
     defaults = default_keyboard_bindings()
     if not isinstance(raw_bindings, dict):
         return defaults
-    normalized: dict[str, int | None] = {}
+    normalized: dict[str, KeyboardBindingValue] = {}
     for action in ACTION_ORDER:
         value = raw_bindings.get(action, defaults[action])
-        normalized[action] = value if isinstance(value, int) or value is None else defaults[action]
+        normalized[action] = _normalize_keyboard_binding_value(value, defaults[action])
     legacy_buffer_keys = {
         "menu_buffer_previous": pygame.K_PAGEUP,
         "menu_buffer_next": pygame.K_PAGEDOWN,
@@ -494,15 +553,19 @@ def action_label(action_key: str) -> str:
     return definition.label if definition is not None else action_key
 
 
-def reassign_keyboard_binding(bindings: dict[str, int | None], action_key: str, key: int) -> dict[str, int | None]:
+def reassign_keyboard_binding(
+    bindings: dict[str, KeyboardBindingValue],
+    action_key: str,
+    binding: KeyboardBindingValue,
+) -> dict[str, KeyboardBindingValue]:
     normalized = ensure_keyboard_bindings(bindings)
     definition = ACTION_DEFINITIONS_BY_KEY[action_key]
     for other_action, other_definition in ACTION_DEFINITIONS_BY_KEY.items():
         if other_action == action_key:
             continue
-        if other_definition.context == definition.context and normalized.get(other_action) == key:
+        if other_definition.context == definition.context and normalized.get(other_action) == binding:
             normalized[other_action] = None
-    normalized[action_key] = key
+    normalized[action_key] = binding
     return normalized
 
 
@@ -646,16 +709,16 @@ class ControllerSupport:
         selected_family = family or self.current_controller_family()
         return self.settings["controller_bindings"].get(selected_family, {}).get(action_key)
 
-    def keyboard_binding_for_action(self, action_key: str) -> int | None:
+    def keyboard_binding_for_action(self, action_key: str) -> KeyboardBindingValue:
         return self.settings["keyboard_bindings"].get(action_key)
 
-    def translate_keyboard_key(self, key: int, context: str) -> int | None:
+    def translate_keyboard_key(self, key: int, context: str, modifiers: int = 0) -> int | None:
         self.last_input_source = "keyboard"
         for action_key in ACTION_ORDER:
             definition = ACTION_DEFINITIONS_BY_KEY[action_key]
             if definition.context != context and not (context == GAME_CONTEXT and action_key.startswith("menu_buffer_")):
                 continue
-            if self.settings["keyboard_bindings"].get(action_key) == key:
+            if _keyboard_binding_matches(self.settings["keyboard_bindings"].get(action_key), key, modifiers):
                 return definition.target_key
         if context == GAME_CONTEXT and key in (pygame.K_r, pygame.K_t):
             return key
@@ -692,8 +755,8 @@ class ControllerSupport:
             return axis_binding
         return None
 
-    def update_keyboard_binding(self, action_key: str, key: int) -> None:
-        self.settings["keyboard_bindings"] = reassign_keyboard_binding(self.settings["keyboard_bindings"], action_key, key)
+    def update_keyboard_binding(self, action_key: str, binding: KeyboardBindingValue) -> None:
+        self.settings["keyboard_bindings"] = reassign_keyboard_binding(self.settings["keyboard_bindings"], action_key, binding)
 
     def update_controller_binding(self, family: str, action_key: str, binding: str) -> None:
         self.settings["controller_bindings"] = reassign_controller_binding(

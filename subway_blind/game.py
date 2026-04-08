@@ -70,6 +70,7 @@ from subway_blind.controls import (
     controller_binding_label,
     default_keyboard_bindings,
     family_label,
+    keyboard_binding_label,
     keyboard_key_label,
 )
 from subway_blind.events import (
@@ -242,12 +243,23 @@ EVENT_SHOP_HOVERBOARD_PACK_COST = 16
 EVENT_SHOP_HEADSTART_COST = 20
 EVENT_SHOP_SCORE_BOOSTER_COST = 24
 EVENT_SHOP_SUPER_BOX_COST = 30
+BINDING_CAPTURE_HOLD_SECONDS = 3.0
+BINDING_CAPTURE_DING_PITCHES = {3: 1.0, 2: 1.15, 1: 1.3}
 
 
 @dataclass(frozen=True)
 class BindingCaptureRequest:
     device: str
     action_key: str
+
+
+@dataclass
+class KeyboardBindingHoldState:
+    action_key: str
+    binding_value: int | dict[str, int]
+    required_keys: frozenset[int]
+    remaining_seconds: float
+    next_ding_mark: int
 
 
 @dataclass(frozen=True)
@@ -671,6 +683,8 @@ class SubwayBlindGame:
         self._item_upgrade_detail_key = DEFAULT_ITEM_UPGRADE_KEY
         self.controls = ControllerSupport(settings)
         self._binding_capture: BindingCaptureRequest | None = None
+        self._keyboard_binding_hold: KeyboardBindingHoldState | None = None
+        self._pressed_keys: set[int] = set()
         self._selected_binding_device = "controller" if self.controls.active_controller() is not None else "keyboard"
         self.leaderboard_client = LeaderboardClient()
         self._leaderboard_username = str(self.settings.get("leaderboard_username", "") or "").strip()
@@ -2197,7 +2211,7 @@ class SubwayBlindGame:
             if bound_key is None and action_key in keyboard_buffer_labels:
                 binding = keyboard_buffer_labels[action_key]
             else:
-                binding = keyboard_key_label(bound_key)
+                binding = keyboard_binding_label(bound_key)
             items.append(MenuItem(f"{label}: {binding}", f"bind_keyboard:{action_key}"))
         items.append(MenuItem("Reset to Defaults", "reset_keyboard_bindings"))
         items.append(MenuItem("Back", "back"))
@@ -2622,10 +2636,10 @@ class SubwayBlindGame:
         self.update_menu.items[2].action = "back" if not self.packaged_build else "quit"
 
     def _menu_navigation_hint(self) -> str:
-        up = keyboard_key_label(self.controls.keyboard_binding_for_action("menu_up"))
-        down = keyboard_key_label(self.controls.keyboard_binding_for_action("menu_down"))
-        confirm = keyboard_key_label(self.controls.keyboard_binding_for_action("menu_confirm"))
-        back = keyboard_key_label(self.controls.keyboard_binding_for_action("menu_back"))
+        up = keyboard_binding_label(self.controls.keyboard_binding_for_action("menu_up"))
+        down = keyboard_binding_label(self.controls.keyboard_binding_for_action("menu_down"))
+        confirm = keyboard_binding_label(self.controls.keyboard_binding_for_action("menu_confirm"))
+        back = keyboard_binding_label(self.controls.keyboard_binding_for_action("menu_back"))
         if self.controls.last_input_source == "controller" and self.controls.active_controller() is not None:
             family = self.controls.current_controller_family()
             up = controller_binding_label(self.controls.controller_binding_for_action("menu_up", family), family)
@@ -2635,8 +2649,8 @@ class SubwayBlindGame:
         return f"Use {up}/{down}, {confirm} to select, {back} to go back."
 
     def _option_adjustment_hint(self) -> str:
-        decrease = keyboard_key_label(self.controls.keyboard_binding_for_action("option_decrease"))
-        increase = keyboard_key_label(self.controls.keyboard_binding_for_action("option_increase"))
+        decrease = keyboard_binding_label(self.controls.keyboard_binding_for_action("option_decrease"))
+        increase = keyboard_binding_label(self.controls.keyboard_binding_for_action("option_increase"))
         if self.controls.last_input_source == "controller" and self.controls.active_controller() is not None:
             family = self.controls.current_controller_family()
             decrease = controller_binding_label(self.controls.controller_binding_for_action("option_decrease", family), family)
@@ -2644,13 +2658,13 @@ class SubwayBlindGame:
         return f"Adjust values with {decrease}/{increase}."
 
     def _gameplay_controls_summary(self) -> str:
-        move_left = keyboard_key_label(self.controls.keyboard_binding_for_action("game_move_left"))
-        move_right = keyboard_key_label(self.controls.keyboard_binding_for_action("game_move_right"))
-        jump = keyboard_key_label(self.controls.keyboard_binding_for_action("game_jump"))
-        roll = keyboard_key_label(self.controls.keyboard_binding_for_action("game_roll"))
-        hoverboard = keyboard_key_label(self.controls.keyboard_binding_for_action("game_hoverboard"))
-        pause = keyboard_key_label(self.controls.keyboard_binding_for_action("game_pause"))
-        speech = keyboard_key_label(self.controls.keyboard_binding_for_action("game_toggle_speech"))
+        move_left = keyboard_binding_label(self.controls.keyboard_binding_for_action("game_move_left"))
+        move_right = keyboard_binding_label(self.controls.keyboard_binding_for_action("game_move_right"))
+        jump = keyboard_binding_label(self.controls.keyboard_binding_for_action("game_jump"))
+        roll = keyboard_binding_label(self.controls.keyboard_binding_for_action("game_roll"))
+        hoverboard = keyboard_binding_label(self.controls.keyboard_binding_for_action("game_hoverboard"))
+        pause = keyboard_binding_label(self.controls.keyboard_binding_for_action("game_pause"))
+        speech = keyboard_binding_label(self.controls.keyboard_binding_for_action("game_toggle_speech"))
         if self.controls.last_input_source == "controller" and self.controls.active_controller() is not None:
             family = self.controls.current_controller_family()
             move_left = controller_binding_label(self.controls.controller_binding_for_action("game_move_left", family), family)
@@ -3663,15 +3677,20 @@ class SubwayBlindGame:
     def _cancel_binding_capture(self, announce: bool = True) -> None:
         if self._binding_capture is None:
             return
+        self._keyboard_binding_hold = None
         self._binding_capture = None
         if announce:
             self.speaker.speak("Control reassignment cancelled.", interrupt=True)
 
     def _begin_binding_capture(self, device: str, action_key: str) -> None:
         self._binding_capture = BindingCaptureRequest(device=device, action_key=action_key)
+        self._keyboard_binding_hold = None
         prompt = action_label(action_key)
         if device == "keyboard":
-            self.speaker.speak(f"Press a key for {prompt}. Press Escape to cancel.", interrupt=True)
+            self.speaker.speak(
+                f"Press the key or key combination for {prompt}, then hold for 3 seconds. Escape cancels.",
+                interrupt=True,
+            )
             return
         controller_name = family_label(self.controls.current_controller_family())
         self.speaker.speak(
@@ -3679,15 +3698,101 @@ class SubwayBlindGame:
             interrupt=True,
         )
 
-    def _complete_keyboard_binding_capture(self, key: int) -> None:
+    @staticmethod
+    def _is_modifier_key(key: int) -> bool:
+        return key in {
+            pygame.K_LSHIFT,
+            pygame.K_RSHIFT,
+            pygame.K_LCTRL,
+            pygame.K_RCTRL,
+            pygame.K_LALT,
+            pygame.K_RALT,
+            pygame.K_LMETA,
+            pygame.K_RMETA,
+        }
+
+    def _modifier_mask_from_keys(self, keys: set[int]) -> int:
+        mask = 0
+        if pygame.K_LSHIFT in keys or pygame.K_RSHIFT in keys:
+            mask |= pygame.KMOD_SHIFT
+        if pygame.K_LCTRL in keys or pygame.K_RCTRL in keys:
+            mask |= pygame.KMOD_CTRL
+        if pygame.K_LALT in keys or pygame.K_RALT in keys:
+            mask |= pygame.KMOD_ALT
+        if pygame.K_LMETA in keys or pygame.K_RMETA in keys:
+            mask |= pygame.KMOD_META
+        return mask
+
+    def _keyboard_binding_value_from_pressed_keys(self) -> tuple[int | dict[str, int] | None, frozenset[int], str]:
+        non_modifier_keys = [key for key in self._pressed_keys if not self._is_modifier_key(key)]
+        if len(non_modifier_keys) != 1:
+            return None, frozenset(), ""
+        primary_key = int(non_modifier_keys[0])
+        modifier_mask = self._modifier_mask_from_keys(self._pressed_keys)
+        label = keyboard_key_label(primary_key)
+        if modifier_mask & pygame.KMOD_CTRL:
+            label = f"Ctrl + {label}"
+        if modifier_mask & pygame.KMOD_ALT:
+            label = f"Alt + {label}"
+        if modifier_mask & pygame.KMOD_SHIFT:
+            label = f"Shift + {label}"
+        if modifier_mask & pygame.KMOD_META:
+            label = f"Meta + {label}"
+        if modifier_mask == 0:
+            return primary_key, frozenset(self._pressed_keys), label
+        return {"key": primary_key, "modifiers": int(modifier_mask)}, frozenset(self._pressed_keys), label
+
+    def _start_keyboard_binding_hold_capture(self) -> None:
         if self._binding_capture is None:
             return
+        binding_value, required_keys, label = self._keyboard_binding_value_from_pressed_keys()
+        if binding_value is None:
+            if len([key for key in self._pressed_keys if not self._is_modifier_key(key)]) > 1:
+                self._play_menu_feedback("menuedge")
+                self.speaker.speak("Only one non-modifier key can be assigned in one binding.", interrupt=True)
+            return
+        self._keyboard_binding_hold = KeyboardBindingHoldState(
+            action_key=self._binding_capture.action_key,
+            binding_value=binding_value,
+            required_keys=required_keys,
+            remaining_seconds=BINDING_CAPTURE_HOLD_SECONDS,
+            next_ding_mark=2,
+        )
+        self.audio.play("binding_countdown", channel="ui", pitch=BINDING_CAPTURE_DING_PITCHES[3])
+        self.speaker.speak(f"Hold {label} for 3 seconds.", interrupt=True)
+
+    def _fail_keyboard_binding_hold(self) -> None:
+        self._keyboard_binding_hold = None
+        self.audio.play("binding_fail", channel="ui")
+        self.speaker.speak("Binding failed. Keep the selected keys pressed for the full 3 seconds.", interrupt=True)
+
+    def _complete_keyboard_binding_capture(self) -> None:
+        if self._binding_capture is None or self._keyboard_binding_hold is None:
+            return
         action_key = self._binding_capture.action_key
-        self.controls.update_keyboard_binding(action_key, key)
+        self.controls.update_keyboard_binding(action_key, self._keyboard_binding_hold.binding_value)
+        binding_label = keyboard_binding_label(self.controls.keyboard_binding_for_action(action_key))
+        self._keyboard_binding_hold = None
         self._binding_capture = None
         self._build_keyboard_bindings_menu()
-        binding_label = keyboard_key_label(self.controls.keyboard_binding_for_action(action_key))
+        self.audio.play("binding_done", channel="ui")
         self.speaker.speak(f"{action_label(action_key)} set to {binding_label}.", interrupt=True)
+
+    def _update_keyboard_binding_hold(self, delta_time: float) -> None:
+        hold_state = self._keyboard_binding_hold
+        if hold_state is None:
+            return
+        if not hold_state.required_keys.issubset(self._pressed_keys):
+            self._fail_keyboard_binding_hold()
+            return
+        hold_state.remaining_seconds = max(0.0, hold_state.remaining_seconds - float(delta_time))
+        while hold_state.next_ding_mark >= 1 and hold_state.remaining_seconds <= float(hold_state.next_ding_mark):
+            pitch = BINDING_CAPTURE_DING_PITCHES.get(hold_state.next_ding_mark, 1.0)
+            self.audio.play("binding_countdown", channel="ui", pitch=pitch)
+            hold_state.next_ding_mark -= 1
+        if hold_state.remaining_seconds > 0:
+            return
+        self._complete_keyboard_binding_capture()
 
     def _complete_controller_binding_capture(self, binding: str) -> None:
         if self._binding_capture is None:
@@ -3710,11 +3815,16 @@ class SubwayBlindGame:
 
     def _handle_keyboard_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.KEYDOWN:
+            self._pressed_keys.add(int(event.key))
             if self._binding_capture is not None and self._binding_capture.device == "keyboard":
                 if event.key == pygame.K_ESCAPE:
                     self._cancel_binding_capture()
                     return
-                self._complete_keyboard_binding_capture(event.key)
+                if self._keyboard_binding_hold is None:
+                    self._start_keyboard_binding_hold_capture()
+                    return
+                if frozenset(self._pressed_keys) != self._keyboard_binding_hold.required_keys:
+                    self._fail_keyboard_binding_hold()
                 return
             context = self._input_context()
             typed_character = str(getattr(event, "unicode", "") or "").casefold()
@@ -3728,13 +3838,22 @@ class SubwayBlindGame:
                 if typed_character == previous_char.casefold():
                     self._process_translated_keydown(BUFFER_JUMP_FIRST_KEY if left_shift else pygame.K_PAGEUP)
                     return
-            translated_key = self.controls.translate_keyboard_key(event.key, context)
+            translated_key = self.controls.translate_keyboard_key(event.key, context, int(getattr(event, "mod", pygame.key.get_mods())))
             if translated_key is None:
                 return
             self._process_translated_keydown(translated_key)
             return
         if event.type == pygame.KEYUP:
-            translated_key = self.controls.translate_keyboard_key(event.key, self._input_context())
+            self._pressed_keys.discard(int(event.key))
+            if self._binding_capture is not None and self._binding_capture.device == "keyboard":
+                if self._keyboard_binding_hold is not None:
+                    self._fail_keyboard_binding_hold()
+                return
+            translated_key = self.controls.translate_keyboard_key(
+                event.key,
+                self._input_context(),
+                int(getattr(event, "mod", pygame.key.get_mods())),
+            )
             if translated_key is None:
                 return
             self._process_translated_keyup(translated_key)
@@ -3853,6 +3972,7 @@ class SubwayBlindGame:
                 self._update_menu_repeat(delta_time)
                 self._update_learn_sound_preview(delta_time)
                 self._update_update_install_state()
+                self._update_keyboard_binding_hold(delta_time)
             if not self._exit_requested:
                 self._update_leaderboard_operation_state()
 
@@ -7215,11 +7335,16 @@ class SubwayBlindGame:
         elif menu in {self.options_menu, self.sapi_menu, self.announcements_menu}:
             hint_text = f"{self._menu_navigation_hint()} {self._option_adjustment_hint()}"
         elif menu in {self.keyboard_bindings_menu, self.controller_bindings_menu} and self._binding_capture is not None:
-            capture_prompt = (
-                f"Press a key for {action_label(self._binding_capture.action_key)}. Escape cancels."
-                if self._binding_capture.device == "keyboard"
-                else f"Press a controller input for {action_label(self._binding_capture.action_key)}. Escape cancels."
-            )
+            if self._binding_capture.device == "keyboard":
+                if self._keyboard_binding_hold is None:
+                    capture_prompt = f"Press key(s) for {action_label(self._binding_capture.action_key)}, then hold 3 seconds. Escape cancels."
+                else:
+                    remaining = max(0.0, self._keyboard_binding_hold.remaining_seconds)
+                    capture_prompt = (
+                        f"Keep holding keys... {remaining:.1f}s left for {action_label(self._binding_capture.action_key)}. Escape cancels."
+                    )
+            else:
+                capture_prompt = f"Press a controller input for {action_label(self._binding_capture.action_key)}. Escape cancels."
             prompt_surface = self.font.render(capture_prompt, True, (255, 220, 120))
             self.screen.blit(prompt_surface, (40, max(height - 80, y_position + 18)))
 

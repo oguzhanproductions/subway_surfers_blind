@@ -7,6 +7,9 @@ Version: 1.1.5
 Update Summary
 - Added automatic keyboard layout localization that detects the active system keyboard layout on every startup and stores a stable layout signature in settings.
 - Added startup-safe control synchronization that keeps existing key bindings untouched when the detected keyboard layout is unchanged and refreshes layout-specific shortcut characters only when the layout changes.
+- Added keyboard binding capture support for modifier combinations such as Shift + S, Ctrl + key, Alt + key, and Meta + key.
+- Added a hold-to-confirm binding flow that requires keeping the selected key or key combination pressed for 3 seconds before applying the new binding.
+- Added capture validation that fails immediately if multiple non-modifier keys are pressed or if any required key is released before the 3-second confirmation window completes.
 - Added richer Shop item labels that now report both owned inventory and the maximum amount that can be bought with current banked coins.
 - Added max-buy reporting for Mystery Box entries so players can hear how many 500-coin box opens they can currently afford.
 - Added dynamic coin pickup sound pitch that rises with active collection streaks so successful combo chains sound progressively more intense.
@@ -26,6 +29,11 @@ Update Summary
 
 Audio or UI Updates
 - Keyboard Bindings menu now shows the detected keyboard layout name directly in the menu title.
+- Added dedicated short binding capture sounds from a new UI sound set:
+  - `binding_countdown.wav` for the 3-second hold countdown with rising pitch each second.
+  - `binding_done.wav` when hold confirmation succeeds and the new binding is saved.
+  - `binding_fail.wav` when hold confirmation fails before completion.
+- Updated keyboard binding capture prompts to announce hold-based confirmation and live remaining countdown time.
 - Shop labels now refresh with live max-buy affordability after purchases and coin changes, improving spending clarity before confirming an item.
 - Coin pickup feedback now applies streak-aware pitch scaling so consecutive pickups are easier to track by ear during high-speed runs.
 - Added speech buffer navigation and management controls based on ç and ö, including left-shift jump-to-start/end behavior and Delete removal.

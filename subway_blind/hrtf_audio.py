@@ -356,6 +356,17 @@ class OpenALHrtfEngine:
         self._stop_source(source)
         self._channel_keys.pop(channel, None)
 
+    def is_channel_playing(self, channel: str) -> bool:
+        if not self.available:
+            return False
+        source = self._sources.get(channel)
+        if source is None:
+            return False
+        try:
+            return bool(source.playing)
+        except Exception:
+            return False
+
     def shutdown(self) -> None:
         for source in self._sources.values():
             self._stop_source(source)

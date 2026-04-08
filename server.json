@@ -1,7 +1,7 @@
 {
-  "host": "localhost",
+  "host": "tt5server.com.tr",
   "port": 5363,
-  "server_public_key": "xKF38bSXeBlj0QNv-0aWuuhS-rHcRW_nGx_xtw6cFxk=",
+  "server_public_key": "9ohcsDDjlUgoUM5KJIi8S2yIrPCQ2PMriOLm8RuSOx0=",
   "server_public_key_path": "",
   "connect_timeout_ms": 1800,
   "request_timeout_ms": 4000,

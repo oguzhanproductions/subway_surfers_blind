@@ -1,4 +1,4 @@
-import os
+﻿import os
 import shutil
 import sys
 import tempfile
@@ -821,6 +821,19 @@ class AudioTests(unittest.TestCase):
 
         self.assertEqual(captured_channel.plays, [(audio.sounds["menuopen"], 0)])
 
+    def test_resolve_playback_channel_prefers_free_polyphony_slot(self):
+        audio = Audio.__new__(Audio)
+        audio.channels = {
+            "player_pickup__0": type("Channel", (), {"get_busy": lambda self: True})(),
+            "player_pickup__1": type("Channel", (), {"get_busy": lambda self: False})(),
+        }
+        audio._channel_polyphony_index = {"player_pickup": 0}
+        audio.hrtf = type("Hrtf", (), {"is_channel_playing": lambda self, _name: False})()
+
+        selected = audio._resolve_playback_channel("player_pickup", loop=False)
+
+        self.assertEqual(selected, "player_pickup__1")
+
     def test_update_starts_pending_track_after_music_fades_out(self):
         audio = Audio.__new__(Audio)
         audio._mixer_ready = True
@@ -1539,6 +1552,140 @@ class GameTests(unittest.TestCase):
                 "Check for Updates",
                 "Exit",
             ],
+        )
+
+    def test_speech_buffer_menu_replays_unicode_entry(self):
+        game, speaker, _ = self.make_game()
+        game._speech_buffer_history.clear()
+        game._speech_buffer_cursor = -1
+        game.speaker.speak("\u00e7 ve \u00f6 testi", interrupt=True)
+        speaker.messages.clear()
+
+        game._open_speech_buffer_menu(return_menu=game.main_menu)
+        game.speech_buffer_menu.index = 0
+        game._handle_active_menu_key(pygame.K_RETURN)
+
+        self.assertIs(game.active_menu, game.speech_buffer_menu)
+        self.assertIn("\u00e7 ve \u00f6 testi", game.speech_buffer_menu.items[0].label)
+        self.assertEqual(speaker.messages[-1][0], "\u00e7 ve \u00f6 testi")
+
+    def test_speech_buffer_delete_key_removes_selected_entry(self):
+        game, speaker, _ = self.make_game()
+        game._speech_buffer_history.clear()
+        game._speech_buffer_cursor = -1
+        game.speaker.speak("ilk sat\u0131r", interrupt=True)
+        game.speaker.speak("silinecek sat\u0131r", interrupt=True)
+        speaker.messages.clear()
+        game._open_speech_buffer_menu(return_menu=game.main_menu)
+        game.speech_buffer_menu.index = 0
+
+        game._handle_active_menu_key(pygame.K_DELETE)
+
+        self.assertEqual(len(game._speech_buffer_history), 1)
+        self.assertEqual(list(game._speech_buffer_history)[0], "ilk sat\u0131r")
+        self.assertIn("ilk sat\u0131r", game.speech_buffer_menu.items[0].label)
+
+    def test_speech_buffer_keyboard_shortcuts_use_active_layout_characters(self):
+        game, speaker, _ = self.make_game()
+        game.start_run()
+        game._speech_buffer_history.clear()
+        game._speech_buffer_cursor = -1
+        game.speaker.speak("ilk", interrupt=True)
+        game.speaker.speak("ikinci", interrupt=True)
+        speaker.messages.clear()
+        previous_char, next_char = game._buffer_shortcut_chars()
+
+        game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_UNKNOWN, "unicode": next_char}))
+        game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_DELETE, "unicode": ""}))
+
+        self.assertEqual(speaker.messages[-1][0], "Speech buffer item deleted.")
+        self.assertEqual(list(game._speech_buffer_history), ["ilk"])
+
+    def test_speech_buffer_shift_shortcuts_jump_to_first_and_last(self):
+        game, speaker, _ = self.make_game()
+        game.start_run()
+        game._speech_buffer_history.clear()
+        game._speech_buffer_cursor = -1
+        game.speaker.speak("bir", interrupt=True)
+        game.speaker.speak("iki", interrupt=True)
+        game.speaker.speak("uc", interrupt=True)
+        speaker.messages.clear()
+        previous_char, next_char = game._buffer_shortcut_chars()
+
+        game._handle_keyboard_event(
+            pygame.event.Event(
+                pygame.KEYDOWN,
+                {"key": pygame.K_UNKNOWN, "unicode": previous_char, "mod": pygame.KMOD_LSHIFT},
+            )
+        )
+        game._handle_keyboard_event(
+            pygame.event.Event(
+                pygame.KEYDOWN,
+                {"key": pygame.K_UNKNOWN, "unicode": next_char, "mod": pygame.KMOD_LSHIFT},
+            )
+        )
+
+        self.assertEqual(speaker.messages[0][0], "bir")
+        self.assertEqual(speaker.messages[1][0], "uc")
+
+    def test_speech_buffer_navigation_and_delete_do_not_play_menu_sfx(self):
+        game, _, audio = self.make_game()
+        game._speech_buffer_history.clear()
+        game._speech_buffer_cursor = -1
+        game.speaker.speak("bir", interrupt=True)
+        game.speaker.speak("iki", interrupt=True)
+        audio.played.clear()
+        game._open_speech_buffer_menu(return_menu=game.main_menu)
+        audio.played.clear()
+
+        game._handle_active_menu_key(pygame.K_PAGEUP)
+        game._handle_active_menu_key(pygame.K_DELETE)
+
+        self.assertEqual(audio.played, [])
+
+    def test_home_and_end_keys_do_not_navigate_speech_buffer(self):
+        game, _, _ = self.make_game()
+        game._speech_buffer_history.clear()
+        game._speech_buffer_cursor = -1
+        game.speaker.speak("bir", interrupt=True)
+        game.speaker.speak("iki", interrupt=True)
+        game._open_speech_buffer_menu(return_menu=game.main_menu)
+        game.speech_buffer_menu.index = 1
+
+        game._handle_active_menu_key(pygame.K_HOME)
+        game._handle_active_menu_key(pygame.K_END)
+
+        self.assertEqual(game.speech_buffer_menu.index, 1)
+
+    def test_speech_buffer_controller_shortcuts_work_for_playstation_profile(self):
+        game, _, _ = self.make_game()
+        self.attach_controller(game, family=PLAYSTATION_FAMILY, name="Wireless Controller")
+        game._speech_buffer_history.clear()
+        game._speech_buffer_cursor = -1
+        game.speaker.speak("ilk", interrupt=True)
+        game.speaker.speak("ikinci", interrupt=True)
+        game._open_speech_buffer_menu(return_menu=game.main_menu)
+
+        game._handle_controller_event(
+            pygame.event.Event(
+                pygame.CONTROLLERBUTTONDOWN,
+                {"instance_id": 41, "button": pygame.CONTROLLER_BUTTON_LEFTSHOULDER},
+            )
+        )
+
+        self.assertIs(game.active_menu, game.speech_buffer_menu)
+        self.assertEqual(game.speech_buffer_menu.index, 1)
+        self.assertEqual(
+            game.controls.controller_binding_for_action("menu_buffer_previous", PLAYSTATION_FAMILY),
+            "button:leftshoulder",
+        )
+        self.assertEqual(
+            game.controls.controller_binding_for_action("menu_buffer_home", PLAYSTATION_FAMILY),
+            "button:leftstick",
+        )
+        self.assertEqual(
+            game.controls.controller_binding_for_action("menu_buffer_end", PLAYSTATION_FAMILY),
+            "button:rightstick",
         )
 
     def test_main_menu_open_announces_item_description_when_enabled(self):
@@ -3361,10 +3508,39 @@ class GameTests(unittest.TestCase):
         game.active_menu = game.keyboard_bindings_menu
 
         game._begin_binding_capture("keyboard", "menu_confirm")
-        game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_f}))
+        game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_f, "mod": 0}))
+        game._update_keyboard_binding_hold(3.0)
 
         self.assertEqual(game.controls.keyboard_binding_for_action("menu_confirm"), pygame.K_f)
         self.assertIn(("Confirm set to F.", True), speaker.messages)
+
+    def test_keyboard_binding_capture_supports_modifier_combo(self):
+        game, speaker, _ = self.make_game()
+        game._build_keyboard_bindings_menu()
+        game.active_menu = game.keyboard_bindings_menu
+
+        game._begin_binding_capture("keyboard", "menu_confirm")
+        game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_LSHIFT, "mod": pygame.KMOD_LSHIFT}))
+        game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_s, "mod": pygame.KMOD_LSHIFT}))
+        game._update_keyboard_binding_hold(3.0)
+
+        self.assertEqual(
+            game.controls.keyboard_binding_for_action("menu_confirm"),
+            {"key": pygame.K_s, "modifiers": pygame.KMOD_SHIFT},
+        )
+        self.assertIn(("Confirm set to Shift + S.", True), speaker.messages)
+
+    def test_keyboard_binding_capture_fails_when_key_released_early(self):
+        game, speaker, _ = self.make_game()
+        game._build_keyboard_bindings_menu()
+        game.active_menu = game.keyboard_bindings_menu
+
+        game._begin_binding_capture("keyboard", "menu_confirm")
+        game._handle_keyboard_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_f, "mod": 0}))
+        game._handle_keyboard_event(pygame.event.Event(pygame.KEYUP, {"key": pygame.K_f, "mod": 0}))
+
+        self.assertEqual(game.controls.keyboard_binding_for_action("menu_confirm"), pygame.K_RETURN)
+        self.assertIn(("Binding failed. Keep the selected keys pressed for the full 3 seconds.", True), speaker.messages)
 
     def test_remapped_menu_up_uses_new_key_only(self):
         game, _, _ = self.make_game()
@@ -4768,3 +4944,4 @@ class GameTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
