@@ -21,6 +21,8 @@ CONTROLLER_FAMILIES = (XBOX_FAMILY, PLAYSTATION_FAMILY, GENERIC_FAMILY)
 AXIS_CAPTURE_THRESHOLD = 0.7
 AXIS_RELEASE_THRESHOLD = 0.45
 UNASSIGNED_LABEL = "Unassigned"
+BUFFER_JUMP_FIRST_KEY = -10001
+BUFFER_JUMP_LAST_KEY = -10002
 
 
 @dataclass(frozen=True)
@@ -29,7 +31,7 @@ class InputActionDefinition:
     label: str
     context: str
     target_key: int
-    keyboard_default: int
+    keyboard_default: int | None
     controller_default: str
 
 
@@ -46,6 +48,46 @@ ACTION_DEFINITIONS: tuple[InputActionDefinition, ...] = (
     InputActionDefinition("menu_down", "Menu Down", MENU_CONTEXT, pygame.K_DOWN, pygame.K_DOWN, "button:dpad_down"),
     InputActionDefinition("menu_confirm", "Confirm", MENU_CONTEXT, pygame.K_RETURN, pygame.K_RETURN, "button:a"),
     InputActionDefinition("menu_back", "Back", MENU_CONTEXT, pygame.K_ESCAPE, pygame.K_ESCAPE, "button:b"),
+    InputActionDefinition(
+        "menu_buffer_previous",
+        "Buffer Previous Item",
+        MENU_CONTEXT,
+        pygame.K_PAGEUP,
+        None,
+        "button:leftshoulder",
+    ),
+    InputActionDefinition(
+        "menu_buffer_next",
+        "Buffer Next Item",
+        MENU_CONTEXT,
+        pygame.K_PAGEDOWN,
+        None,
+        "button:rightshoulder",
+    ),
+    InputActionDefinition(
+        "menu_buffer_delete",
+        "Delete Buffer Item",
+        MENU_CONTEXT,
+        pygame.K_DELETE,
+        pygame.K_DELETE,
+        "button:y",
+    ),
+    InputActionDefinition(
+        "menu_buffer_home",
+        "Buffer Jump To First",
+        MENU_CONTEXT,
+        BUFFER_JUMP_FIRST_KEY,
+        None,
+        "button:leftstick",
+    ),
+    InputActionDefinition(
+        "menu_buffer_end",
+        "Buffer Jump To Last",
+        MENU_CONTEXT,
+        BUFFER_JUMP_LAST_KEY,
+        None,
+        "button:rightstick",
+    ),
     InputActionDefinition(
         "option_decrease",
         "Option Decrease",
@@ -114,6 +156,9 @@ KEY_LABEL_OVERRIDES = {
     pygame.K_SPACE: "Space",
     pygame.K_HOME: "Home",
     pygame.K_END: "End",
+    pygame.K_PAGEUP: "Page Up",
+    pygame.K_PAGEDOWN: "Page Down",
+    pygame.K_DELETE: "Delete",
 }
 XBOX_BUTTON_LABELS = {
     "a": "A",
@@ -197,6 +242,15 @@ def ensure_keyboard_bindings(raw_bindings: Any) -> dict[str, int | None]:
     for action in ACTION_ORDER:
         value = raw_bindings.get(action, defaults[action])
         normalized[action] = value if isinstance(value, int) or value is None else defaults[action]
+    legacy_buffer_keys = {
+        "menu_buffer_previous": pygame.K_PAGEUP,
+        "menu_buffer_next": pygame.K_PAGEDOWN,
+        "menu_buffer_home": pygame.K_HOME,
+        "menu_buffer_end": pygame.K_END,
+    }
+    for action, legacy_key in legacy_buffer_keys.items():
+        if normalized.get(action) == legacy_key:
+            normalized[action] = defaults[action]
     return normalized
 
 
@@ -424,7 +478,7 @@ class ControllerSupport:
         self.last_input_source = "keyboard"
         for action_key in ACTION_ORDER:
             definition = ACTION_DEFINITIONS_BY_KEY[action_key]
-            if definition.context != context:
+            if definition.context != context and not (context == GAME_CONTEXT and action_key.startswith("menu_buffer_")):
                 continue
             if self.settings["keyboard_bindings"].get(action_key) == key:
                 return definition.target_key
@@ -497,7 +551,7 @@ class ControllerSupport:
         translated: list[tuple[int, bool]] = []
         for action_key in ACTION_ORDER:
             definition = ACTION_DEFINITIONS_BY_KEY[action_key]
-            if definition.context != context:
+            if definition.context != context and not (context == GAME_CONTEXT and action_key.startswith("menu_buffer_")):
                 continue
             if bindings.get(action_key) == binding:
                 translated.append((definition.target_key, pressed))

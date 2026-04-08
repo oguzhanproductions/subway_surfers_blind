@@ -8,6 +8,7 @@ Update Summary
 - Added richer Shop item labels that now report both owned inventory and the maximum amount that can be bought with current banked coins.
 - Added max-buy reporting for Mystery Box entries so players can hear how many 500-coin box opens they can currently afford.
 - Added dynamic coin pickup sound pitch that rises with active collection streaks so successful combo chains sound progressively more intense.
+- Added an always-on speech buffer system that captures in-game spoken lines and preserves Turkish characters correctly.
 - Added a new Practice Lane mode in the main menu with fixed speed, obstacle-only training flow, and a short clear-target session for onboarding.
 - Updated Practice Lane flow to open a dedicated Practice Setup menu before starting the run.
 - Added a Practice Setup hazard-target input so players can set how many hazards must be cleared to finish Practice Lane.
@@ -24,6 +25,9 @@ Update Summary
 Audio or UI Updates
 - Shop labels now refresh with live max-buy affordability after purchases and coin changes, improving spending clarity before confirming an item.
 - Coin pickup feedback now applies streak-aware pitch scaling so consecutive pickups are easier to track by ear during high-speed runs.
+- Added speech buffer navigation and management controls based on ç and ö, including left-shift jump-to-start/end behavior and Delete removal.
+- Added controller bindings for speech buffer previous, next, delete, jump-to-first, and jump-to-last actions.
+- Removed the main menu Speech Buffer entry and moved speech buffer access to shortcut-driven flow only.
 - Added an Options entry to the in-run pause menu so players can open Options directly while paused and return to the pause flow after closing it.
 - Changed Options SFX and Music volume adjustment to move by 5 per step instead of 1.
 - Added a new Options toggle for Menu Wrap so menu navigation can loop from the end back to the start.

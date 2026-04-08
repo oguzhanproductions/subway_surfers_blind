@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+from collections import deque
 import queue
 import sys
 import textwrap
@@ -58,6 +59,8 @@ from subway_blind.collections import (
 )
 from subway_blind.controls import (
     ACTION_DEFINITIONS_BY_KEY,
+    BUFFER_JUMP_FIRST_KEY,
+    BUFFER_JUMP_LAST_KEY,
     CONTROLLER_ACTION_ORDER,
     GAME_CONTEXT,
     KEYBOARD_ACTION_ORDER,
@@ -65,6 +68,7 @@ from subway_blind.controls import (
     ControllerSupport,
     action_label,
     controller_binding_label,
+    default_keyboard_bindings,
     family_label,
     keyboard_key_label,
 )
@@ -217,6 +221,7 @@ MENU_REPEAT_INITIAL_DELAY = 0.34
 MENU_REPEAT_INTERVAL = 0.075
 LEARN_SOUND_PREVIEW_CHANNEL = "learn_sound_preview"
 LEARN_SOUND_LOOP_PREVIEW_DURATION = 2.6
+SPEECH_BUFFER_MAX_ITEMS = 300
 HEADSTART_SHAKE_CHANNEL = "intro_headstart_shake"
 HEADSTART_SPRAY_CHANNEL = "intro_headstart_spray"
 MIN_WINDOW_WIDTH = 640
@@ -602,6 +607,12 @@ class SubwayBlindGame:
         self.clock = clock
         self.settings = settings
         self.speaker = Speaker.from_settings(settings)
+        self._speech_buffer_history: deque[str] = deque(maxlen=SPEECH_BUFFER_MAX_ITEMS)
+        self._speech_buffer_cursor = -1
+        self._speech_buffer_capture_enabled = True
+        self._speaker_raw_speak = self.speaker.speak
+        self._speech_buffer_return_menu: Menu | None = None
+        self._install_speech_buffer_capture()
         self.audio = Audio(settings)
         self.updater = updater or GitHubReleaseUpdater()
         self.packaged_build = bool(getattr(sys, "frozen", False)) if packaged_build is None else bool(packaged_build)
@@ -782,6 +793,12 @@ class SubwayBlindGame:
             self._main_menu_title(),
             self._main_menu_items(),
             description_enabled=self._main_menu_descriptions_enabled,
+        )
+        self.speech_buffer_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Speech Buffer",
+            [MenuItem("Speech buffer is empty.", "speech_buffer_empty"), MenuItem("Back", "speech_buffer_back")],
         )
         self.loadout_menu = Menu(
             self.speaker,
@@ -1000,6 +1017,7 @@ class SubwayBlindGame:
             "Learn Game Sounds",
             [MenuItem(entry.label, f"learn_sound:{entry.key}") for entry in LEARN_SOUND_LIBRARY] + [MenuItem("Back", "back")],
         )
+        self._refresh_speech_buffer_menu_labels()
         self.howto_menu = Menu(
             self.speaker,
             self.audio,
@@ -1098,7 +1116,6 @@ class SubwayBlindGame:
             f"Check for Updates on Startup: "
             f"{'On' if self.settings['check_updates_on_startup'] else 'Off'}"
         )
-
     def _speech_option_label(self) -> str:
         return f"Speech: {'On' if self.settings['speech_enabled'] else 'Off'}"
 
@@ -1587,7 +1604,6 @@ class SubwayBlindGame:
         self.options_menu.items = self._build_options_menu_items()
         if selected_action:
             self.options_menu.index = self._update_option_index(selected_action)
-
     def _build_options_menu_items(self) -> list[MenuItem]:
         items = [
             MenuItem(self._sfx_option_label(), "opt_sfx"),
@@ -2167,9 +2183,19 @@ class SubwayBlindGame:
 
     def _build_keyboard_bindings_menu(self) -> None:
         items = []
+        keyboard_buffer_labels = {
+            "menu_buffer_previous": "ö",
+            "menu_buffer_next": "ç",
+            "menu_buffer_home": "Left Shift + ö",
+            "menu_buffer_end": "Left Shift + ç",
+        }
         for action_key in KEYBOARD_ACTION_ORDER:
             label = action_label(action_key)
-            binding = keyboard_key_label(self.controls.keyboard_binding_for_action(action_key))
+            bound_key = self.controls.keyboard_binding_for_action(action_key)
+            if bound_key is None and action_key in keyboard_buffer_labels:
+                binding = keyboard_buffer_labels[action_key]
+            else:
+                binding = keyboard_key_label(bound_key)
             items.append(MenuItem(f"{label}: {binding}", f"bind_keyboard:{action_key}"))
         items.append(MenuItem("Reset to Defaults", "reset_keyboard_bindings"))
         items.append(MenuItem("Back", "back"))
@@ -2192,6 +2218,193 @@ class SubwayBlindGame:
         self._build_controls_menu()
         self._build_keyboard_bindings_menu()
         self._build_controller_bindings_menu()
+
+    def _install_speech_buffer_capture(self) -> None:
+        raw_speak = self._speaker_raw_speak
+
+        def speak_with_buffer(text: str, interrupt: bool = True) -> None:
+            if self._speech_buffer_capture_enabled:
+                current_menu = getattr(self, "active_menu", None)
+                speech_buffer_menu = getattr(self, "speech_buffer_menu", None)
+                if current_menu is not speech_buffer_menu:
+                    normalized = self._normalize_speech_buffer_text(text)
+                    if normalized:
+                        self._speech_buffer_history.append(normalized)
+                        self._speech_buffer_cursor = len(self._speech_buffer_history) - 1
+            try:
+                raw_speak(text, interrupt=interrupt)
+            except TypeError:
+                raw_speak(text, interrupt)
+
+        self.speaker.speak = speak_with_buffer
+
+    @staticmethod
+    def _normalize_speech_buffer_text(text: object) -> str:
+        normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+        return normalized
+
+    def _speak_without_buffer_capture(self, text: str, interrupt: bool = True) -> None:
+        capture_previous = self._speech_buffer_capture_enabled
+        self._speech_buffer_capture_enabled = False
+        try:
+            try:
+                self._speaker_raw_speak(text, interrupt=interrupt)
+            except TypeError:
+                self._speaker_raw_speak(text, interrupt)
+        finally:
+            self._speech_buffer_capture_enabled = capture_previous
+
+    def _speech_buffer_item_label(self, text: str) -> str:
+        single_line = " ".join(text.splitlines())
+        if len(single_line) <= 110:
+            return single_line
+        return f"{single_line[:107]}..."
+
+    def _refresh_speech_buffer_menu_labels(self) -> None:
+        messages = list(self._speech_buffer_history)
+        self.speech_buffer_menu.title = f"Speech Buffer ({len(messages)})"
+        if not messages:
+            self.speech_buffer_menu.items = [
+                MenuItem("Speech buffer is empty.", "speech_buffer_empty"),
+                MenuItem("Back", "speech_buffer_back"),
+            ]
+            self.speech_buffer_menu.index = min(self.speech_buffer_menu.index, len(self.speech_buffer_menu.items) - 1)
+            return
+        items = [
+            MenuItem(self._speech_buffer_item_label(messages[index]), f"speech_buffer_item:{index}")
+            for index in range(len(messages) - 1, -1, -1)
+        ]
+        items.append(MenuItem("Back", "speech_buffer_back"))
+        self.speech_buffer_menu.items = items
+        self.speech_buffer_menu.index = min(self.speech_buffer_menu.index, len(items) - 1)
+
+    def _speech_buffer_selected_history_index(self) -> int | None:
+        if not self._speech_buffer_history:
+            return None
+        if self.active_menu == self.speech_buffer_menu and self.speech_buffer_menu.items:
+            selected = self.speech_buffer_menu.items[self.speech_buffer_menu.index]
+            if selected.action.startswith("speech_buffer_item:"):
+                try:
+                    return int(selected.action.split(":", 1)[1])
+                except ValueError:
+                    return None
+        if self._speech_buffer_cursor < 0:
+            self._speech_buffer_cursor = len(self._speech_buffer_history) - 1
+        return max(0, min(self._speech_buffer_cursor, len(self._speech_buffer_history) - 1))
+
+    def _open_speech_buffer_menu(self, return_menu: Menu | None) -> None:
+        self._refresh_speech_buffer_menu_labels()
+        messages_count = len(self._speech_buffer_history)
+        if messages_count > 0:
+            if self._speech_buffer_cursor < 0:
+                self._speech_buffer_cursor = messages_count - 1
+            self._speech_buffer_cursor = max(0, min(self._speech_buffer_cursor, messages_count - 1))
+            start_index = (messages_count - 1) - self._speech_buffer_cursor
+        else:
+            start_index = 0
+        self._speech_buffer_return_menu = return_menu
+        self._set_active_menu(self.speech_buffer_menu, start_index=start_index)
+
+    def _step_speech_buffer_cursor(self, direction: int) -> bool:
+        if not self._speech_buffer_history:
+            self._speak_without_buffer_capture("Speech buffer is empty.", interrupt=True)
+            return True
+        if self._speech_buffer_cursor < 0:
+            self._speech_buffer_cursor = len(self._speech_buffer_history) - 1
+        target = self._speech_buffer_cursor + direction
+        target = max(0, min(target, len(self._speech_buffer_history) - 1))
+        if target == self._speech_buffer_cursor:
+            return True
+        self._speech_buffer_cursor = target
+        self._speak_without_buffer_capture(list(self._speech_buffer_history)[self._speech_buffer_cursor], interrupt=True)
+        return True
+
+    def _repeat_speech_buffer_cursor(self) -> bool:
+        history_index = self._speech_buffer_selected_history_index()
+        if history_index is None:
+            self._speak_without_buffer_capture("Speech buffer is empty.", interrupt=True)
+            return True
+        self._speech_buffer_cursor = history_index
+        self._speak_without_buffer_capture(list(self._speech_buffer_history)[history_index], interrupt=True)
+        return True
+
+    def _delete_speech_buffer_cursor(self) -> bool:
+        history_index = self._speech_buffer_selected_history_index()
+        if history_index is None:
+            self._speak_without_buffer_capture("Speech buffer is empty.", interrupt=True)
+            return True
+        messages = list(self._speech_buffer_history)
+        del messages[history_index]
+        self._speech_buffer_history = deque(messages, maxlen=SPEECH_BUFFER_MAX_ITEMS)
+        if self._speech_buffer_history:
+            self._speech_buffer_cursor = min(history_index, len(self._speech_buffer_history) - 1)
+        else:
+            self._speech_buffer_cursor = -1
+        self._refresh_speech_buffer_menu_labels()
+        if self.active_menu == self.speech_buffer_menu:
+            if self._speech_buffer_history:
+                start_index = (len(self._speech_buffer_history) - 1) - self._speech_buffer_cursor
+                self.speech_buffer_menu.index = max(0, min(start_index, len(self.speech_buffer_menu.items) - 1))
+            else:
+                self.speech_buffer_menu.index = 0
+        self._speak_without_buffer_capture("Speech buffer item deleted.", interrupt=True)
+        return True
+
+    def _jump_speech_buffer_cursor(self, target: str) -> bool:
+        if not self._speech_buffer_history:
+            self._speak_without_buffer_capture("Speech buffer is empty.", interrupt=True)
+            return True
+        if target == "first":
+            self._speech_buffer_cursor = 0
+        else:
+            self._speech_buffer_cursor = len(self._speech_buffer_history) - 1
+        self._speak_without_buffer_capture(list(self._speech_buffer_history)[self._speech_buffer_cursor], interrupt=True)
+        return True
+
+    def _move_speech_buffer_menu_focus(self, delta: int | None = None, target: str | None = None) -> bool:
+        if self.active_menu != self.speech_buffer_menu:
+            return False
+        if not self._speech_buffer_history:
+            self.speech_buffer_menu.index = 0
+            self._speak_without_buffer_capture("Speech buffer is empty.", interrupt=True)
+            return True
+        history_count = len(self._speech_buffer_history)
+        if target == "first":
+            history_index = 0
+        elif target == "last":
+            history_index = history_count - 1
+        else:
+            selected_index = self._speech_buffer_selected_history_index()
+            if selected_index is None:
+                history_index = history_count - 1
+            else:
+                step = int(delta or 0)
+                history_index = max(0, min(history_count - 1, selected_index + step))
+        self._speech_buffer_cursor = history_index
+        self.speech_buffer_menu.index = (history_count - 1) - history_index
+        self._speak_without_buffer_capture(list(self._speech_buffer_history)[history_index], interrupt=True)
+        return True
+
+    def _handle_speech_buffer_shortcuts(self, key: int) -> bool:
+        if key == pygame.K_PAGEUP:
+            if self.active_menu == self.speech_buffer_menu:
+                return self._move_speech_buffer_menu_focus(delta=-1)
+            return self._step_speech_buffer_cursor(-1)
+        if key == pygame.K_PAGEDOWN:
+            if self.active_menu == self.speech_buffer_menu:
+                return self._move_speech_buffer_menu_focus(delta=1)
+            return self._step_speech_buffer_cursor(1)
+        if key == BUFFER_JUMP_FIRST_KEY:
+            if self.active_menu == self.speech_buffer_menu:
+                return self._move_speech_buffer_menu_focus(target="first")
+            return self._jump_speech_buffer_cursor("first")
+        if key == BUFFER_JUMP_LAST_KEY:
+            if self.active_menu == self.speech_buffer_menu:
+                return self._move_speech_buffer_menu_focus(target="last")
+            return self._jump_speech_buffer_cursor("last")
+        if key == pygame.K_DELETE:
+            return self._delete_speech_buffer_cursor()
+        return False
 
     def _current_learn_sound_entry(self) -> LearnSoundEntry | None:
         if self.active_menu != self.learn_sounds_menu:
@@ -3347,6 +3560,8 @@ class SubwayBlindGame:
             self._menu_last_indices[id(self.active_menu)] = int(self.active_menu.index)
         self.active_menu = menu
         if menu is not None:
+            if menu == self.speech_buffer_menu:
+                self._refresh_speech_buffer_menu_labels()
             if start_index is None:
                 remembered_index = self._menu_last_indices.get(id(menu))
                 target_index = int(remembered_index) if remembered_index is not None else 0
@@ -3368,6 +3583,13 @@ class SubwayBlindGame:
         if self.active_menu == self.controls_menu and key in (pygame.K_LEFT, pygame.K_RIGHT):
             selected_action = self.controls_menu.items[self.controls_menu.index].action if self.controls_menu.items else ""
             return selected_action == "select_binding_profile"
+        if self.active_menu == self.speech_buffer_menu and key in (
+            pygame.K_PAGEUP,
+            pygame.K_PAGEDOWN,
+            BUFFER_JUMP_FIRST_KEY,
+            BUFFER_JUMP_LAST_KEY,
+        ):
+            return True
         return False
 
     def _prime_menu_repeat(self, key: int) -> None:
@@ -3469,6 +3691,14 @@ class SubwayBlindGame:
         binding_label = controller_binding_label(self.controls.controller_binding_for_action(action_key, family), family)
         self.speaker.speak(f"{action_label(action_key)} set to {binding_label}.", interrupt=True)
 
+    def _buffer_character_shortcuts_enabled(self, context: str) -> bool:
+        defaults = default_keyboard_bindings()
+        bindings = self.settings.get("keyboard_bindings", {})
+        return (
+            bindings.get("menu_buffer_previous") == defaults.get("menu_buffer_previous")
+            and bindings.get("menu_buffer_next") == defaults.get("menu_buffer_next")
+        )
+
     def _handle_keyboard_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.KEYDOWN:
             if self._binding_capture is not None and self._binding_capture.device == "keyboard":
@@ -3477,7 +3707,18 @@ class SubwayBlindGame:
                     return
                 self._complete_keyboard_binding_capture(event.key)
                 return
-            translated_key = self.controls.translate_keyboard_key(event.key, self._input_context())
+            context = self._input_context()
+            typed_character = str(getattr(event, "unicode", "") or "").casefold()
+            if self._buffer_character_shortcuts_enabled(context):
+                modifiers = int(getattr(event, "mod", pygame.key.get_mods()))
+                left_shift = bool(modifiers & pygame.KMOD_LSHIFT)
+                if typed_character == "\u00e7":
+                    self._process_translated_keydown(BUFFER_JUMP_LAST_KEY if left_shift else pygame.K_PAGEDOWN)
+                    return
+                if typed_character == "\u00f6":
+                    self._process_translated_keydown(BUFFER_JUMP_FIRST_KEY if left_shift else pygame.K_PAGEUP)
+                    return
+            translated_key = self.controls.translate_keyboard_key(event.key, context)
             if translated_key is None:
                 return
             self._process_translated_keydown(translated_key)
@@ -3646,6 +3887,8 @@ class SubwayBlindGame:
             else:
                 self._play_menu_feedback("menuedge")
             return True
+        if self._handle_speech_buffer_shortcuts(key):
+            return True
         if self.active_menu == self.options_menu:
             if key in (pygame.K_LEFT, pygame.K_RIGHT):
                 self._adjust_selected_option(-1 if key == pygame.K_LEFT else 1)
@@ -3704,6 +3947,15 @@ class SubwayBlindGame:
             if action:
                 return self._handle_menu_action(action)
             return True
+        if self.active_menu == self.speech_buffer_menu:
+            if key in (pygame.K_HOME, pygame.K_END):
+                return True
+            if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                return self._repeat_speech_buffer_cursor()
+            action = self.speech_buffer_menu.handle_key(key)
+            if action:
+                return self._handle_menu_action(action)
+            return True
         action = self.active_menu.handle_key(key)
         if action:
             return self._handle_menu_action(action)
@@ -3731,6 +3983,11 @@ class SubwayBlindGame:
             if self.active_menu == self.controls_menu:
                 self._refresh_options_menu_labels()
                 self._set_active_menu(self.options_menu, start_index=self._update_option_index("opt_controls"))
+                return True
+            if self.active_menu == self.speech_buffer_menu:
+                return_menu = self._speech_buffer_return_menu or self.main_menu
+                return_index = self._menu_last_indices.get(id(return_menu))
+                self._set_active_menu(return_menu, start_index=return_index if return_index is not None else 0)
                 return True
             if self.active_menu == self.options_menu:
                 return_menu = self._options_return_menu or self.main_menu
@@ -4638,6 +4895,18 @@ class SubwayBlindGame:
             if action == "back":
                 self._set_active_menu(self.main_menu)
                 return True
+
+        if self.active_menu == self.speech_buffer_menu:
+            if action == "speech_buffer_back":
+                return_menu = self._speech_buffer_return_menu or self.main_menu
+                return_index = self._menu_last_indices.get(id(return_menu))
+                self._set_active_menu(return_menu, start_index=return_index if return_index is not None else 0)
+                return True
+            if action == "speech_buffer_empty":
+                self._play_menu_feedback("menuedge")
+                return True
+            if action.startswith("speech_buffer_item:"):
+                return self._repeat_speech_buffer_cursor()
 
         if self.active_menu == self.howto_menu:
             if action == "back":
@@ -6030,6 +6299,8 @@ class SubwayBlindGame:
         self._set_active_menu(None)
 
     def _handle_game_key(self, key: int) -> None:
+        if self._handle_speech_buffer_shortcuts(key):
+            return
         if key == pygame.K_ESCAPE:
             self._pause_active_run()
             return
@@ -6823,7 +7094,7 @@ class SubwayBlindGame:
 
         list_top = 110
         row_height = 38
-        visible_rows = 9 if menu == self.learn_sounds_menu else 10
+        visible_rows = 9 if menu in {self.learn_sounds_menu, self.speech_buffer_menu} else 10
         max_start_index = max(0, len(menu.items) - visible_rows)
         start_index = max(0, min(menu.index - (visible_rows // 2), max_start_index))
         visible_items = menu.items[start_index : start_index + visible_rows]
@@ -6866,6 +7137,10 @@ class SubwayBlindGame:
                 line_surface = self.font.render(line, True, (180, 180, 180))
                 self.screen.blit(line_surface, (40, description_top + 32 + (line_index * 26)))
             hint_text = self._menu_navigation_hint()
+        elif menu == self.speech_buffer_menu:
+            prompt_surface = self.font.render("Use \u00e7 and \u00f6 to move. Enter repeats. Delete removes selected line.", True, (205, 205, 205))
+            self.screen.blit(prompt_surface, (40, max(height - 100, y_position + 18)))
+            hint_text = f"{self._menu_navigation_hint()} \u00e7/\u00f6 work in menus and gameplay."
         elif menu == self.update_menu:
             description_lines = textwrap.wrap(self._update_status_message, width=62)[:2]
             release_note_lines = textwrap.wrap(self._update_release_notes, width=62)[:5]
@@ -7048,3 +7323,5 @@ class SubwayBlindGame:
             overlay = pygame.Surface((width, height), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 160))
             self.screen.blit(overlay, (0, 0))
+
+
