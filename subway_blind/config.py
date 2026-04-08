@@ -13,12 +13,15 @@ from subway_blind.boards import DEFAULT_SELECTED_BOARD_KEY, default_board_progre
 from subway_blind.characters import DEFAULT_SELECTED_CHARACTER_KEY, default_character_progress_state
 from subway_blind.collections import ensure_collection_state
 from subway_blind.controls import default_controller_bindings, default_keyboard_bindings
+from subway_blind.controls import detect_buffer_shortcut_chars, ensure_buffer_shortcut_chars
+from subway_blind.controls import detect_keyboard_layout_info
 from subway_blind.events import default_event_state, ensure_event_state
 from subway_blind.item_upgrades import default_item_upgrade_state
 from subway_blind.progression import ensure_progression_state
 from subway_blind.quests import default_quest_state, ensure_quest_state
 from subway_blind.characters import ensure_character_progress_state
 from subway_blind.controls import ensure_controller_bindings, ensure_keyboard_bindings
+from subway_blind.controls import sync_keyboard_layout_settings
 from subway_blind.item_upgrades import ensure_item_upgrade_state
 from subway_blind.version import APP_NAME
 
@@ -37,6 +40,7 @@ def _default_storage_base_dir() -> Path:
 
 
 BASE_DIR = _default_storage_base_dir()
+CURRENT_KEYBOARD_LAYOUT = detect_keyboard_layout_info()
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "sfx_volume": 0.9,
@@ -110,6 +114,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "word_hunt_active_word": "",
     "keyboard_bindings": default_keyboard_bindings(),
     "controller_bindings": default_controller_bindings(),
+    "buffer_shortcut_chars": detect_buffer_shortcut_chars(),
+    "keyboard_layout_signature": CURRENT_KEYBOARD_LAYOUT.signature,
+    "keyboard_layout_locale": CURRENT_KEYBOARD_LAYOUT.locale_code,
+    "keyboard_layout_locale_label": CURRENT_KEYBOARD_LAYOUT.locale_label,
+    "keyboard_layout_code": CURRENT_KEYBOARD_LAYOUT.layout_code,
+    "keyboard_layout_name": CURRENT_KEYBOARD_LAYOUT.layout_label,
 }
 
 
@@ -186,7 +196,8 @@ def load_settings() -> dict[str, Any]:
         except Exception:
             continue
         normalized = _normalized_settings(loaded)
-        if candidate == backup_path:
+        loaded_signature = str(loaded.get("keyboard_layout_signature", "") or "").strip() if isinstance(loaded, dict) else ""
+        if candidate == backup_path or loaded_signature != str(normalized.get("keyboard_layout_signature", "") or "").strip():
             save_settings(normalized)
         return normalized
     return _normalized_settings({})
@@ -243,4 +254,6 @@ def _normalized_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
     ][:256]
     merged["keyboard_bindings"] = ensure_keyboard_bindings(merged.get("keyboard_bindings"))
     merged["controller_bindings"] = ensure_controller_bindings(merged.get("controller_bindings"))
+    merged["buffer_shortcut_chars"] = ensure_buffer_shortcut_chars(merged.get("buffer_shortcut_chars"))
+    sync_keyboard_layout_settings(merged)
     return merged

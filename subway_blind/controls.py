@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import copy
+import ctypes
 from dataclasses import dataclass
+import locale
+import os
 from typing import Any
 
 import pygame
@@ -10,6 +13,11 @@ try:
     from pygame._sdl2 import controller as sdl_controller
 except Exception:
     sdl_controller = None
+
+try:
+    from babel import Locale as BabelLocale
+except Exception:
+    BabelLocale = None
 
 
 MENU_CONTEXT = "menu"
@@ -23,7 +31,34 @@ AXIS_RELEASE_THRESHOLD = 0.45
 UNASSIGNED_LABEL = "Unassigned"
 BUFFER_JUMP_FIRST_KEY = -10001
 BUFFER_JUMP_LAST_KEY = -10002
-
+BUFFER_SHORTCUT_CANDIDATE_PAIRS: tuple[tuple[str, str], ...] = (
+    ("ö", "ç"),
+    (";", "'"),
+    ("ş", "i"),
+    (",", "."),
+    ("[", "]"),
+    ("-", "="),
+)
+WINDOWS_LAYOUT_LABELS: dict[str, str] = {
+    "00000409": "US QWERTY",
+    "00000809": "UK QWERTY",
+    "00000407": "German QWERTZ",
+    "0000040C": "French AZERTY",
+    "00000410": "Italian QWERTY",
+    "0000040A": "Spanish QWERTY",
+    "0000041F": "Turkish Q",
+    "0001041F": "Turkish F",
+    "00000419": "Russian JCUKEN",
+}
+WINDOWS_LAYOUT_FALLBACK_LABELS: dict[str, str] = {
+    "tr": "Turkish",
+    "en": "English",
+    "de": "German",
+    "fr": "French",
+    "es": "Spanish",
+    "it": "Italian",
+    "ru": "Russian",
+}
 
 @dataclass(frozen=True)
 class InputActionDefinition:
@@ -41,6 +76,15 @@ class ConnectedController:
     name: str
     family: str
     controller: Any
+
+
+@dataclass(frozen=True)
+class KeyboardLayoutInfo:
+    signature: str
+    locale_code: str
+    locale_label: str
+    layout_code: str
+    layout_label: str
 
 
 ACTION_DEFINITIONS: tuple[InputActionDefinition, ...] = (
@@ -223,6 +267,137 @@ AXIS_LABELS = {
     "triggerleft:1": "Left Trigger",
     "triggerright:1": "Right Trigger",
 }
+
+
+def _normalize_locale_code(value: str) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return ""
+    normalized = normalized.split(".", 1)[0].split("@", 1)[0].replace("_", "-")
+    parts = [part for part in normalized.split("-") if part]
+    if not parts:
+        return ""
+    language = parts[0].lower()
+    if len(parts) == 1:
+        return language
+    region = parts[1].upper()
+    rest = parts[2:]
+    return "-".join([language, region, *rest])
+
+
+def _localized_locale_label(locale_code: str) -> str:
+    normalized = _normalize_locale_code(locale_code)
+    if not normalized:
+        return "Unknown Locale"
+    if BabelLocale is not None:
+        try:
+            locale_instance = BabelLocale.parse(normalized, sep="-")
+            return str(locale_instance.get_display_name(locale_instance))
+        except Exception:
+            pass
+    return normalized
+
+
+def _windows_layout_label(layout_code: str, locale_code: str) -> str:
+    normalized_layout = str(layout_code or "").upper()
+    if normalized_layout in WINDOWS_LAYOUT_LABELS:
+        return WINDOWS_LAYOUT_LABELS[normalized_layout]
+    language = _normalize_locale_code(locale_code).split("-", 1)[0]
+    if language in WINDOWS_LAYOUT_FALLBACK_LABELS:
+        return WINDOWS_LAYOUT_FALLBACK_LABELS[language]
+    return "Standard Keyboard"
+
+
+def detect_keyboard_layout_info() -> KeyboardLayoutInfo:
+    locale_code = ""
+    layout_code = ""
+    if os.name == "nt":
+        try:
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            get_layout = user32.GetKeyboardLayout
+            get_layout.argtypes = [ctypes.c_uint]
+            get_layout.restype = ctypes.c_void_p
+            get_layout_name = user32.GetKeyboardLayoutNameW
+            get_layout_name.argtypes = [ctypes.c_wchar_p]
+            get_layout_name.restype = ctypes.c_int
+            layout_handle = int(get_layout(0) or 0)
+            language_id = layout_handle & 0xFFFF
+            locale_from_windows = locale.windows_locale.get(language_id, "")
+            locale_code = _normalize_locale_code(locale_from_windows)
+            layout_buffer = ctypes.create_unicode_buffer(9)
+            if int(get_layout_name(layout_buffer)) != 0:
+                layout_code = str(layout_buffer.value or "").upper()
+        except Exception:
+            locale_code = ""
+            layout_code = ""
+    if not locale_code:
+        locale_guess = locale.getlocale()[0] or ""
+        locale_code = _normalize_locale_code(locale_guess)
+    locale_label = _localized_locale_label(locale_code)
+    layout_label = _windows_layout_label(layout_code, locale_code)
+    signature = f"{os.name}|{locale_code or 'unknown'}|{layout_code or 'default'}"
+    return KeyboardLayoutInfo(
+        signature=signature,
+        locale_code=locale_code,
+        locale_label=locale_label,
+        layout_code=layout_code,
+        layout_label=layout_label,
+    )
+
+
+def _char_supported_in_active_layout(character: str) -> bool:
+    if len(character) != 1:
+        return False
+    if os.name != "nt":
+        return character.isprintable()
+    try:
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        get_layout = user32.GetKeyboardLayout
+        get_layout.argtypes = [ctypes.c_uint]
+        get_layout.restype = ctypes.c_void_p
+        vk_scan = user32.VkKeyScanExW
+        vk_scan.argtypes = [ctypes.c_wchar, ctypes.c_void_p]
+        vk_scan.restype = ctypes.c_short
+        layout = get_layout(0)
+        if layout is None:
+            return character.isprintable()
+        return int(vk_scan(character, layout)) != -1
+    except Exception:
+        return character.isprintable()
+
+
+def detect_buffer_shortcut_chars() -> dict[str, str]:
+    for previous_char, next_char in BUFFER_SHORTCUT_CANDIDATE_PAIRS:
+        if _char_supported_in_active_layout(previous_char) and _char_supported_in_active_layout(next_char):
+            return {"previous": previous_char, "next": next_char}
+    return {"previous": ";", "next": "'"}
+
+
+def ensure_buffer_shortcut_chars(raw_chars: Any) -> dict[str, str]:
+    detected = detect_buffer_shortcut_chars()
+    if not isinstance(raw_chars, dict):
+        return detected
+    previous = str(raw_chars.get("previous", "") or "").strip()[:1]
+    next_char = str(raw_chars.get("next", "") or "").strip()[:1]
+    if not previous or not next_char or previous == next_char:
+        return detected
+    if not _char_supported_in_active_layout(previous) or not _char_supported_in_active_layout(next_char):
+        return detected
+    return {"previous": previous, "next": next_char}
+
+
+def sync_keyboard_layout_settings(settings: dict[str, Any]) -> bool:
+    layout_info = detect_keyboard_layout_info()
+    previous_signature = str(settings.get("keyboard_layout_signature", "") or "").strip()
+    changed = previous_signature != layout_info.signature
+    settings["keyboard_layout_signature"] = layout_info.signature
+    settings["keyboard_layout_locale"] = layout_info.locale_code
+    settings["keyboard_layout_locale_label"] = layout_info.locale_label
+    settings["keyboard_layout_code"] = layout_info.layout_code
+    settings["keyboard_layout_name"] = layout_info.layout_label
+    if changed:
+        settings["buffer_shortcut_chars"] = detect_buffer_shortcut_chars()
+    return changed
 
 
 def default_keyboard_bindings() -> dict[str, int]:
@@ -592,3 +767,4 @@ class ControllerSupport:
             return None
         direction = -1 if value < 0 else 1
         return f"axis:{axis_token}:{direction}"
+

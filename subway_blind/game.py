@@ -2179,15 +2179,17 @@ class SubwayBlindGame:
         self._selected_binding_device = available_devices[(current_index + direction) % len(available_devices)]
         self._play_menu_feedback("confirm")
         self._build_controls_menu()
-        self.speaker.speak(self.controls_menu.items[1].label, interrupt=True)
+        profile_index = self._menu_index_for_action(self.controls_menu, "select_binding_profile")
+        self.speaker.speak(self.controls_menu.items[profile_index].label, interrupt=True)
 
     def _build_keyboard_bindings_menu(self) -> None:
         items = []
+        previous_char, next_char = self._buffer_shortcut_chars()
         keyboard_buffer_labels = {
-            "menu_buffer_previous": "ö",
-            "menu_buffer_next": "ç",
-            "menu_buffer_home": "Left Shift + ö",
-            "menu_buffer_end": "Left Shift + ç",
+            "menu_buffer_previous": previous_char,
+            "menu_buffer_next": next_char,
+            "menu_buffer_home": f"Left Shift + {previous_char}",
+            "menu_buffer_end": f"Left Shift + {next_char}",
         }
         for action_key in KEYBOARD_ACTION_ORDER:
             label = action_label(action_key)
@@ -2200,7 +2202,14 @@ class SubwayBlindGame:
         items.append(MenuItem("Reset to Defaults", "reset_keyboard_bindings"))
         items.append(MenuItem("Back", "back"))
         self.keyboard_bindings_menu.items = items
-        self.keyboard_bindings_menu.title = "Keyboard Bindings"
+        keyboard_layout_name = str(self.settings.get("keyboard_layout_name", "") or "").strip()
+        self.keyboard_bindings_menu.title = f"Keyboard Bindings ({keyboard_layout_name})" if keyboard_layout_name else "Keyboard Bindings"
+
+    def _buffer_shortcut_chars(self) -> tuple[str, str]:
+        shortcut_chars = self.settings.get("buffer_shortcut_chars", {})
+        previous_char = str(shortcut_chars.get("previous", "ö") or "ö")
+        next_char = str(shortcut_chars.get("next", "ç") or "ç")
+        return previous_char[:1], next_char[:1]
 
     def _build_controller_bindings_menu(self) -> None:
         family = self.controls.current_controller_family()
@@ -3691,7 +3700,7 @@ class SubwayBlindGame:
         binding_label = controller_binding_label(self.controls.controller_binding_for_action(action_key, family), family)
         self.speaker.speak(f"{action_label(action_key)} set to {binding_label}.", interrupt=True)
 
-    def _buffer_character_shortcuts_enabled(self, context: str) -> bool:
+    def _buffer_character_shortcuts_enabled(self) -> bool:
         defaults = default_keyboard_bindings()
         bindings = self.settings.get("keyboard_bindings", {})
         return (
@@ -3709,13 +3718,14 @@ class SubwayBlindGame:
                 return
             context = self._input_context()
             typed_character = str(getattr(event, "unicode", "") or "").casefold()
-            if self._buffer_character_shortcuts_enabled(context):
+            if self._buffer_character_shortcuts_enabled():
+                previous_char, next_char = self._buffer_shortcut_chars()
                 modifiers = int(getattr(event, "mod", pygame.key.get_mods()))
                 left_shift = bool(modifiers & pygame.KMOD_LSHIFT)
-                if typed_character == "\u00e7":
+                if typed_character == next_char.casefold():
                     self._process_translated_keydown(BUFFER_JUMP_LAST_KEY if left_shift else pygame.K_PAGEDOWN)
                     return
-                if typed_character == "\u00f6":
+                if typed_character == previous_char.casefold():
                     self._process_translated_keydown(BUFFER_JUMP_FIRST_KEY if left_shift else pygame.K_PAGEUP)
                     return
             translated_key = self.controls.translate_keyboard_key(event.key, context)
@@ -7138,9 +7148,14 @@ class SubwayBlindGame:
                 self.screen.blit(line_surface, (40, description_top + 32 + (line_index * 26)))
             hint_text = self._menu_navigation_hint()
         elif menu == self.speech_buffer_menu:
-            prompt_surface = self.font.render("Use \u00e7 and \u00f6 to move. Enter repeats. Delete removes selected line.", True, (205, 205, 205))
+            previous_char, next_char = self._buffer_shortcut_chars()
+            prompt_surface = self.font.render(
+                f"Use {next_char} and {previous_char} to move. Enter repeats. Delete removes selected line.",
+                True,
+                (205, 205, 205),
+            )
             self.screen.blit(prompt_surface, (40, max(height - 100, y_position + 18)))
-            hint_text = f"{self._menu_navigation_hint()} \u00e7/\u00f6 work in menus and gameplay."
+            hint_text = f"{self._menu_navigation_hint()} {next_char}/{previous_char} work in menus and gameplay."
         elif menu == self.update_menu:
             description_lines = textwrap.wrap(self._update_status_message, width=62)[:2]
             release_note_lines = textwrap.wrap(self._update_release_notes, width=62)[:5]

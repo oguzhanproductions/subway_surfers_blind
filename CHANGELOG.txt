@@ -5,6 +5,8 @@ Date: 2026-04-03
 Version: 1.1.5
 
 Update Summary
+- Added automatic keyboard layout localization that detects the active system keyboard layout on every startup and stores a stable layout signature in settings.
+- Added startup-safe control synchronization that keeps existing key bindings untouched when the detected keyboard layout is unchanged and refreshes layout-specific shortcut characters only when the layout changes.
 - Added richer Shop item labels that now report both owned inventory and the maximum amount that can be bought with current banked coins.
 - Added max-buy reporting for Mystery Box entries so players can hear how many 500-coin box opens they can currently afford.
 - Added dynamic coin pickup sound pitch that rises with active collection streaks so successful combo chains sound progressively more intense.
@@ -23,6 +25,7 @@ Update Summary
 - Fixed magnet and jetpack loop state synchronization so active loop channels no longer re-trigger from a stale inactive flag after power activation.
 
 Audio or UI Updates
+- Keyboard Bindings menu now shows the detected keyboard layout name directly in the menu title.
 - Shop labels now refresh with live max-buy affordability after purchases and coin changes, improving spending clarity before confirming an item.
 - Coin pickup feedback now applies streak-aware pitch scaling so consecutive pickups are easier to track by ear during high-speed runs.
 - Added speech buffer navigation and management controls based on ç and ö, including left-shift jump-to-start/end behavior and Delete removal.
