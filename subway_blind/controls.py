@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import copy
 import ctypes
@@ -30,16 +30,6 @@ AXIS_CAPTURE_THRESHOLD = 0.7
 AXIS_RELEASE_THRESHOLD = 0.45
 UNASSIGNED_LABEL = "Unassigned"
 KEYBOARD_MODIFIER_MASK = pygame.KMOD_SHIFT | pygame.KMOD_CTRL | pygame.KMOD_ALT | pygame.KMOD_META
-BUFFER_JUMP_FIRST_KEY = -10001
-BUFFER_JUMP_LAST_KEY = -10002
-BUFFER_SHORTCUT_CANDIDATE_PAIRS: tuple[tuple[str, str], ...] = (
-    ("ö", "ç"),
-    (";", "'"),
-    ("ş", "i"),
-    (",", "."),
-    ("[", "]"),
-    ("-", "="),
-)
 WINDOWS_LAYOUT_LABELS: dict[str, str] = {
     "00000409": "US QWERTY",
     "00000809": "UK QWERTY",
@@ -96,46 +86,6 @@ ACTION_DEFINITIONS: tuple[InputActionDefinition, ...] = (
     InputActionDefinition("menu_down", "Menu Down", MENU_CONTEXT, pygame.K_DOWN, pygame.K_DOWN, "button:dpad_down"),
     InputActionDefinition("menu_confirm", "Confirm", MENU_CONTEXT, pygame.K_RETURN, pygame.K_RETURN, "button:a"),
     InputActionDefinition("menu_back", "Back", MENU_CONTEXT, pygame.K_ESCAPE, pygame.K_ESCAPE, "button:b"),
-    InputActionDefinition(
-        "menu_buffer_previous",
-        "Buffer Previous Item",
-        MENU_CONTEXT,
-        pygame.K_PAGEUP,
-        None,
-        "button:leftshoulder",
-    ),
-    InputActionDefinition(
-        "menu_buffer_next",
-        "Buffer Next Item",
-        MENU_CONTEXT,
-        pygame.K_PAGEDOWN,
-        None,
-        "button:rightshoulder",
-    ),
-    InputActionDefinition(
-        "menu_buffer_delete",
-        "Delete Buffer Item",
-        MENU_CONTEXT,
-        pygame.K_DELETE,
-        pygame.K_DELETE,
-        "button:y",
-    ),
-    InputActionDefinition(
-        "menu_buffer_home",
-        "Buffer Jump To First",
-        MENU_CONTEXT,
-        BUFFER_JUMP_FIRST_KEY,
-        None,
-        "button:leftstick",
-    ),
-    InputActionDefinition(
-        "menu_buffer_end",
-        "Buffer Jump To Last",
-        MENU_CONTEXT,
-        BUFFER_JUMP_LAST_KEY,
-        None,
-        "button:rightstick",
-    ),
     InputActionDefinition(
         "option_decrease",
         "Option Decrease",
@@ -370,26 +320,6 @@ def _char_supported_in_active_layout(character: str) -> bool:
         return character.isprintable()
 
 
-def detect_buffer_shortcut_chars() -> dict[str, str]:
-    for previous_char, next_char in BUFFER_SHORTCUT_CANDIDATE_PAIRS:
-        if _char_supported_in_active_layout(previous_char) and _char_supported_in_active_layout(next_char):
-            return {"previous": previous_char, "next": next_char}
-    return {"previous": ";", "next": "'"}
-
-
-def ensure_buffer_shortcut_chars(raw_chars: Any) -> dict[str, str]:
-    detected = detect_buffer_shortcut_chars()
-    if not isinstance(raw_chars, dict):
-        return detected
-    previous = str(raw_chars.get("previous", "") or "").strip()[:1]
-    next_char = str(raw_chars.get("next", "") or "").strip()[:1]
-    if not previous or not next_char or previous == next_char:
-        return detected
-    if not _char_supported_in_active_layout(previous) or not _char_supported_in_active_layout(next_char):
-        return detected
-    return {"previous": previous, "next": next_char}
-
-
 def sync_keyboard_layout_settings(settings: dict[str, Any]) -> bool:
     layout_info = detect_keyboard_layout_info()
     previous_signature = str(settings.get("keyboard_layout_signature", "") or "").strip()
@@ -399,8 +329,6 @@ def sync_keyboard_layout_settings(settings: dict[str, Any]) -> bool:
     settings["keyboard_layout_locale_label"] = layout_info.locale_label
     settings["keyboard_layout_code"] = layout_info.layout_code
     settings["keyboard_layout_name"] = layout_info.layout_label
-    if changed:
-        settings["buffer_shortcut_chars"] = detect_buffer_shortcut_chars()
     return changed
 
 
@@ -409,7 +337,16 @@ def _normalize_keyboard_modifier_mask(mask: Any) -> int:
         normalized = int(mask)
     except Exception:
         return 0
-    return normalized & int(KEYBOARD_MODIFIER_MASK)
+    canonical = 0
+    if normalized & pygame.KMOD_SHIFT:
+        canonical |= pygame.KMOD_SHIFT
+    if normalized & pygame.KMOD_CTRL:
+        canonical |= pygame.KMOD_CTRL
+    if normalized & pygame.KMOD_ALT:
+        canonical |= pygame.KMOD_ALT
+    if normalized & pygame.KMOD_META:
+        canonical |= pygame.KMOD_META
+    return canonical & int(KEYBOARD_MODIFIER_MASK)
 
 
 def _normalize_keyboard_binding_value(value: Any, fallback: int | None) -> KeyboardBindingValue:
@@ -483,15 +420,6 @@ def ensure_keyboard_bindings(raw_bindings: Any) -> dict[str, KeyboardBindingValu
     for action in ACTION_ORDER:
         value = raw_bindings.get(action, defaults[action])
         normalized[action] = _normalize_keyboard_binding_value(value, defaults[action])
-    legacy_buffer_keys = {
-        "menu_buffer_previous": pygame.K_PAGEUP,
-        "menu_buffer_next": pygame.K_PAGEDOWN,
-        "menu_buffer_home": pygame.K_HOME,
-        "menu_buffer_end": pygame.K_END,
-    }
-    for action, legacy_key in legacy_buffer_keys.items():
-        if normalized.get(action) == legacy_key:
-            normalized[action] = defaults[action]
     return normalized
 
 
@@ -723,7 +651,7 @@ class ControllerSupport:
         self.last_input_source = "keyboard"
         for action_key in ACTION_ORDER:
             definition = ACTION_DEFINITIONS_BY_KEY[action_key]
-            if definition.context != context and not (context == GAME_CONTEXT and action_key.startswith("menu_buffer_")):
+            if definition.context != context:
                 continue
             if _keyboard_binding_matches(self.settings["keyboard_bindings"].get(action_key), key, modifiers):
                 return definition.target_key
@@ -796,7 +724,7 @@ class ControllerSupport:
         translated: list[tuple[int, bool]] = []
         for action_key in ACTION_ORDER:
             definition = ACTION_DEFINITIONS_BY_KEY[action_key]
-            if definition.context != context and not (context == GAME_CONTEXT and action_key.startswith("menu_buffer_")):
+            if definition.context != context:
                 continue
             if bindings.get(action_key) == binding:
                 translated.append((definition.target_key, pressed))
@@ -837,4 +765,5 @@ class ControllerSupport:
             return None
         direction = -1 if value < 0 else 1
         return f"axis:{axis_token}:{direction}"
+
 

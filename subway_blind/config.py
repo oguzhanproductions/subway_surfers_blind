@@ -13,7 +13,6 @@ from subway_blind.boards import DEFAULT_SELECTED_BOARD_KEY, default_board_progre
 from subway_blind.characters import DEFAULT_SELECTED_CHARACTER_KEY, default_character_progress_state
 from subway_blind.collections import ensure_collection_state
 from subway_blind.controls import default_controller_bindings, default_keyboard_bindings
-from subway_blind.controls import detect_buffer_shortcut_chars, ensure_buffer_shortcut_chars
 from subway_blind.controls import detect_keyboard_layout_info
 from subway_blind.events import default_event_state, ensure_event_state
 from subway_blind.item_upgrades import default_item_upgrade_state
@@ -114,7 +113,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "word_hunt_active_word": "",
     "keyboard_bindings": default_keyboard_bindings(),
     "controller_bindings": default_controller_bindings(),
-    "buffer_shortcut_chars": detect_buffer_shortcut_chars(),
     "keyboard_layout_signature": CURRENT_KEYBOARD_LAYOUT.signature,
     "keyboard_layout_locale": CURRENT_KEYBOARD_LAYOUT.locale_code,
     "keyboard_layout_locale_label": CURRENT_KEYBOARD_LAYOUT.locale_label,
@@ -254,6 +252,5 @@ def _normalized_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
     ][:256]
     merged["keyboard_bindings"] = ensure_keyboard_bindings(merged.get("keyboard_bindings"))
     merged["controller_bindings"] = ensure_controller_bindings(merged.get("controller_bindings"))
-    merged["buffer_shortcut_chars"] = ensure_buffer_shortcut_chars(merged.get("buffer_shortcut_chars"))
     sync_keyboard_layout_settings(merged)
     return merged
