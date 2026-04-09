@@ -88,7 +88,7 @@ class KeyboardLayoutInfo:
     layout_label: str
 
 
-KeyboardBindingValue = int | dict[str, int] | None
+KeyboardBindingValue = int | dict[str, object] | None
 
 
 ACTION_DEFINITIONS: tuple[InputActionDefinition, ...] = (
@@ -421,7 +421,11 @@ def _normalize_keyboard_binding_value(value: Any, fallback: int | None) -> Keybo
         key = value.get("key")
         modifiers = value.get("modifiers")
         if isinstance(key, int):
-            return {"key": key, "modifiers": _normalize_keyboard_modifier_mask(modifiers)}
+            normalized: dict[str, object] = {"key": key, "modifiers": _normalize_keyboard_modifier_mask(modifiers)}
+            label = value.get("label")
+            if isinstance(label, str) and label.strip():
+                normalized["label"] = label.strip()
+            return normalized
     return fallback
 
 
@@ -441,6 +445,9 @@ def keyboard_binding_label(binding: KeyboardBindingValue) -> str:
     if isinstance(binding, int):
         return keyboard_key_label(binding)
     if isinstance(binding, dict):
+        custom_label = binding.get("label")
+        if isinstance(custom_label, str) and custom_label.strip():
+            return custom_label.strip()
         key = binding.get("key")
         if not isinstance(key, int):
             return UNASSIGNED_LABEL

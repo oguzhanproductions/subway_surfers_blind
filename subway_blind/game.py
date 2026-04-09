@@ -256,7 +256,7 @@ class BindingCaptureRequest:
 @dataclass
 class KeyboardBindingHoldState:
     action_key: str
-    binding_value: int | dict[str, int]
+    binding_value: int | dict[str, object]
     required_keys: frozenset[int]
     remaining_seconds: float
     next_ding_mark: int
@@ -3723,13 +3723,18 @@ class SubwayBlindGame:
             mask |= pygame.KMOD_META
         return mask
 
-    def _keyboard_binding_value_from_pressed_keys(self) -> tuple[int | dict[str, int] | None, frozenset[int], str]:
+    def _keyboard_binding_value_from_pressed_keys(
+        self,
+        key_event: pygame.event.Event,
+    ) -> tuple[int | dict[str, object] | None, frozenset[int], str]:
         non_modifier_keys = [key for key in self._pressed_keys if not self._is_modifier_key(key)]
         if len(non_modifier_keys) != 1:
             return None, frozenset(), ""
         primary_key = int(non_modifier_keys[0])
         modifier_mask = self._modifier_mask_from_keys(self._pressed_keys)
-        label = keyboard_key_label(primary_key)
+        raw_char = str(getattr(key_event, "unicode", "") or "")
+        char_label = raw_char if len(raw_char) == 1 and raw_char.isprintable() and not raw_char.isspace() else ""
+        label = char_label or keyboard_key_label(primary_key)
         if modifier_mask & pygame.KMOD_CTRL:
             label = f"Ctrl + {label}"
         if modifier_mask & pygame.KMOD_ALT:
@@ -3738,14 +3743,14 @@ class SubwayBlindGame:
             label = f"Shift + {label}"
         if modifier_mask & pygame.KMOD_META:
             label = f"Meta + {label}"
-        if modifier_mask == 0:
+        if modifier_mask == 0 and not char_label:
             return primary_key, frozenset(self._pressed_keys), label
-        return {"key": primary_key, "modifiers": int(modifier_mask)}, frozenset(self._pressed_keys), label
+        return {"key": primary_key, "modifiers": int(modifier_mask), "label": label}, frozenset(self._pressed_keys), label
 
-    def _start_keyboard_binding_hold_capture(self) -> None:
+    def _start_keyboard_binding_hold_capture(self, key_event: pygame.event.Event) -> None:
         if self._binding_capture is None:
             return
-        binding_value, required_keys, label = self._keyboard_binding_value_from_pressed_keys()
+        binding_value, required_keys, label = self._keyboard_binding_value_from_pressed_keys(key_event)
         if binding_value is None:
             if len([key for key in self._pressed_keys if not self._is_modifier_key(key)]) > 1:
                 self._play_menu_feedback("menuedge")
@@ -3821,7 +3826,7 @@ class SubwayBlindGame:
                     self._cancel_binding_capture()
                     return
                 if self._keyboard_binding_hold is None:
-                    self._start_keyboard_binding_hold_capture()
+                    self._start_keyboard_binding_hold_capture(event)
                     return
                 if frozenset(self._pressed_keys) != self._keyboard_binding_hold.required_keys:
                     self._fail_keyboard_binding_hold()

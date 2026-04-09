@@ -3526,7 +3526,7 @@ class GameTests(unittest.TestCase):
 
         self.assertEqual(
             game.controls.keyboard_binding_for_action("menu_confirm"),
-            {"key": pygame.K_s, "modifiers": pygame.KMOD_SHIFT},
+            {"key": pygame.K_s, "modifiers": pygame.KMOD_SHIFT, "label": "Shift + S"},
         )
         self.assertIn(("Confirm set to Shift + S.", True), speaker.messages)
 
