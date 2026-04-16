@@ -10,7 +10,7 @@ import random
 import re
 import threading
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 import pygame
 
@@ -708,6 +708,9 @@ class SubwayBlindGame:
         self._publish_confirm_return_index = 0
         self._publish_after_leaderboard_auth = False
         self._issue_submit_after_leaderboard_auth = False
+        self._pending_purchase_handler: Callable[[], None] | None = None
+        self._pending_purchase_return_menu: Menu | None = None
+        self._pending_purchase_return_index = 0
         self._game_over_publish_state = "idle"
         self._active_run_stats = self._empty_run_stats()
         self._game_over_summary = self._empty_game_over_summary()
@@ -776,6 +779,15 @@ class SubwayBlindGame:
             [
                 MenuItem("Yes", "publish_confirm_yes"),
                 MenuItem("No", "publish_confirm_no"),
+            ],
+        )
+        self.purchase_confirm_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Confirm Purchase?",
+            [
+                MenuItem("Yes", "confirm_purchase_yes"),
+                MenuItem("No", "confirm_purchase_no"),
             ],
         )
         self.game_over_menu = Menu(
@@ -1066,6 +1078,7 @@ class SubwayBlindGame:
         self._refresh_me_menu_labels()
         self._refresh_issue_menu()
         self._refresh_control_menus()
+        self._refresh_game_over_menu()
 
         self.active_menu: Optional[Menu] = self.main_menu
         if self.packaged_build and bool(self.settings.get("check_updates_on_startup", True)):
@@ -1183,6 +1196,9 @@ class SubwayBlindGame:
 
     def _exit_confirmation_option_label(self) -> str:
         return f"Exit Confirmation: {'On' if self._exit_confirmation_enabled() else 'Off'}"
+
+    def _purchase_confirmation_option_label(self) -> str:
+        return f"Purchase Confirmation: {'On' if self._purchase_confirmation_enabled() else 'Off'}"
 
     def _headstart_option_label(self) -> str:
         owned = int(self.settings.get("headstarts", 0))
@@ -1621,6 +1637,7 @@ class SubwayBlindGame:
             [
                 MenuItem("Gameplay Announcements", "opt_gameplay_announcements"),
                 MenuItem("Controls", "opt_controls"),
+                MenuItem(self._purchase_confirmation_option_label(), "opt_purchase_confirmation"),
                 MenuItem(self._exit_confirmation_option_label(), "opt_exit_confirmation"),
                 MenuItem("Back", "back"),
             ]
@@ -1658,8 +1675,10 @@ class SubwayBlindGame:
         self.game_over_menu.items[1].label = f"Coins: {int(summary['coins'])}"
         self.game_over_menu.items[2].label = f"Play Time: {format_play_time(summary['play_time_seconds'])}"
         self.game_over_menu.items[3].label = f"Death reason: {summary['death_reason']}"
-        self.game_over_menu.items[4].label = "Run again"
-        self.game_over_menu.items[5].label = "Main menu"
+        run_again_index = self._menu_index_for_action(self.game_over_menu, "game_over_retry")
+        main_menu_index = self._menu_index_for_action(self.game_over_menu, "game_over_main_menu")
+        self.game_over_menu.items[run_again_index].label = "Run again"
+        self.game_over_menu.items[main_menu_index].label = "Main menu"
 
     @staticmethod
     def _empty_run_stats() -> dict[str, object]:
@@ -2303,6 +2322,9 @@ class SubwayBlindGame:
     def _exit_confirmation_enabled(self) -> bool:
         return bool(self.settings.get("confirm_exit_enabled", True))
 
+    def _purchase_confirmation_enabled(self) -> bool:
+        return bool(self.settings.get("confirm_purchase_enabled", True))
+
     def _main_menu_items(self) -> list[MenuItem]:
         return [
             MenuItem(
@@ -2595,6 +2617,7 @@ class SubwayBlindGame:
     def _sync_music_context(self) -> None:
         if self._exit_requested:
             return
+        self.audio.set_music_ducking(False)
         if self.active_menu is None:
             if self.state.running:
                 self.audio.music_start("gameplay")
@@ -2671,6 +2694,37 @@ class SubwayBlindGame:
         self.publish_confirm_menu.opened = True
         self.publish_confirm_menu.index = 0
         self._pending_menu_announcement = (self.publish_confirm_menu, 0.0, True)
+
+    def _run_or_confirm_purchase(
+        self,
+        purchase_handler: Callable[[], None],
+        return_menu: Menu | None = None,
+        return_index: int | None = None,
+    ) -> None:
+        if not self._purchase_confirmation_enabled():
+            purchase_handler()
+            return
+        source_menu = return_menu or self.active_menu
+        if source_menu is not None and source_menu.items:
+            source_index = min(source_menu.index, len(source_menu.items) - 1)
+        else:
+            source_index = 0
+        self._pending_purchase_handler = purchase_handler
+        self._pending_purchase_return_menu = source_menu
+        self._pending_purchase_return_index = max(0, source_index if return_index is None else int(return_index))
+        self._set_active_menu(self.purchase_confirm_menu, start_index=0)
+
+    def _resolve_pending_purchase(self, accepted: bool) -> None:
+        purchase_handler = self._pending_purchase_handler
+        return_menu = self._pending_purchase_return_menu
+        return_index = self._pending_purchase_return_index
+        self._pending_purchase_handler = None
+        self._pending_purchase_return_menu = None
+        self._pending_purchase_return_index = 0
+        if accepted and purchase_handler is not None:
+            purchase_handler()
+        if self.active_menu == self.purchase_confirm_menu and return_menu is not None:
+            self._set_active_menu(return_menu, start_index=return_index)
 
     def _mission_goals(self):
         return mission_goals_for_set(int(self.settings.get("mission_set", 1)))
@@ -3906,6 +3960,9 @@ class SubwayBlindGame:
             if self.active_menu == self.publish_confirm_menu:
                 self._set_active_menu(self.game_over_menu)
                 return True
+            if self.active_menu == self.purchase_confirm_menu:
+                self._resolve_pending_purchase(accepted=False)
+                return True
             if self.active_menu == self.exit_confirm_menu:
                 self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "quit"))
                 return True
@@ -4165,44 +4222,72 @@ class SubwayBlindGame:
 
         if self.active_menu == self.event_shop_menu:
             if action == "event_shop_buy_character":
-                self._buy_event_shop_character()
+                self._run_or_confirm_purchase(
+                    self._buy_event_shop_character,
+                    return_menu=self.event_shop_menu,
+                    return_index=self._menu_index_for_action(self.event_shop_menu, "event_shop_buy_character"),
+                )
                 return True
             if action == "event_shop_buy_board":
-                self._buy_event_shop_board()
+                self._run_or_confirm_purchase(
+                    self._buy_event_shop_board,
+                    return_menu=self.event_shop_menu,
+                    return_index=self._menu_index_for_action(self.event_shop_menu, "event_shop_buy_board"),
+                )
                 return True
             if action == "event_shop_buy_key":
-                self._buy_event_shop_reward(
-                    EVENT_SHOP_KEY_COST,
-                    {"kind": "key", "amount": 1},
-                    "Event Shop",
+                self._run_or_confirm_purchase(
+                    lambda: self._buy_event_shop_reward(
+                        EVENT_SHOP_KEY_COST,
+                        {"kind": "key", "amount": 1},
+                        "Event Shop",
+                    ),
+                    return_menu=self.event_shop_menu,
+                    return_index=self._menu_index_for_action(self.event_shop_menu, "event_shop_buy_key"),
                 )
                 return True
             if action == "event_shop_buy_hoverboards":
-                self._buy_event_shop_reward(
-                    EVENT_SHOP_HOVERBOARD_PACK_COST,
-                    {"kind": "hoverboard", "amount": 2},
-                    "Event Shop",
+                self._run_or_confirm_purchase(
+                    lambda: self._buy_event_shop_reward(
+                        EVENT_SHOP_HOVERBOARD_PACK_COST,
+                        {"kind": "hoverboard", "amount": 2},
+                        "Event Shop",
+                    ),
+                    return_menu=self.event_shop_menu,
+                    return_index=self._menu_index_for_action(self.event_shop_menu, "event_shop_buy_hoverboards"),
                 )
                 return True
             if action == "event_shop_buy_headstart":
-                self._buy_event_shop_reward(
-                    EVENT_SHOP_HEADSTART_COST,
-                    {"kind": "headstart", "amount": 1},
-                    "Event Shop",
+                self._run_or_confirm_purchase(
+                    lambda: self._buy_event_shop_reward(
+                        EVENT_SHOP_HEADSTART_COST,
+                        {"kind": "headstart", "amount": 1},
+                        "Event Shop",
+                    ),
+                    return_menu=self.event_shop_menu,
+                    return_index=self._menu_index_for_action(self.event_shop_menu, "event_shop_buy_headstart"),
                 )
                 return True
             if action == "event_shop_buy_score_booster":
-                self._buy_event_shop_reward(
-                    EVENT_SHOP_SCORE_BOOSTER_COST,
-                    {"kind": "score_booster", "amount": 1},
-                    "Event Shop",
+                self._run_or_confirm_purchase(
+                    lambda: self._buy_event_shop_reward(
+                        EVENT_SHOP_SCORE_BOOSTER_COST,
+                        {"kind": "score_booster", "amount": 1},
+                        "Event Shop",
+                    ),
+                    return_menu=self.event_shop_menu,
+                    return_index=self._menu_index_for_action(self.event_shop_menu, "event_shop_buy_score_booster"),
                 )
                 return True
             if action == "event_shop_buy_super_box":
-                self._buy_event_shop_reward(
-                    EVENT_SHOP_SUPER_BOX_COST,
-                    {"kind": "super_box", "amount": 1},
-                    "Event Shop",
+                self._run_or_confirm_purchase(
+                    lambda: self._buy_event_shop_reward(
+                        EVENT_SHOP_SUPER_BOX_COST,
+                        {"kind": "super_box", "amount": 1},
+                        "Event Shop",
+                    ),
+                    return_menu=self.event_shop_menu,
+                    return_index=self._menu_index_for_action(self.event_shop_menu, "event_shop_buy_super_box"),
                 )
                 return True
             if action == "back":
@@ -4564,16 +4649,32 @@ class SubwayBlindGame:
                 self._set_active_menu(self.main_menu)
                 return True
             if action == "buy_hoverboard":
-                self._purchase_shop_item("hoverboard")
+                self._run_or_confirm_purchase(
+                    lambda: self._purchase_shop_item("hoverboard"),
+                    return_menu=self.shop_menu,
+                    return_index=self._menu_index_for_action(self.shop_menu, "buy_hoverboard"),
+                )
                 return True
             if action == "buy_box":
-                self._purchase_shop_item("mystery_box")
+                self._run_or_confirm_purchase(
+                    lambda: self._purchase_shop_item("mystery_box"),
+                    return_menu=self.shop_menu,
+                    return_index=self._menu_index_for_action(self.shop_menu, "buy_box"),
+                )
                 return True
             if action == "buy_headstart":
-                self._purchase_shop_item("headstart")
+                self._run_or_confirm_purchase(
+                    lambda: self._purchase_shop_item("headstart"),
+                    return_menu=self.shop_menu,
+                    return_index=self._menu_index_for_action(self.shop_menu, "buy_headstart"),
+                )
                 return True
             if action == "buy_score_booster":
-                self._purchase_shop_item("score_booster")
+                self._run_or_confirm_purchase(
+                    lambda: self._purchase_shop_item("score_booster"),
+                    return_menu=self.shop_menu,
+                    return_index=self._menu_index_for_action(self.shop_menu, "buy_score_booster"),
+                )
                 return True
             if action == "claim_daily_gift":
                 reward = claim_daily_gift(self.settings)
@@ -4630,7 +4731,12 @@ class SubwayBlindGame:
                 self.speaker.speak(f"{definition.name}. {self._item_upgrade_effect_label(definition.key)}.", interrupt=True)
                 return True
             if action.startswith("item_upgrade_purchase:"):
-                self._purchase_item_upgrade(action.split(":", 1)[1])
+                key = action.split(":", 1)[1]
+                self._run_or_confirm_purchase(
+                    lambda key=key: self._purchase_item_upgrade(key),
+                    return_menu=self.item_upgrade_detail_menu,
+                    return_index=self.item_upgrade_detail_menu.index,
+                )
                 return True
             if action.startswith("item_upgrade_max_info:"):
                 definition = item_upgrade_definition(action.split(":", 1)[1])
@@ -4676,13 +4782,23 @@ class SubwayBlindGame:
                 )
                 return True
             if action.startswith("character_unlock:"):
-                self._unlock_character(action.split(":", 1)[1])
+                key = action.split(":", 1)[1]
+                self._run_or_confirm_purchase(
+                    lambda key=key: self._unlock_character(key),
+                    return_menu=self.character_detail_menu,
+                    return_index=self.character_detail_menu.index,
+                )
                 return True
             if action.startswith("character_select:"):
                 self._select_character(action.split(":", 1)[1])
                 return True
             if action.startswith("character_upgrade:"):
-                self._upgrade_character(action.split(":", 1)[1])
+                key = action.split(":", 1)[1]
+                self._run_or_confirm_purchase(
+                    lambda key=key: self._upgrade_character(key),
+                    return_menu=self.character_detail_menu,
+                    return_index=self.character_detail_menu.index,
+                )
                 return True
 
         if self.active_menu == self.board_menu:
@@ -4714,7 +4830,12 @@ class SubwayBlindGame:
                 self.speaker.speak(f"{definition.name}. {self._board_power_label(definition.key)}.", interrupt=True)
                 return True
             if action.startswith("board_unlock:"):
-                self._unlock_board(action.split(":", 1)[1])
+                key = action.split(":", 1)[1]
+                self._run_or_confirm_purchase(
+                    lambda key=key: self._unlock_board(key),
+                    return_menu=self.board_detail_menu,
+                    return_index=self.board_detail_menu.index,
+                )
                 return True
             if action.startswith("board_select:"):
                 self._select_board(action.split(":", 1)[1])
@@ -4854,6 +4975,14 @@ class SubwayBlindGame:
             if action == "publish_confirm_no":
                 target_menu = self._publish_confirm_return_menu or self.game_over_menu
                 self._set_active_menu(target_menu, start_index=self._publish_confirm_return_index)
+                return True
+
+        if self.active_menu == self.purchase_confirm_menu:
+            if action == "confirm_purchase_yes":
+                self._resolve_pending_purchase(accepted=True)
+                return True
+            if action == "confirm_purchase_no":
+                self._resolve_pending_purchase(accepted=False)
                 return True
 
         if self.active_menu == self.exit_confirm_menu:
@@ -5021,7 +5150,7 @@ class SubwayBlindGame:
             target_menu = self._publish_confirm_return_menu or self.game_over_menu
             self._set_active_menu(target_menu, start_index=self._publish_confirm_return_index, play_sound=False)
             if target_menu == self.game_over_menu:
-                self.game_over_menu.index = 4
+                self.game_over_menu.index = self._menu_index_for_action(self.game_over_menu, "game_over_retry")
             suspicious_run = str(data.get("verification_status") or "verified") == "suspicious"
             if bool(data.get("high_score")):
                 rank = data.get("board_rank")
@@ -5993,6 +6122,15 @@ class SubwayBlindGame:
             self._refresh_options_menu_labels()
             self.speaker.speak(
                 self.options_menu.items[self._update_option_index("opt_exit_confirmation")].label,
+                interrupt=True,
+            )
+            return
+        if selected_action == "opt_purchase_confirmation":
+            self.settings["confirm_purchase_enabled"] = direction > 0
+            self._play_menu_feedback("confirm")
+            self._refresh_options_menu_labels()
+            self.speaker.speak(
+                self.options_menu.items[self._update_option_index("opt_purchase_confirmation")].label,
                 interrupt=True,
             )
             return

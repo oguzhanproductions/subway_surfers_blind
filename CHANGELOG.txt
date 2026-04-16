@@ -25,6 +25,7 @@ Update Summary
 - Fixed Super Mystery Box jetpack rewards opened outside a run so they no longer grant a non-persistent runtime power-up and now resolve to a persistent economy reward path.
 - Fixed a jetpack loop audio edge case where menu-side reward handling could leave jetpack loop behavior in an invalid non-run state.
 - Fixed magnet and jetpack loop state synchronization so active loop channels no longer re-trigger from a stale inactive flag after power activation.
+- Added a unified purchase confirmation flow for all coin-spending actions in Shop, Event Shop, Item Upgrades, Character upgrades/unlocks, and Board unlocks.
 
 Audio or UI Updates
 - Keyboard Bindings menu now shows the detected keyboard layout name directly in the menu title.
@@ -45,6 +46,7 @@ Audio or UI Updates
 - Fixed menu focus restoration so returning from submenus now keeps the previously focused parent menu item instead of jumping back to the first entry.
 - Fixed Events menu info rows so pressing Enter now announces the selected event status line instead of triggering a silent no-op.
 - Added an Event Shop entry inside Events and surfaced live Event Coin balance directly in Event Shop labels and title.
+- Added a new Options toggle named Purchase Confirmation so players can enable or disable the "Confirm Purchase?" prompt for economy spending actions.
 
 ------------------------------------------------------------
 

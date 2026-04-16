@@ -153,6 +153,7 @@ class DummyAudio:
         self.music_stopped = 0
         self.music_started_tracks: list[str] = []
         self.music_update_calls: list[float] = []
+        self.music_ducking_calls: list[bool] = []
         self.music_idle = False
         self._output_device_name = settings.get("audio_output_device") or None
 
@@ -210,6 +211,9 @@ class DummyAudio:
     def music_stop(self, immediate: bool = False) -> None:
         self.music_stopped += 1
         self.music_idle = True
+
+    def set_music_ducking(self, enabled: bool, level: float = 0.28) -> None:
+        self.music_ducking_calls.append(bool(enabled))
 
     def update(self, delta_time: float) -> None:
         self.music_update_calls.append(delta_time)
@@ -1513,6 +1517,7 @@ class GameTests(unittest.TestCase):
         audio.music_stopped = 0
         audio.music_started_tracks.clear()
         audio.music_update_calls.clear()
+        audio.music_ducking_calls.clear()
         audio.music_idle = False
         game._persist_settings = lambda: None
         game._sync_music_context()
@@ -2225,7 +2230,7 @@ class GameTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertIs(game.active_menu, game.main_menu)
-        self.assertEqual(game.main_menu.index, 13)
+        self.assertEqual(game.main_menu.index, game._menu_index_for_action(game.main_menu, "quit"))
 
     def test_exit_confirmation_yes_closes_game(self):
         game, _, _ = self.make_game()
@@ -2270,6 +2275,7 @@ class GameTests(unittest.TestCase):
             "Set User Name",
             "Gameplay Announcements",
             "Controls",
+            "Purchase Confirmation: On",
             "Exit Confirmation: On",
             "Back",
         ]
@@ -2353,6 +2359,14 @@ class GameTests(unittest.TestCase):
         result = game._handle_menu_action("event_shop_buy_key")
 
         self.assertTrue(result)
+        self.assertIs(game.active_menu, game.purchase_confirm_menu)
+        self.assertEqual(game.settings["event_state"]["event_coins"], 25)
+        self.assertEqual(game.settings["keys"], starting_keys)
+
+        result = game._handle_menu_action("confirm_purchase_yes")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.event_shop_menu)
         self.assertEqual(game.settings["event_state"]["event_coins"], 7)
         self.assertEqual(game.settings["keys"], starting_keys + 1)
 
@@ -3205,18 +3219,18 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_cycles_output_device_in_place(self):
         game, speaker, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 3
+        game.options_menu.index = game._update_option_index("opt_output")
 
         game._adjust_selected_option(1)
 
         self.assertEqual(game.settings["audio_output_device"], "External USB Headphones")
-        self.assertEqual(game.options_menu.items[3].label, "Output Device: External USB Headphones")
+        self.assertEqual(game.options_menu.items[game._update_option_index("opt_output")].label, "Output Device: External USB Headphones")
         self.assertEqual(speaker.messages[-1][0], "Output device set to External USB Headphones.")
 
     def test_enter_does_nothing_in_options_menu(self):
         game, speaker, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 3
+        game.options_menu.index = game._update_option_index("opt_output")
 
         result = game._handle_active_menu_key(pygame.K_RETURN)
 
@@ -3511,7 +3525,7 @@ class GameTests(unittest.TestCase):
     def test_adjust_selected_option_toggles_menu_sound_hrtf(self):
         game, speaker, audio = self.make_game()
         game.active_menu = game.options_menu
-        game.options_menu.index = 4
+        game.options_menu.index = game._update_option_index("opt_menu_hrtf")
         game.settings["menu_sound_hrtf"] = True
 
         game._adjust_selected_option(-1)
@@ -3541,6 +3555,17 @@ class GameTests(unittest.TestCase):
         self.assertFalse(game.settings["confirm_exit_enabled"])
         self.assertIn(("confirm", "ui", False), audio.played)
         self.assertEqual(speaker.messages[-1][0], "Exit Confirmation: Off")
+
+    def test_adjust_selected_option_toggles_purchase_confirmation_from_options(self):
+        game, speaker, audio = self.make_game()
+        game.active_menu = game.options_menu
+        game.options_menu.index = game._update_option_index("opt_purchase_confirmation")
+
+        game._adjust_selected_option(-1)
+
+        self.assertFalse(game.settings["confirm_purchase_enabled"])
+        self.assertIn(("confirm", "ui", False), audio.played)
+        self.assertEqual(speaker.messages[-1][0], "Purchase Confirmation: Off")
 
     def test_adjust_selected_option_sets_speech_state_from_direction(self):
         game, speaker, _ = self.make_game()
@@ -3837,6 +3862,42 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.settings["bank_coins"], 0)
         self.assertEqual(game.settings["hoverboards"], 1)
         self.assertIn(("Hoverboard purchased.", True), speaker.messages)
+
+    def test_shop_purchase_action_requires_confirmation_when_enabled(self):
+        game, _, _ = self.make_game()
+        game.settings["bank_coins"] = SHOP_PRICES["hoverboard"]
+        game.settings["hoverboards"] = 0
+        game.active_menu = game.shop_menu
+        game.shop_menu.index = game._menu_index_for_action(game.shop_menu, "buy_hoverboard")
+
+        result = game._handle_menu_action("buy_hoverboard")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.purchase_confirm_menu)
+        self.assertEqual(game.settings["bank_coins"], SHOP_PRICES["hoverboard"])
+        self.assertEqual(game.settings["hoverboards"], 0)
+
+        result = game._handle_menu_action("confirm_purchase_yes")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.shop_menu)
+        self.assertEqual(game.shop_menu.index, game._menu_index_for_action(game.shop_menu, "buy_hoverboard"))
+        self.assertEqual(game.settings["bank_coins"], 0)
+        self.assertEqual(game.settings["hoverboards"], 1)
+
+    def test_shop_purchase_action_executes_immediately_when_confirmation_disabled(self):
+        game, _, _ = self.make_game()
+        game.settings["confirm_purchase_enabled"] = False
+        game.settings["bank_coins"] = SHOP_PRICES["hoverboard"]
+        game.settings["hoverboards"] = 0
+        game.active_menu = game.shop_menu
+
+        result = game._handle_menu_action("buy_hoverboard")
+
+        self.assertTrue(result)
+        self.assertIs(game.active_menu, game.shop_menu)
+        self.assertEqual(game.settings["bank_coins"], 0)
+        self.assertEqual(game.settings["hoverboards"], 1)
 
     def test_shop_mystery_box_can_grant_multiple_hoverboards(self):
         game, speaker, _ = self.make_game()

@@ -66,6 +66,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "practice_hazard_target": 24,
     "main_menu_descriptions_enabled": True,
     "confirm_exit_enabled": True,
+    "confirm_purchase_enabled": True,
     "leaderboard_username": "",
     "leaderboard_session_token": "",
     "leaderboard_applied_reward_ids": [],
