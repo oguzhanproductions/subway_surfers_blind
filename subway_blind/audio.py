@@ -126,6 +126,8 @@ MUSIC_TRACK_CANDIDATES = {
 }
 MUSIC_FADE_IN_SECONDS = 1.05
 MUSIC_FADE_OUT_SECONDS = 0.75
+MUSIC_DUCK_FADE_SECONDS = 1.05
+MUSIC_DUCKED_LEVEL = 0.28
 
 
 @dataclass(frozen=True)
@@ -489,6 +491,8 @@ class Audio:
         self._music_pending_track: str | None = None
         self._music_fade_level = 0.0
         self._music_transition: str | None = None
+        self._music_ducking_level = 1.0
+        self._music_ducking_target = 1.0
         self._pitched_sounds: dict[tuple[str, int], pygame.mixer.Sound] = {}
         self._channel_polyphony_index: dict[str, int] = {}
         self.hrtf = OpenALHrtfEngine(settings.get("sfx_volume", 1.0), self._output_device_name)
@@ -574,6 +578,7 @@ class Audio:
         self._load_sound("high", self._pick_sfx_sound("high"))
         self._load_sound("mystery_box", sfx_path("mystery_box.wav"))
         self._load_sound("mystery_box_open", sfx_path("Hr_mysteryBoxOpen #20822.wav"))
+        self._load_sound("wheel_spin", sfx_path("wheel_spin.mp3"))
         self._load_sound("mission_reward", sfx_path("mission_reward.wav"))
         self._load_sound("train_pass", sfx_path("train_pass.wav"))
         self._load_sound("intro_start", sfx_path("intro_start.wav"))
@@ -1015,7 +1020,7 @@ class Audio:
         if not self._mixer_ready:
             return
         try:
-            pygame.mixer.music.set_volume(self._target_music_volume() * self._music_fade_level)
+            pygame.mixer.music.set_volume(self._target_music_volume() * self._music_fade_level * self._music_ducking_level)
         except Exception:
             return
 
@@ -1029,6 +1034,13 @@ class Audio:
         self._music_pending_track = None
         self._music_fade_level = 0.0
         self._music_transition = None
+
+    def set_music_ducking(self, enabled: bool, level: float = MUSIC_DUCKED_LEVEL) -> None:
+        target = max(0.0, min(1.0, float(level if enabled else 1.0)))
+        self._music_ducking_target = target
+        if abs(self._music_ducking_level - target) < 0.001:
+            self._music_ducking_level = target
+        self._apply_music_volume()
 
     def _play_music_track(self, track_key: str) -> bool:
         if not self._mixer_ready:
@@ -1090,7 +1102,20 @@ class Audio:
         return self._music_current_track is None and self._music_pending_track is None and self._music_transition is None
 
     def update(self, delta_time: float) -> None:
-        if not self._mixer_ready or self._music_transition is None:
+        if not self._mixer_ready:
+            return
+        if not hasattr(self, "_music_ducking_level"):
+            self._music_ducking_level = 1.0
+        if not hasattr(self, "_music_ducking_target"):
+            self._music_ducking_target = 1.0
+        duck_step = float(delta_time) / MUSIC_DUCK_FADE_SECONDS if MUSIC_DUCK_FADE_SECONDS > 0 else 1.0
+        if self._music_ducking_level < self._music_ducking_target:
+            self._music_ducking_level = min(self._music_ducking_target, self._music_ducking_level + duck_step)
+            self._apply_music_volume()
+        elif self._music_ducking_level > self._music_ducking_target:
+            self._music_ducking_level = max(self._music_ducking_target, self._music_ducking_level - duck_step)
+            self._apply_music_volume()
+        if self._music_transition is None:
             return
         if self._music_transition == "fade_in":
             self._music_fade_level = min(1.0, self._music_fade_level + (float(delta_time) / MUSIC_FADE_IN_SECONDS))

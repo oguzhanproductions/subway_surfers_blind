@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import json
 import math
+import random
 import re
 import uuid
 
@@ -101,6 +102,49 @@ SEASON_REWARD_LABELS = {
     "headstart": "Headstart",
     "score_booster": "Score Booster",
 }
+SPECIAL_WHEEL_MAX_SPINS = 2
+SPECIAL_ITEM_LABELS = {
+    "phantom_step": "Phantom Step",
+    "afterimage_dash": "Afterimage Dash",
+    "crowd_jammer": "Crowd Jammer",
+    "impact_foam": "Impact Foam",
+    "overclock_key": "Overclock Key",
+    "magnet_echo": "Magnet Echo",
+    "quiet_jet": "Quiet Jet",
+    "combo_battery": "Combo Battery",
+    "hyper_sneakers": "Hyper Sneakers",
+    "risk_converter": "Risk Converter",
+    "jackpot_fuse": "Jackpot Fuse",
+    "chain_saver": "Chain Saver",
+    "vault_seal": "Vault Seal",
+    "season_imprint": "Season Imprint",
+}
+SPECIAL_ITEM_KEYS = tuple(SPECIAL_ITEM_LABELS.keys())
+SPECIAL_WHEEL_REWARD_WEIGHTS = {
+    "phantom_step": 8,
+    "afterimage_dash": 7,
+    "crowd_jammer": 8,
+    "impact_foam": 9,
+    "overclock_key": 8,
+    "magnet_echo": 8,
+    "quiet_jet": 7,
+    "combo_battery": 8,
+    "hyper_sneakers": 7,
+    "risk_converter": 8,
+    "jackpot_fuse": 5,
+    "chain_saver": 6,
+    "vault_seal": 6,
+    "season_imprint": 5,
+}
+SEASON_IMPRINT_BONUS_KEYS = (
+    "coin_drift",
+    "risk_bloom",
+    "safe_stride",
+    "power_echo",
+    "fortune_line",
+    "streak_guard",
+    "spawn_calm",
+)
 
 
 class ServiceError(RuntimeError):
@@ -269,16 +313,189 @@ class LeaderboardService:
             device_hash=principal.device_hash,
         )
 
-    def sync_account(self, principal: SessionPrincipal, claimed_reward_ids: list[str] | None = None) -> dict:
+    def sync_account(
+        self,
+        principal: SessionPrincipal,
+        claimed_reward_ids: list[str] | None = None,
+        consumed_special_item_keys: list[str] | None = None,
+    ) -> dict:
         principal = self.revalidate_principal(principal)
         self._acknowledge_reward_claims(principal.account_id, claimed_reward_ids or [])
+        self._consume_special_items(principal.account_id, consumed_special_item_keys or [])
         current_season = self._ensure_season_state_current()
         pending_rewards = self._fetch_pending_rewards(principal.account_id)
+        special_state = self._special_state_payload(principal.account_id)
         return {
             "username": principal.username,
             "season": self._serialize_season_definition(current_season),
             "pending_rewards": pending_rewards,
             "pending_reward_count": len(pending_rewards),
+            "special_items": dict(special_state["items"]),
+            "special_item_loadout": dict(special_state["loadout"]),
+            "wheel": dict(special_state["wheel"]),
+            "season_imprint_bonus": str(special_state["season_imprint_bonus"]),
+        }
+
+    def _consume_special_items(self, account_id: int, consumed_item_keys: list[str]) -> None:
+        normalized_keys: list[str] = []
+        for raw_key in consumed_item_keys:
+            key = str(raw_key or "").strip().lower()
+            if key not in SPECIAL_ITEM_KEYS:
+                continue
+            normalized_keys.append(key)
+        if not normalized_keys:
+            return
+        unique_keys = list(dict.fromkeys(normalized_keys))[:64]
+        now_text = self.utcnow().isoformat()
+        connection = self.database.connection
+        try:
+            connection.execute("BEGIN")
+            for item_key in unique_keys:
+                row = connection.execute(
+                    """
+                    SELECT quantity
+                    FROM account_special_items
+                    WHERE account_id = ? AND item_key = ?
+                    """,
+                    (int(account_id), item_key),
+                ).fetchone()
+                if row is None:
+                    continue
+                current_quantity = max(0, int(row["quantity"] or 0))
+                next_quantity = max(0, current_quantity - 1)
+                connection.execute(
+                    """
+                    UPDATE account_special_items
+                    SET quantity = ?, updated_at = ?
+                    WHERE account_id = ? AND item_key = ?
+                    """,
+                    (next_quantity, now_text, int(account_id), item_key),
+                )
+                if next_quantity <= 0:
+                    connection.execute(
+                        """
+                        UPDATE account_special_item_loadout
+                        SET enabled = 0, updated_at = ?
+                        WHERE account_id = ? AND item_key = ?
+                        """,
+                        (now_text, int(account_id), item_key),
+                    )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+
+    def spin_weekly_wheel(self, principal: SessionPrincipal) -> dict:
+        principal = self.revalidate_principal(principal)
+        week_key, week_start, next_reset_at = self._wheel_week_window_for_time(self.utcnow())
+        usage_row = self.database.fetchone(
+            """
+            SELECT spins_used
+            FROM wheel_spin_usage
+            WHERE account_id = ? AND week_key = ?
+            """,
+            (principal.account_id, week_key),
+        )
+        spins_used = int(usage_row["spins_used"]) if usage_row is not None else 0
+        if spins_used >= SPECIAL_WHEEL_MAX_SPINS:
+            raise ServiceError("wheel_spins_exhausted", "No wheel spins remaining this week.")
+        reward_key = random.choices(
+            list(SPECIAL_WHEEL_REWARD_WEIGHTS.keys()),
+            weights=list(SPECIAL_WHEEL_REWARD_WEIGHTS.values()),
+            k=1,
+        )[0]
+        reward_amount = 1
+        if reward_key in {"chain_saver", "vault_seal", "jackpot_fuse", "season_imprint"} and random.random() < 0.2:
+            reward_amount = 2
+        now = self.utcnow()
+        now_text = now.isoformat()
+        connection = self.database.connection
+        try:
+            connection.execute("BEGIN")
+            connection.execute(
+                """
+                INSERT INTO wheel_spin_usage (account_id, week_key, spins_used, updated_at, last_spin_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(account_id, week_key) DO UPDATE
+                SET spins_used = excluded.spins_used,
+                    updated_at = excluded.updated_at,
+                    last_spin_at = excluded.last_spin_at
+                """,
+                (principal.account_id, week_key, spins_used + 1, now_text, now_text),
+            )
+            connection.execute(
+                """
+                INSERT INTO account_special_items (account_id, item_key, quantity, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(account_id, item_key) DO UPDATE
+                SET quantity = account_special_items.quantity + excluded.quantity,
+                    updated_at = excluded.updated_at
+                """,
+                (principal.account_id, reward_key, reward_amount, now_text),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        wheel_status = self._wheel_status_for_account(
+            account_id=principal.account_id,
+            week_key=week_key,
+            week_start=week_start,
+            next_reset_at=next_reset_at,
+        )
+        special_state = self._special_state_payload(
+            principal.account_id,
+            cached_wheel=wheel_status,
+            now=now,
+        )
+        return {
+            "reward": {
+                "item_key": reward_key,
+                "item_label": self._special_item_label(reward_key),
+                "amount": reward_amount,
+            },
+            "special_items": dict(special_state["items"]),
+            "special_item_loadout": dict(special_state["loadout"]),
+            "wheel": dict(special_state["wheel"]),
+            "season_imprint_bonus": str(special_state["season_imprint_bonus"]),
+        }
+
+    def set_special_item_loadout(self, principal: SessionPrincipal, item_key: str, enabled: bool) -> dict:
+        principal = self.revalidate_principal(principal)
+        normalized_item_key = self._normalize_special_item_key(item_key)
+        now = self.utcnow()
+        now_text = now.isoformat()
+        quantity_row = self.database.fetchone(
+            """
+            SELECT quantity
+            FROM account_special_items
+            WHERE account_id = ? AND item_key = ?
+            """,
+            (principal.account_id, normalized_item_key),
+        )
+        current_quantity = int(quantity_row["quantity"]) if quantity_row is not None else 0
+        next_enabled = bool(enabled)
+        if next_enabled and current_quantity <= 0:
+            raise ServiceError("special_item_locked", "This special item is not owned on the server.")
+        self.database.execute(
+            """
+            INSERT INTO account_special_item_loadout (account_id, item_key, enabled, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(account_id, item_key) DO UPDATE
+            SET enabled = excluded.enabled,
+                updated_at = excluded.updated_at
+            """,
+            (principal.account_id, normalized_item_key, 1 if next_enabled else 0, now_text),
+        )
+        special_state = self._special_state_payload(principal.account_id, now=now)
+        return {
+            "item_key": normalized_item_key,
+            "item_label": self._special_item_label(normalized_item_key),
+            "enabled": bool(special_state["loadout"].get(normalized_item_key, False)),
+            "special_items": dict(special_state["items"]),
+            "special_item_loadout": dict(special_state["loadout"]),
+            "wheel": dict(special_state["wheel"]),
+            "season_imprint_bonus": str(special_state["season_imprint_bonus"]),
         }
 
     def fetch_leaderboard(
@@ -1323,6 +1540,129 @@ class LeaderboardService:
             """,
             (self.utcnow().isoformat(), account_id, *unique_ids),
         )
+
+    def _special_state_payload(
+        self,
+        account_id: int,
+        *,
+        cached_wheel: dict | None = None,
+        now: datetime | None = None,
+    ) -> dict:
+        current_time = now or self.utcnow()
+        week_key, week_start, next_reset_at = self._wheel_week_window_for_time(current_time)
+        items = self._special_items_for_account(account_id)
+        loadout = self._special_item_loadout_for_account(account_id, items)
+        wheel = cached_wheel or self._wheel_status_for_account(
+            account_id=account_id,
+            week_key=week_key,
+            week_start=week_start,
+            next_reset_at=next_reset_at,
+        )
+        return {
+            "items": items,
+            "loadout": loadout,
+            "wheel": wheel,
+            "season_imprint_bonus": self._season_imprint_bonus_key(week_key),
+        }
+
+    def _special_items_for_account(self, account_id: int) -> dict[str, int]:
+        rows = self.database.fetchall(
+            """
+            SELECT item_key, quantity
+            FROM account_special_items
+            WHERE account_id = ?
+            """,
+            (int(account_id),),
+        )
+        normalized: dict[str, int] = {}
+        for row in rows:
+            item_key = str(row["item_key"] or "").strip().lower()
+            if item_key not in SPECIAL_ITEM_KEYS:
+                continue
+            quantity = max(0, int(row["quantity"] or 0))
+            if quantity > 0:
+                normalized[item_key] = quantity
+        return normalized
+
+    def _special_item_loadout_for_account(self, account_id: int, items: dict[str, int]) -> dict[str, bool]:
+        rows = self.database.fetchall(
+            """
+            SELECT item_key, enabled
+            FROM account_special_item_loadout
+            WHERE account_id = ?
+            """,
+            (int(account_id),),
+        )
+        enabled_map = {
+            str(row["item_key"] or "").strip().lower(): bool(int(row["enabled"] or 0))
+            for row in rows
+            if str(row["item_key"] or "").strip().lower() in SPECIAL_ITEM_KEYS
+        }
+        normalized: dict[str, bool] = {}
+        for item_key in SPECIAL_ITEM_KEYS:
+            if int(items.get(item_key, 0)) <= 0:
+                normalized[item_key] = False
+                continue
+            normalized[item_key] = bool(enabled_map.get(item_key, False))
+        return normalized
+
+    def _wheel_status_for_account(
+        self,
+        *,
+        account_id: int,
+        week_key: str,
+        week_start: datetime,
+        next_reset_at: datetime,
+    ) -> dict:
+        row = self.database.fetchone(
+            """
+            SELECT spins_used
+            FROM wheel_spin_usage
+            WHERE account_id = ? AND week_key = ?
+            """,
+            (int(account_id), str(week_key)),
+        )
+        spins_used = max(0, int(row["spins_used"] or 0)) if row is not None else 0
+        spins_used = min(SPECIAL_WHEEL_MAX_SPINS, spins_used)
+        return {
+            "week_key": week_key,
+            "week_start_at": week_start.isoformat(),
+            "next_reset_at": next_reset_at.isoformat(),
+            "max_spins": SPECIAL_WHEEL_MAX_SPINS,
+            "spins_used": spins_used,
+            "spins_remaining": max(0, SPECIAL_WHEEL_MAX_SPINS - spins_used),
+        }
+
+    @staticmethod
+    def _wheel_week_window_for_time(value: datetime) -> tuple[str, datetime, datetime]:
+        normalized = value.astimezone(UTC)
+        start_of_day = normalized.replace(hour=0, minute=0, second=0, microsecond=0)
+        days_since_wednesday = (start_of_day.weekday() - 2) % 7
+        week_start = start_of_day - timedelta(days=days_since_wednesday)
+        next_reset = week_start + timedelta(days=7)
+        week_key = week_start.strftime("%Y-%m-%d")
+        return week_key, week_start, next_reset
+
+    @staticmethod
+    def _season_imprint_bonus_key(week_key: str) -> str:
+        if not week_key:
+            return SEASON_IMPRINT_BONUS_KEYS[0]
+        total = 0
+        for char in str(week_key):
+            total += ord(char)
+        return SEASON_IMPRINT_BONUS_KEYS[total % len(SEASON_IMPRINT_BONUS_KEYS)]
+
+    @staticmethod
+    def _special_item_label(item_key: str) -> str:
+        normalized = str(item_key or "").strip().lower()
+        return SPECIAL_ITEM_LABELS.get(normalized, "Special Item")
+
+    @staticmethod
+    def _normalize_special_item_key(item_key: str) -> str:
+        normalized = str(item_key or "").strip().lower()
+        if normalized not in SPECIAL_ITEM_KEYS:
+            raise ServiceError("invalid_special_item", "Unknown special item.")
+        return normalized
 
     def _serialize_season_definition(self, season: SeasonDefinition) -> dict:
         seconds_remaining = max(0, int((season.end_at - self.utcnow()).total_seconds()))

@@ -229,11 +229,31 @@ class LeaderboardServer:
                 raise ServiceError("authentication_required", "Sign in before syncing seasonal rewards.")
             peer_state.principal = self.service.revalidate_principal(peer_state.principal)
             claimed_reward_ids = payload.get("claimed_reward_ids")
+            consumed_special_item_keys = payload.get("consumed_special_item_keys")
             result = self.service.sync_account(
                 peer_state.principal,
                 claimed_reward_ids=claimed_reward_ids if isinstance(claimed_reward_ids, list) else None,
+                consumed_special_item_keys=(
+                    consumed_special_item_keys if isinstance(consumed_special_item_keys, list) else None
+                ),
             )
             return {"ok": True, "type": "sync_account_result", "payload": result}
+        if request_type == "spin_weekly_wheel":
+            if peer_state.principal is None:
+                raise ServiceError("authentication_required", "Sign in before spinning the wheel.")
+            peer_state.principal = self.service.revalidate_principal(peer_state.principal)
+            result = self.service.spin_weekly_wheel(peer_state.principal)
+            return {"ok": True, "type": "spin_weekly_wheel_result", "payload": result}
+        if request_type == "set_special_item_loadout":
+            if peer_state.principal is None:
+                raise ServiceError("authentication_required", "Sign in before changing special item loadout.")
+            peer_state.principal = self.service.revalidate_principal(peer_state.principal)
+            result = self.service.set_special_item_loadout(
+                peer_state.principal,
+                item_key=str(payload.get("item_key") or ""),
+                enabled=bool(payload.get("enabled", False)),
+            )
+            return {"ok": True, "type": "set_special_item_loadout_result", "payload": result}
         if request_type == "fetch_leaderboard":
             result = self.service.fetch_leaderboard(
                 offset=int(payload.get("offset", 0) or 0),

@@ -137,9 +137,47 @@ class LeaderboardDatabase:
 
             CREATE INDEX IF NOT EXISTS idx_account_reward_inbox_claimed
                 ON account_reward_inbox(account_id, claimed_at, season_key DESC);
+
+            CREATE TABLE IF NOT EXISTS account_special_items (
+                account_id INTEGER NOT NULL,
+                item_key TEXT NOT NULL,
+                quantity INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (account_id, item_key),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS account_special_item_loadout (
+                account_id INTEGER NOT NULL,
+                item_key TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (account_id, item_key),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS wheel_spin_usage (
+                account_id INTEGER NOT NULL,
+                week_key TEXT NOT NULL,
+                spins_used INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                last_spin_at TEXT,
+                PRIMARY KEY (account_id, week_key),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_account_special_items_account
+                ON account_special_items(account_id, item_key);
+
+            CREATE INDEX IF NOT EXISTS idx_account_special_item_loadout_account
+                ON account_special_item_loadout(account_id, item_key);
+
+            CREATE INDEX IF NOT EXISTS idx_wheel_spin_usage_account_week
+                ON wheel_spin_usage(account_id, week_key);
             """
         )
         self._ensure_submission_columns()
+        self._ensure_special_item_columns()
         self.connection.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_submissions_period_difficulty
@@ -167,6 +205,34 @@ class LeaderboardDatabase:
             if column_name in existing_columns:
                 continue
             self.connection.execute(statement)
+
+    def _ensure_special_item_columns(self) -> None:
+        item_columns = {
+            str(row["name"])
+            for row in self.connection.execute("PRAGMA table_info(account_special_items)").fetchall()
+        }
+        if "quantity" not in item_columns:
+            self.connection.execute("ALTER TABLE account_special_items ADD COLUMN quantity INTEGER NOT NULL DEFAULT 0")
+        if "updated_at" not in item_columns:
+            self.connection.execute("ALTER TABLE account_special_items ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+        loadout_columns = {
+            str(row["name"])
+            for row in self.connection.execute("PRAGMA table_info(account_special_item_loadout)").fetchall()
+        }
+        if "enabled" not in loadout_columns:
+            self.connection.execute("ALTER TABLE account_special_item_loadout ADD COLUMN enabled INTEGER NOT NULL DEFAULT 0")
+        if "updated_at" not in loadout_columns:
+            self.connection.execute("ALTER TABLE account_special_item_loadout ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+        usage_columns = {
+            str(row["name"])
+            for row in self.connection.execute("PRAGMA table_info(wheel_spin_usage)").fetchall()
+        }
+        if "spins_used" not in usage_columns:
+            self.connection.execute("ALTER TABLE wheel_spin_usage ADD COLUMN spins_used INTEGER NOT NULL DEFAULT 0")
+        if "updated_at" not in usage_columns:
+            self.connection.execute("ALTER TABLE wheel_spin_usage ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+        if "last_spin_at" not in usage_columns:
+            self.connection.execute("ALTER TABLE wheel_spin_usage ADD COLUMN last_spin_at TEXT")
 
     def fetchone(self, query: str, parameters: tuple[Any, ...] = ()) -> sqlite3.Row | None:
         return self.connection.execute(query, parameters).fetchone()

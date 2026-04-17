@@ -1549,6 +1549,7 @@ class GameTests(unittest.TestCase):
                 "Me",
                 "Shop",
                 "Leaderboard",
+                "Wheel Spin",
                 "Report a Bug",
                 "What's New",
                 "Options",
@@ -4875,6 +4876,175 @@ class GameTests(unittest.TestCase):
         game._handle_window_event(pygame.event.Event(pygame.WINDOWSIZECHANGED, x=700, y=420))
 
         self.assertIs(game.screen, resized)
+
+    def test_phantom_step_prevents_next_hit(self):
+        game, _, _ = self.make_game()
+        game._active_special_run_items = {"phantom_step"}
+        game.player.lane = 0
+
+        game._handle_game_key(pygame.K_RIGHT)
+        self.assertGreater(game._special_timer("phantom_step"), 0.0)
+
+        game._on_hit("train")
+        self.assertEqual(game.player.stumbles, 0)
+        self.assertEqual(game._special_timer("phantom_step"), 0.0)
+
+    def test_afterimage_dash_grants_extra_lane_shift(self):
+        game, _, _ = self.make_game()
+        game._active_special_run_items = {"afterimage_dash"}
+        game.player.lane = 0
+
+        game._handle_game_key(pygame.K_RIGHT)
+        self.assertEqual(game.player.lane, 1)
+        self.assertEqual(int(game._special_effect_timers.get("afterimage_charges", 0) or 0), 2)
+
+        game._handle_game_key(pygame.K_LEFT)
+        self.assertEqual(game.player.lane, -1)
+        self.assertEqual(int(game._special_effect_timers.get("afterimage_charges", 0) or 0), 1)
+
+    def test_crowd_jammer_activates_after_near_miss(self):
+        game, _, _ = self.make_game()
+        game._active_special_run_items = {"crowd_jammer"}
+        game.player.lane = 0
+        game.obstacles = [Obstacle(kind="train", lane=1, z=1.2)]
+
+        game._update_near_miss_audio()
+
+        self.assertGreater(game._special_timer("crowd_jammer"), 0.0)
+
+    def test_impact_foam_converts_first_hit(self):
+        game, _, _ = self.make_game()
+        game._active_special_run_items = {"impact_foam"}
+
+        game._on_hit("train")
+        self.assertEqual(game.player.stumbles, 0)
+        self.assertIn("impact_foam_used", game._special_run_used_flags)
+
+        game._on_hit("train")
+        self.assertEqual(game.player.stumbles, 1)
+
+    def test_overclock_key_adds_bonus_key_on_run_commit(self):
+        game, _, _ = self.make_game()
+        game._active_special_run_items = {"overclock_key"}
+        game.state.running = True
+        game.state.coins = 0
+        initial_keys = int(game.settings.get("keys", 0))
+
+        with patch("subway_blind.game.random.random", return_value=0.0):
+            game._collect_key()
+
+        game._commit_run_rewards()
+        self.assertEqual(int(game.settings.get("keys", 0)), initial_keys + 2)
+
+    def test_magnet_echo_collects_adjacent_coin_after_expire(self):
+        game, _, _ = self.make_game()
+        game._active_special_run_items = {"magnet_echo"}
+        game.player.lane = 0
+        game.player.magnet = 0.1
+        game.state.running = True
+        game.obstacles = [Obstacle(kind="coin", lane=1, z=1.0, value=1)]
+
+        game._tick_powerups(0.2)
+        self.assertGreater(game._special_timer("magnet_echo"), 0.0)
+
+        with patch("subway_blind.game.random.random", return_value=0.0):
+            game._handle_obstacles()
+
+        self.assertEqual(game.state.coins, 1)
+
+    def test_quiet_jet_grants_post_jetpack_collision_buffer(self):
+        game, _, _ = self.make_game()
+        game._active_special_run_items = {"quiet_jet"}
+        game.player.lane = 0
+        game.player.jetpack = 0.1
+        game.obstacles = [Obstacle(kind="train", lane=0, z=1.2)]
+
+        game._tick_powerups(0.2)
+        self.assertGreater(game._special_timer("quiet_jet_buffer"), 0.0)
+
+        game._handle_obstacles()
+        self.assertEqual(game.player.stumbles, 0)
+
+    def test_combo_battery_adds_grace_before_coin_streak_reset(self):
+        game, _, _ = self.make_game()
+        game.state.running = True
+        game._active_special_run_items = {"combo_battery"}
+        game._coin_streak = 8
+        game._coin_pitch_index = 3
+        game._coin_pitch_timer = 0.05
+
+        game._update_game(0.1)
+        self.assertGreater(game._coin_streak_grace_timer, 0.0)
+        self.assertEqual(game._coin_streak, 8)
+        self.assertEqual(game._coin_pitch_index, 3)
+
+        game._update_game(1.0)
+        self.assertEqual(game._coin_streak, 0)
+        self.assertEqual(game._coin_pitch_index, 0)
+
+    def test_hyper_sneakers_reduces_roll_duration(self):
+        game, _, _ = self.make_game()
+        game.player.super_sneakers = 2.0
+        game._active_special_run_items = {"hyper_sneakers"}
+
+        game._try_roll()
+
+        self.assertLess(game.player.rolling, 0.7)
+
+    def test_risk_converter_adds_event_coins_on_near_miss(self):
+        game, _, _ = self.make_game()
+        game._active_special_run_items = {"risk_converter"}
+        game.player.lane = 0
+        game.settings["event_state"]["event_coins"] = 0
+        game.obstacles = [Obstacle(kind="train", lane=1, z=1.1)]
+
+        game._update_near_miss_audio()
+
+        self.assertEqual(int(game.settings["event_state"].get("event_coins", 0)), 1)
+
+    def test_jackpot_fuse_can_force_high_tier_track_box_reward(self):
+        game, _, _ = self.make_game()
+        game._active_special_run_items = {"jackpot_fuse"}
+        game._box_high_tier_meter = 5
+
+        with patch("subway_blind.game.random.random", return_value=0.0), patch(
+            "subway_blind.game.random.choice",
+            return_value="key",
+        ):
+            reward = game._pick_track_box_reward()
+
+        self.assertEqual(reward, "key")
+        self.assertEqual(game._box_high_tier_meter, 0)
+
+    def test_chain_saver_restores_powerup_chain_once(self):
+        game, _, _ = self.make_game()
+        game._active_special_run_items = {"chain_saver"}
+        game.player.magnet = 0.1
+
+        game._tick_powerups(0.2)
+
+        self.assertGreater(game.player.magnet, 0.0)
+        self.assertIn("chain_saver_used", game._special_run_used_flags)
+
+    def test_vault_seal_adds_banked_coin_protection_bonus(self):
+        game, _, _ = self.make_game()
+        game._active_special_run_items = {"vault_seal"}
+        game.state.running = True
+        game.state.coins = 100
+
+        game._commit_run_rewards()
+
+        self.assertEqual(int(game.settings.get("bank_coins", 0)), 107)
+
+    def test_season_imprint_coin_drift_increases_coin_gain(self):
+        game, _, _ = self.make_game()
+        game._active_special_run_items = {"season_imprint"}
+        game._season_imprint_bonus_key = "coin_drift"
+        game.state.running = True
+
+        game._add_run_coins(10)
+
+        self.assertEqual(game.state.coins, 11)
 
 
 if __name__ == "__main__":

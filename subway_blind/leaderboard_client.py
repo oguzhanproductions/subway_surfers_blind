@@ -160,11 +160,36 @@ class LeaderboardClient:
         self.auth_token = str(result.get("session_token") or "")
         return result
 
-    def sync_account(self, claimed_reward_ids: list[str] | None = None) -> dict[str, Any]:
+    def sync_account(
+        self,
+        claimed_reward_ids: list[str] | None = None,
+        consumed_special_item_keys: list[str] | None = None,
+    ) -> dict[str, Any]:
         result = self._request(
             "sync_account",
             {
                 "claimed_reward_ids": [str(reward_id).strip() for reward_id in list(claimed_reward_ids or []) if str(reward_id).strip()],
+                "consumed_special_item_keys": [
+                    str(item_key).strip()
+                    for item_key in list(consumed_special_item_keys or [])
+                    if str(item_key).strip()
+                ],
+            },
+        )
+        self.last_account_sync = dict(result)
+        return result
+
+    def spin_weekly_wheel(self) -> dict[str, Any]:
+        result = self._request("spin_weekly_wheel", {})
+        self.last_account_sync = dict(result)
+        return result
+
+    def set_special_item_loadout(self, item_key: str, enabled: bool) -> dict[str, Any]:
+        result = self._request(
+            "set_special_item_loadout",
+            {
+                "item_key": str(item_key or ""),
+                "enabled": bool(enabled),
             },
         )
         self.last_account_sync = dict(result)

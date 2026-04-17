@@ -212,6 +212,48 @@ RUN_POWERUP_LABELS = {
     "pogo": "Pogo Stick",
     "hoverboard": "Hoverboard",
 }
+SPECIAL_ITEM_LABELS = {
+    "phantom_step": "Phantom Step",
+    "afterimage_dash": "Afterimage Dash",
+    "crowd_jammer": "Crowd Jammer",
+    "impact_foam": "Impact Foam",
+    "overclock_key": "Overclock Key",
+    "magnet_echo": "Magnet Echo",
+    "quiet_jet": "Quiet Jet",
+    "combo_battery": "Combo Battery",
+    "hyper_sneakers": "Hyper Sneakers",
+    "risk_converter": "Risk Converter",
+    "jackpot_fuse": "Jackpot Fuse",
+    "chain_saver": "Chain Saver",
+    "vault_seal": "Vault Seal",
+    "season_imprint": "Season Imprint",
+}
+SPECIAL_ITEM_EFFECT_TEXT = {
+    "phantom_step": "8 seconds of delayed ghost dodge after lane change.",
+    "afterimage_dash": "Two quick extra lane shifts are available in sequence.",
+    "crowd_jammer": "Nearby hazard spawn pressure is reduced for a short time.",
+    "impact_foam": "One collision becomes a stumble instead of a full crash.",
+    "overclock_key": "Collected run keys can duplicate by +1 at run end.",
+    "magnet_echo": "A weaker magnet pull lingers for 3 seconds after magnet ends.",
+    "quiet_jet": "2 seconds of collision buffer after jetpack landing.",
+    "combo_battery": "Coin streak keeps a short grace window before reset.",
+    "hyper_sneakers": "Roll transition penalty is reduced during sneakers.",
+    "risk_converter": "Near misses grant small Event Coin rewards.",
+    "jackpot_fuse": "Mystery and Super box high-tier drop chance ramps up.",
+    "chain_saver": "One power-up chain break is prevented per run.",
+    "vault_seal": "A portion of banked coin loss is prevented when loss effects trigger.",
+    "season_imprint": "Weekly passive bonus rotates with the active season imprint.",
+}
+SEASON_IMPRINT_TEXT = {
+    "coin_drift": "Coin rewards are slightly increased.",
+    "risk_bloom": "Near-miss rewards are stronger.",
+    "safe_stride": "Run safety effects last a little longer.",
+    "power_echo": "Temporary power-up durations are slightly extended.",
+    "fortune_line": "Box jackpots are slightly more likely.",
+    "streak_guard": "Coin streak grace lasts longer.",
+    "spawn_calm": "Hazard pressure reduction is slightly stronger.",
+}
+SPECIAL_ITEM_ORDER = tuple(SPECIAL_ITEM_LABELS.keys())
 
 GUARD_LOOP_DURATION = 1.35
 POGO_STICK_DURATION = 5.5
@@ -679,6 +721,19 @@ class SubwayBlindGame:
         self.leaderboard_client = LeaderboardClient()
         self._leaderboard_username = str(self.settings.get("leaderboard_username", "") or "").strip()
         self._restore_persisted_leaderboard_session()
+        self._server_special_items: dict[str, int] = {}
+        self._server_special_item_loadout: dict[str, bool] = {key: False for key in SPECIAL_ITEM_ORDER}
+        self._server_wheel_status: dict[str, object] = {}
+        self._season_imprint_bonus_key = ""
+        self._special_toggle_item_key = ""
+        self._active_special_run_items: set[str] = set()
+        self._special_effect_timers: dict[str, float] = {}
+        self._special_run_used_flags: set[str] = set()
+        self._consumed_special_items_this_run: set[str] = set()
+        self._pending_consumed_special_items: list[str] = []
+        self._pending_overclock_keys = 0
+        self._box_high_tier_meter = 0
+        self._coin_streak_grace_timer = 0.0
         self._leaderboard_period_filter = "season"
         self._leaderboard_difficulty_filter = "all"
         self._leaderboard_season: dict[str, object] = {}
@@ -711,6 +766,8 @@ class SubwayBlindGame:
         self._pending_purchase_handler: Callable[[], None] | None = None
         self._pending_purchase_return_menu: Menu | None = None
         self._pending_purchase_return_index = 0
+        self._pending_wheel_spin_reward: dict[str, object] | None = None
+        self._pending_wheel_spin_reward_delay = 0.0
         self._game_over_publish_state = "idle"
         self._active_run_stats = self._empty_run_stats()
         self._game_over_summary = self._empty_game_over_summary()
@@ -820,6 +877,12 @@ class SubwayBlindGame:
             self.speaker,
             self.audio,
             "Events",
+            [],
+        )
+        self.wheel_menu = Menu(
+            self.speaker,
+            self.audio,
+            "Wheel Spin",
             [],
         )
         self.event_shop_menu = Menu(
@@ -1268,6 +1331,60 @@ class SubwayBlindGame:
     def _loadout_title(self) -> str:
         return "Practice Setup" if self._pending_practice_setup else "Run Setup"
 
+    @staticmethod
+    def _special_item_label(item_key: str) -> str:
+        return SPECIAL_ITEM_LABELS.get(str(item_key or "").strip().lower(), "Special Item")
+
+    def _special_item_owned_count(self, item_key: str) -> int:
+        return max(0, int(self._server_special_items.get(item_key, 0) or 0))
+
+    def _special_item_enabled(self, item_key: str) -> bool:
+        if self._special_item_owned_count(item_key) <= 0:
+            return False
+        return bool(self._server_special_item_loadout.get(item_key, False))
+
+    def _special_item_loadout_label(self, item_key: str) -> str:
+        return (
+            f"{self._special_item_label(item_key)}: "
+            f"{'On' if self._special_item_enabled(item_key) else 'Off'}   "
+            f"Owned: {self._special_item_owned_count(item_key)}"
+        )
+
+    def _wheel_status_label(self) -> str:
+        spins_remaining = int(self._server_wheel_status.get("spins_remaining", 0) or 0)
+        max_spins = int(self._server_wheel_status.get("max_spins", 2) or 2)
+        return f"Weekly Spins: {spins_remaining}/{max_spins} remaining"
+
+    def _season_imprint_status_label(self) -> str:
+        bonus_key = str(self._season_imprint_bonus_key or "").strip().lower()
+        if not bonus_key:
+            return "Season Imprint: Syncing..."
+        description = SEASON_IMPRINT_TEXT.get(bonus_key, "Weekly bonus is active.")
+        return f"Season Imprint: {bonus_key.replace('_', ' ').title()}   {description}"
+
+    def _wheel_spin_action_label(self) -> str:
+        if not self._leaderboard_is_authenticated():
+            return "Spin Wheel   Sign in required"
+        spins_remaining = int(self._server_wheel_status.get("spins_remaining", 0) or 0)
+        if spins_remaining <= 0:
+            return "Spin Wheel   No spins left this week"
+        return "Spin Wheel"
+
+    def _refresh_wheel_menu_labels(self) -> None:
+        items = [
+            MenuItem(self._wheel_status_label(), "wheel_info"),
+            MenuItem(self._season_imprint_status_label(), "wheel_info"),
+            MenuItem(self._wheel_spin_action_label(), "wheel_spin_now"),
+        ]
+        for item_key in SPECIAL_ITEM_ORDER:
+            owned = self._special_item_owned_count(item_key)
+            if owned <= 0:
+                continue
+            items.append(MenuItem(self._special_item_loadout_label(item_key), f"wheel_item_info:{item_key}"))
+        items.append(MenuItem("Back", "back"))
+        self.wheel_menu.title = "Wheel Spin"
+        self.wheel_menu.items = items
+
     def _practice_speed_scaling_option_label(self) -> str:
         return f"Practice Speed Scaling: {'On' if self._practice_speed_scaling_enabled() else 'Off'}"
 
@@ -1282,13 +1399,18 @@ class SubwayBlindGame:
                 MenuItem("Begin Practice", "begin_run"),
                 MenuItem("Back", "back"),
             ]
-        return [
+        items = [
             MenuItem(self._loadout_board_label(), "loadout_board_info"),
             MenuItem(self._headstart_option_label(), "toggle_headstart"),
             MenuItem(self._score_booster_option_label(), "toggle_score_booster"),
-            MenuItem("Begin Run", "begin_run"),
-            MenuItem("Back", "back"),
         ]
+        if self._leaderboard_is_authenticated():
+            for item_key in SPECIAL_ITEM_ORDER:
+                if self._special_item_owned_count(item_key) <= 0:
+                    continue
+                items.append(MenuItem(self._special_item_loadout_label(item_key), f"toggle_special_item:{item_key}"))
+        items.extend([MenuItem("Begin Run", "begin_run"), MenuItem("Back", "back")])
+        return items
 
     def _events_menu_title(self) -> str:
         event = current_daily_event()
@@ -2363,6 +2485,11 @@ class SubwayBlindGame:
                 "Connect to the online leaderboard, browse top players, and inspect published run history.",
             ),
             MenuItem(
+                "Wheel Spin",
+                "wheel_spin",
+                "Spin the weekly special-item wheel up to two times each week after signing in.",
+            ),
+            MenuItem(
                 "Report a Bug",
                 "issue_reports",
                 "Send a bug report through the online issue system and browse submitted reports by status.",
@@ -2848,7 +2975,18 @@ class SubwayBlindGame:
 
     def _open_super_mystery_box(self, source: str) -> None:
         self._record_achievement_metric("total_boxes_opened", 1)
-        reward = pick_super_mystery_box_reward()
+        if self._special_active("jackpot_fuse"):
+            self._box_high_tier_meter += 1
+            jackpot_chance = min(0.35, 0.06 * self._box_high_tier_meter)
+            if self._season_imprint_matches("fortune_line"):
+                jackpot_chance = min(0.45, jackpot_chance + 0.06)
+            if random.random() < jackpot_chance:
+                self._box_high_tier_meter = 0
+                reward = random.choice(["jackpot", "keys", "hoverboards"])
+            else:
+                reward = pick_super_mystery_box_reward()
+        else:
+            reward = pick_super_mystery_box_reward()
         self.audio.play("mystery_box_open", channel="ui")
         self.audio.play("mystery_combo", channel="ui2")
         if reward == "coins":
@@ -3034,6 +3172,7 @@ class SubwayBlindGame:
         season = payload.get("season")
         if isinstance(season, dict):
             self._leaderboard_season = dict(season)
+        self._apply_special_sync_payload(payload)
         known_ids = set(self._claimed_leaderboard_reward_ids())
         for reward_entry in list(payload.get("pending_rewards") or []):
             if not isinstance(reward_entry, dict):
@@ -3055,6 +3194,50 @@ class SubwayBlindGame:
         elif username:
             self._persist_settings()
         return len(applied_reward_ids)
+
+    def _apply_special_sync_payload(self, payload: dict[str, object]) -> None:
+        items_payload = payload.get("special_items")
+        loadout_payload = payload.get("special_item_loadout")
+        wheel_payload = payload.get("wheel")
+        season_imprint_bonus = str(payload.get("season_imprint_bonus") or "").strip().lower()
+        normalized_items: dict[str, int] = {}
+        if isinstance(items_payload, dict):
+            for item_key in SPECIAL_ITEM_ORDER:
+                amount = int(items_payload.get(item_key, 0) or 0)
+                if amount > 0:
+                    normalized_items[item_key] = amount
+        normalized_loadout: dict[str, bool] = {}
+        for item_key in SPECIAL_ITEM_ORDER:
+            if item_key not in normalized_items:
+                normalized_loadout[item_key] = False
+                continue
+            enabled = bool(loadout_payload.get(item_key, False)) if isinstance(loadout_payload, dict) else False
+            normalized_loadout[item_key] = enabled
+        self._server_special_items = normalized_items
+        self._server_special_item_loadout = normalized_loadout
+        self._server_wheel_status = dict(wheel_payload) if isinstance(wheel_payload, dict) else {}
+        if season_imprint_bonus in SEASON_IMPRINT_TEXT:
+            self._season_imprint_bonus_key = season_imprint_bonus
+        elif not self._season_imprint_bonus_key:
+            self._season_imprint_bonus_key = ""
+        self._refresh_wheel_menu_labels()
+        self._refresh_loadout_menu_labels()
+
+    def _clear_server_special_state(self) -> None:
+        self._server_special_items = {}
+        self._server_special_item_loadout = {key: False for key in SPECIAL_ITEM_ORDER}
+        self._server_wheel_status = {}
+        self._season_imprint_bonus_key = ""
+        self._active_special_run_items.clear()
+        self._special_effect_timers.clear()
+        self._special_run_used_flags.clear()
+        self._consumed_special_items_this_run.clear()
+        self._pending_consumed_special_items = []
+        self._pending_overclock_keys = 0
+        self._box_high_tier_meter = 0
+        self._coin_streak_grace_timer = 0.0
+        self._refresh_wheel_menu_labels()
+        self._refresh_loadout_menu_labels()
 
     def _start_background_leaderboard_sync(self) -> None:
         if self._leaderboard_startup_sync_started or not self._leaderboard_is_authenticated():
@@ -3095,6 +3278,90 @@ class SubwayBlindGame:
 
     def _powerup_duration(self, key: str) -> float:
         return self._character_adjusted_power_duration(item_upgrade_duration(self.settings, key))
+
+    def _special_active(self, item_key: str) -> bool:
+        return item_key in self._active_special_run_items
+
+    def _season_imprint_active(self) -> bool:
+        return self._special_active("season_imprint") and bool(self._season_imprint_bonus_key)
+
+    def _season_imprint_matches(self, bonus_key: str) -> bool:
+        matched = self._season_imprint_active() and self._season_imprint_bonus_key == bonus_key
+        if matched:
+            self._mark_special_item_consumed("season_imprint")
+        return matched
+
+    def _special_timer(self, timer_key: str) -> float:
+        return float(self._special_effect_timers.get(timer_key, 0.0) or 0.0)
+
+    def _set_special_timer(self, timer_key: str, duration: float) -> None:
+        self._special_effect_timers[timer_key] = max(0.0, float(duration))
+
+    def _extend_special_timer(self, timer_key: str, duration: float) -> None:
+        self._set_special_timer(timer_key, max(self._special_timer(timer_key), float(duration)))
+
+    def _special_duration_scale(self) -> float:
+        if self._season_imprint_matches("safe_stride"):
+            return 1.2
+        return 1.0
+
+    def _mark_special_item_consumed(self, item_key: str) -> None:
+        normalized_key = str(item_key or "").strip().lower()
+        if normalized_key not in SPECIAL_ITEM_ORDER:
+            return
+        if normalized_key not in self._active_special_run_items:
+            return
+        if normalized_key in self._consumed_special_items_this_run:
+            return
+        self._consumed_special_items_this_run.add(normalized_key)
+
+    def _queue_consumed_special_items_sync(self) -> None:
+        if not self._consumed_special_items_this_run:
+            return
+        for item_key in sorted(self._consumed_special_items_this_run):
+            self._pending_consumed_special_items.append(item_key)
+        self._consumed_special_items_this_run.clear()
+        if not self._leaderboard_is_authenticated():
+            return
+        if self._leaderboard_active_operation is not None:
+            return
+        pending_items = [
+            str(item_key).strip()
+            for item_key in self._pending_consumed_special_items
+            if str(item_key).strip()
+        ]
+        if not pending_items:
+            return
+        pending_items = list(dict.fromkeys(pending_items))[:64]
+
+        def worker() -> dict[str, object]:
+            self.leaderboard_client.connect()
+            payload = self.leaderboard_client.sync_account(
+                self._claimed_leaderboard_reward_ids(),
+                consumed_special_item_keys=pending_items,
+            )
+            payload["consumed_special_item_keys"] = list(pending_items)
+            return payload
+
+        self._start_leaderboard_operation(
+            "special_item_consume_sync",
+            "Wheel Loadout",
+            "Syncing special item usage...",
+            worker,
+            return_menu=self.active_menu,
+            show_status=False,
+            reject_message=False,
+        )
+
+    def _flush_consumed_special_items(self, consumed_keys: list[str]) -> None:
+        consumed_set = {str(item_key).strip().lower() for item_key in consumed_keys if str(item_key).strip()}
+        if not consumed_set:
+            return
+        self._pending_consumed_special_items = [
+            item_key
+            for item_key in self._pending_consumed_special_items
+            if str(item_key).strip().lower() not in consumed_set
+        ]
 
     def _unlock_character(self, key: str) -> None:
         definition = character_definition(key)
@@ -3286,12 +3553,22 @@ class SubwayBlindGame:
         elif item == "mystery_box":
             if not self._spend_bank_coins(SHOP_PRICES["mystery_box"]):
                 return
-            if self._active_event_profile.get("jackpot_bonus"):
+            if self._active_event_profile.get("jackpot_bonus") or self._special_active("jackpot_fuse"):
+                self._box_high_tier_meter += 1
+                jackpot_weight = 12
+                if self._special_active("jackpot_fuse"):
+                    jackpot_weight += min(20, self._box_high_tier_meter * 3)
+                    if self._season_imprint_matches("fortune_line"):
+                        jackpot_weight += 8
                 reward = random.choices(
                     ["coins", "hover", "key", "headstart", "score_booster", "jackpot", "nothing"],
-                    weights=[45, 12, 12, 10, 8, 12, 1],
+                    weights=[45, 12, 12, 10, 8, jackpot_weight, 1],
                     k=1,
                 )[0]
+                if reward == "jackpot":
+                    self._box_high_tier_meter = 0
+                    if self._special_active("jackpot_fuse"):
+                        self._mark_special_item_consumed("jackpot_fuse")
             else:
                 reward = pick_shop_mystery_box_reward()
             self._grant_shop_box_reward(reward)
@@ -3361,8 +3638,15 @@ class SubwayBlindGame:
             return
         saved_coins = int(self.state.coins)
         character_bonus = int(saved_coins * self._active_character_bonuses.banked_coin_bonus_ratio)
-        total_saved_coins = saved_coins + character_bonus
+        vault_seal_bonus = 0
+        if self._special_active("vault_seal") and saved_coins > 0:
+            ratio = 0.1 if self._season_imprint_matches("safe_stride") else 0.07
+            vault_seal_bonus = max(1, int(saved_coins * ratio))
+            self._mark_special_item_consumed("vault_seal")
+        total_saved_coins = saved_coins + character_bonus + vault_seal_bonus
         self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + total_saved_coins
+        if self._pending_overclock_keys > 0:
+            self.settings["keys"] = int(self.settings.get("keys", 0)) + int(self._pending_overclock_keys)
         self._record_achievement_max("best_distance", int(self.state.distance))
         if total_saved_coins > 0:
             self.audio.play("coin_gui", channel="ui")
@@ -3370,6 +3654,10 @@ class SubwayBlindGame:
         if character_bonus > 0:
             active_character = selected_character_definition(self.settings)
             self.speaker.speak(f"{active_character.name} bonus saved {character_bonus} extra coins.", interrupt=False)
+        if vault_seal_bonus > 0:
+            self.speaker.speak(f"Vault Seal protected {vault_seal_bonus} coins.", interrupt=False)
+        if self._pending_overclock_keys > 0:
+            self.speaker.speak(f"Overclock Key bonus: +{int(self._pending_overclock_keys)} key.", interrupt=False)
         record_daily_score(self.settings, int(self.state.score))
         record_coin_meter_coins(self.settings, saved_coins)
         hoverboards_used = int(self._compact_powerup_usage(self._active_run_stats.get("powerup_usage")).get("hoverboard", 0) or 0)
@@ -3387,6 +3675,7 @@ class SubwayBlindGame:
         self._refresh_quest_menu_labels()
         self._refresh_missions_hub_menu_labels()
         self._persist_settings()
+        self._queue_consumed_special_items_sync()
 
     def _clear_menu_repeat(self) -> None:
         self._menu_repeat_key = None
@@ -3748,11 +4037,13 @@ class SubwayBlindGame:
             return
         if self._practice_mode_active:
             return
-        self.state.coins += amount
-        self._record_achievement_metric("total_coins_collected", amount)
-        # Fatal collisions can commit rewards mid-frame; bank late coin pickups immediately.
+        adjusted_amount = int(amount)
+        if self._season_imprint_matches("coin_drift"):
+            adjusted_amount += max(1, int(round(adjusted_amount * 0.1)))
+        self.state.coins += adjusted_amount
+        self._record_achievement_metric("total_coins_collected", adjusted_amount)
         if self._run_rewards_committed:
-            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + amount
+            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + adjusted_amount
 
     def run(self) -> None:
         running = True
@@ -3787,6 +4078,7 @@ class SubwayBlindGame:
                 self._update_learn_sound_preview(delta_time)
                 self._update_update_install_state()
                 self._update_keyboard_binding_hold(delta_time)
+                self._update_pending_wheel_spin_reward(delta_time)
             if not self._exit_requested:
                 self._update_leaderboard_operation_state()
 
@@ -3821,6 +4113,28 @@ class SubwayBlindGame:
             self.speaker.speak(menu._opening_announcement(), interrupt=True)
             return
         menu._announce_current()
+
+    def _update_pending_wheel_spin_reward(self, delta_time: float) -> None:
+        if self._pending_wheel_spin_reward is None:
+            return
+        self._pending_wheel_spin_reward_delay = max(0.0, float(self._pending_wheel_spin_reward_delay) - float(delta_time))
+        if self._pending_wheel_spin_reward_delay > 0:
+            return
+        reward_data = dict(self._pending_wheel_spin_reward)
+        self._pending_wheel_spin_reward = None
+        self._pending_wheel_spin_reward_delay = 0.0
+        sync_payload = reward_data.get("sync_payload")
+        if isinstance(sync_payload, dict):
+            self._apply_special_sync_payload(sync_payload)
+            self._refresh_wheel_menu_labels()
+        amount = max(1, int(reward_data.get("amount", 1) or 1))
+        item_label = str(reward_data.get("item_label") or "Special Item").strip() or "Special Item"
+        self.audio.play("mystery_box_open", channel="ui")
+        self.audio.play("unlock", channel="ui2")
+        self.speaker.speak(
+            f"Wheel reward: {amount} {item_label}{'' if amount == 1 else 's'}.",
+            interrupt=True,
+        )
 
     def _handle_active_menu_key(self, key: int) -> bool:
         if self.active_menu is None:
@@ -3972,6 +4286,9 @@ class SubwayBlindGame:
             if self.active_menu == self.events_menu:
                 self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "events"))
                 return True
+            if self.active_menu == self.wheel_menu:
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "wheel_spin"))
+                return True
             if self.active_menu == self.event_shop_menu:
                 self._refresh_events_menu_labels()
                 self._set_active_menu(self.events_menu, start_index=self._menu_index_for_action(self.events_menu, "open_event_shop"))
@@ -4095,6 +4412,9 @@ class SubwayBlindGame:
             if action == "leaderboard":
                 self._open_leaderboard()
                 return True
+            if action == "wheel_spin":
+                self._open_wheel_menu()
+                return True
             if action == "issue_reports":
                 self._open_issue_reports()
                 return True
@@ -4160,6 +4480,10 @@ class SubwayBlindGame:
                     interrupt=True,
                 )
                 return True
+            if action.startswith("toggle_special_item:"):
+                item_key = action.split(":", 1)[1]
+                self._toggle_special_item_loadout(item_key)
+                return True
             if action == "edit_practice_hazard_target":
                 self._edit_practice_hazard_target()
                 return True
@@ -4217,6 +4541,25 @@ class SubwayBlindGame:
                 return True
             if action == "back":
                 self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "events"))
+                return True
+            return True
+
+        if self.active_menu == self.wheel_menu:
+            if action == "wheel_info":
+                if self.wheel_menu.items:
+                    item = self.wheel_menu.items[min(self.wheel_menu.index, len(self.wheel_menu.items) - 1)]
+                    self.speaker.speak(item.label, interrupt=True)
+                return True
+            if action == "wheel_spin_now":
+                self._request_weekly_wheel_spin()
+                return True
+            if action.startswith("wheel_item_info:"):
+                item_key = action.split(":", 1)[1]
+                effect = SPECIAL_ITEM_EFFECT_TEXT.get(item_key, "Special server-side run effect.")
+                self.speaker.speak(f"{self._special_item_label(item_key)}. {effect}", interrupt=True)
+                return True
+            if action == "back":
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "wheel_spin"))
                 return True
             return True
 
@@ -5219,6 +5562,66 @@ class SubwayBlindGame:
             self._apply_leaderboard_account_sync(data, announce_rewards=True)
             self._refresh_leaderboard_menu()
             return
+        if operation == "wheel_sync":
+            data = dict(payload or {})
+            if bool(data.get("just_connected")):
+                self.audio.play("connect", channel="ui")
+            self._apply_leaderboard_account_sync(data, announce_rewards=True)
+            self._refresh_leaderboard_menu()
+            self._refresh_wheel_menu_labels()
+            if self.active_menu == self.wheel_menu:
+                self._set_active_menu(self.wheel_menu, play_sound=False)
+            return
+        if operation == "wheel_spin":
+            data = dict(payload or {})
+            reward = dict(data.get("reward") or {})
+            item_key = str(reward.get("item_key") or "").strip().lower()
+            item_label = self._special_item_label(item_key) if item_key else "Special Item"
+            amount = max(1, int(reward.get("amount", 1) or 1))
+            self._set_active_menu(self.wheel_menu, play_sound=False)
+            self.audio.play("wheel_spin", channel="wheel_spin")
+            spin_delay = 0.0
+            spin_sound = self.audio.sounds.get("wheel_spin")
+            if spin_sound is not None:
+                spin_delay = max(0.0, float(spin_sound.get_length()))
+            self._pending_wheel_spin_reward = {
+                "amount": amount,
+                "item_label": item_label,
+                "sync_payload": data,
+            }
+            self._pending_wheel_spin_reward_delay = spin_delay
+            return
+        if operation == "special_item_consume_sync":
+            data = dict(payload or {})
+            self._apply_leaderboard_account_sync(data, announce_rewards=False)
+            consumed_keys = list(data.get("consumed_special_item_keys") or [])
+            self._flush_consumed_special_items(consumed_keys)
+            self._refresh_wheel_menu_labels()
+            self._refresh_loadout_menu_labels()
+            return
+        if operation == "special_item_toggle":
+            data = dict(payload or {})
+            self._apply_special_sync_payload(data)
+            toggled_key = str(data.get("item_key") or self._special_toggle_item_key or "").strip().lower()
+            self._special_toggle_item_key = ""
+            if toggled_key:
+                state_text = "On" if bool(data.get("enabled", False)) else "Off"
+                self.audio.play("confirm", channel="ui")
+                self.speaker.speak(
+                    f"{self._special_item_label(toggled_key)} {state_text}.",
+                    interrupt=True,
+                )
+            if self._leaderboard_return_menu == self.loadout_menu:
+                self._refresh_loadout_menu_labels()
+                self._set_active_menu(
+                    self.loadout_menu,
+                    start_index=self._menu_index_for_action(
+                        self.loadout_menu,
+                        f"toggle_special_item:{toggled_key}" if toggled_key else "begin_run",
+                    ),
+                    play_sound=False,
+                )
+            return
 
     def _handle_leaderboard_error(self, operation: str, error: object) -> None:
         if operation == "leaderboard_auth":
@@ -5229,8 +5632,11 @@ class SubwayBlindGame:
             self.settings["leaderboard_username"] = ""
             self.leaderboard_client.principal_username = ""
             self.leaderboard_client.auth_token = ""
+            self._clear_server_special_state()
             self._refresh_options_menu_labels()
             self._persist_settings()
+        if operation == "special_item_consume_sync":
+            return
         if operation == "leaderboard_startup_sync" and not (
             isinstance(error, LeaderboardClientError) and error.code == "reauth_required"
         ):
@@ -5266,6 +5672,87 @@ class SubwayBlindGame:
         ):
             return "This server does not support the bug report system yet. Update the server and try again."
         return str(error)
+
+    def _open_wheel_menu(self) -> None:
+        if not self._leaderboard_is_authenticated():
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("Sign in from Options, Set User Name, before opening Wheel Spin.", interrupt=True)
+            return
+        self._refresh_wheel_menu_labels()
+        self._set_active_menu(self.wheel_menu)
+        self._request_wheel_sync(show_status=False)
+
+    def _request_wheel_sync(self, *, show_status: bool) -> None:
+        def worker() -> dict[str, object]:
+            just_connected = self.leaderboard_client.connect()
+            payload = self.leaderboard_client.sync_account(self._claimed_leaderboard_reward_ids())
+            payload["just_connected"] = just_connected
+            return payload
+
+        self._start_leaderboard_operation(
+            "wheel_sync",
+            "Wheel Spin",
+            "Syncing wheel status...",
+            worker,
+            return_menu=self.wheel_menu,
+            show_status=show_status,
+            reject_message=False,
+        )
+
+    def _request_weekly_wheel_spin(self) -> None:
+        if not self._leaderboard_is_authenticated():
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("Sign in required.", interrupt=True)
+            return
+        spins_remaining = int(self._server_wheel_status.get("spins_remaining", 0) or 0)
+        if spins_remaining <= 0:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("No wheel spins left this week.", interrupt=True)
+            return
+
+        def worker() -> dict[str, object]:
+            self.leaderboard_client.connect()
+            return self.leaderboard_client.spin_weekly_wheel()
+
+        self._start_leaderboard_operation(
+            "wheel_spin",
+            "Wheel Spin",
+            "Spinning the wheel...",
+            worker,
+            return_menu=self.wheel_menu,
+            show_status=True,
+            reject_message=True,
+        )
+
+    def _toggle_special_item_loadout(self, item_key: str) -> None:
+        normalized_key = str(item_key or "").strip().lower()
+        if normalized_key not in SPECIAL_ITEM_ORDER:
+            self.audio.play("menuedge", channel="ui")
+            return
+        if not self._leaderboard_is_authenticated():
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("Sign in required.", interrupt=True)
+            return
+        if self._special_item_owned_count(normalized_key) <= 0:
+            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak("This special item is not unlocked yet.", interrupt=True)
+            return
+        next_enabled = not self._special_item_enabled(normalized_key)
+
+        def worker() -> dict[str, object]:
+            self.leaderboard_client.connect()
+            return self.leaderboard_client.set_special_item_loadout(normalized_key, next_enabled)
+
+        if self._start_leaderboard_operation(
+            "special_item_toggle",
+            "Wheel Loadout",
+            f"Updating {self._special_item_label(normalized_key)}...",
+            worker,
+            return_menu=self.loadout_menu,
+            show_status=True,
+            reject_message=True,
+        ):
+            self._special_toggle_item_key = normalized_key
 
     def _open_leaderboard(self, force_refresh: bool = False) -> None:
         if not self._leaderboard_is_authenticated():
@@ -5550,6 +6037,7 @@ class SubwayBlindGame:
         self.leaderboard_client.logout()
         self._leaderboard_username = ""
         self.settings["leaderboard_username"] = ""
+        self._clear_server_special_state()
         self._leaderboard_entries = []
         self._leaderboard_total_players = 0
         self._leaderboard_profile = None
@@ -6222,6 +6710,20 @@ class SubwayBlindGame:
         self._game_over_summary = self._empty_game_over_summary()
         self._magnet_loop_active = False
         self._jetpack_loop_active = False
+        self._special_effect_timers = {}
+        self._special_run_used_flags = set()
+        self._consumed_special_items_this_run = set()
+        self._pending_overclock_keys = 0
+        self._box_high_tier_meter = 0
+        self._coin_streak_grace_timer = 0.0
+        if self._leaderboard_is_authenticated():
+            self._active_special_run_items = {
+                item_key
+                for item_key in SPECIAL_ITEM_ORDER
+                if self._special_item_enabled(item_key)
+            }
+        else:
+            self._active_special_run_items = set()
         self.player.board_extra_jump_available = False
         active_character = selected_character_definition(self.settings)
         active_board = selected_board_definition(self.settings)
@@ -6320,6 +6822,21 @@ class SubwayBlindGame:
             if target_lane != self.player.lane:
                 move_count = abs(target_lane - self.player.lane)
                 self.player.lane = target_lane
+                if self._special_active("afterimage_dash"):
+                    window = self._special_timer("afterimage_window")
+                    charges = int(self._special_effect_timers.get("afterimage_charges", 0) or 0)
+                    if window > 0 and charges > 0:
+                        extra_lane = normalize_lane(self.player.lane - 1)
+                        if extra_lane != self.player.lane:
+                            self.player.lane = extra_lane
+                            move_count += 1
+                            self._special_effect_timers["afterimage_charges"] = max(0, charges - 1)
+                            self._mark_special_item_consumed("afterimage_dash")
+                    else:
+                        self._set_special_timer("afterimage_window", 1.2)
+                        self._special_effect_timers["afterimage_charges"] = 2
+                if self._special_active("phantom_step"):
+                    self._set_special_timer("phantom_step", 8.0 * self._special_duration_scale())
                 self._record_mission_event("dodges", move_count)
                 self.audio.play("dodge", pan=lane_to_pan(self.player.lane), channel="move")
                 if self.settings.get("announce_lane", True):
@@ -6332,6 +6849,21 @@ class SubwayBlindGame:
             if target_lane != self.player.lane:
                 move_count = abs(target_lane - self.player.lane)
                 self.player.lane = target_lane
+                if self._special_active("afterimage_dash"):
+                    window = self._special_timer("afterimage_window")
+                    charges = int(self._special_effect_timers.get("afterimage_charges", 0) or 0)
+                    if window > 0 and charges > 0:
+                        extra_lane = normalize_lane(self.player.lane + 1)
+                        if extra_lane != self.player.lane:
+                            self.player.lane = extra_lane
+                            move_count += 1
+                            self._special_effect_timers["afterimage_charges"] = max(0, charges - 1)
+                            self._mark_special_item_consumed("afterimage_dash")
+                    else:
+                        self._set_special_timer("afterimage_window", 1.2)
+                        self._special_effect_timers["afterimage_charges"] = 2
+                if self._special_active("phantom_step"):
+                    self._set_special_timer("phantom_step", 8.0 * self._special_duration_scale())
                 self._record_mission_event("dodges", move_count)
                 self.audio.play("dodge", pan=lane_to_pan(self.player.lane), channel="move")
                 if self.settings.get("announce_lane", True):
@@ -6387,7 +6919,11 @@ class SubwayBlindGame:
         if self.player.y > 0.01:
             return
         board = selected_board_definition(self.settings)
-        self.player.rolling = 1.05 if self.player.hover_active > 0 and board.power_key == "stay_low" else 0.7
+        roll_duration = 1.05 if self.player.hover_active > 0 and board.power_key == "stay_low" else 0.7
+        if self._special_active("hyper_sneakers") and self.player.super_sneakers > 0:
+            roll_duration *= 0.65
+            self._mark_special_item_consumed("hyper_sneakers")
+        self.player.rolling = roll_duration
         self._record_mission_event("rolls")
         self.audio.play("roll", pan=lane_to_pan(self.player.lane), channel="act")
 
@@ -6476,6 +7012,18 @@ class SubwayBlindGame:
         if self._coin_pitch_timer > 0:
             self._coin_pitch_timer = max(0.0, self._coin_pitch_timer - delta_time)
             if self._coin_pitch_timer <= 0:
+                if self._special_active("combo_battery"):
+                    grace = 0.85
+                    if self._season_imprint_matches("streak_guard"):
+                        grace += 0.25
+                    self._coin_streak_grace_timer = max(self._coin_streak_grace_timer, grace)
+                    self._mark_special_item_consumed("combo_battery")
+                else:
+                    self._coin_pitch_index = 0
+                    self._coin_streak = 0
+        if self._coin_streak_grace_timer > 0:
+            self._coin_streak_grace_timer = max(0.0, self._coin_streak_grace_timer - delta_time)
+            if self._coin_streak_grace_timer <= 0:
                 self._coin_pitch_index = 0
                 self._coin_streak = 0
 
@@ -6562,6 +7110,13 @@ class SubwayBlindGame:
             if current_value > 0:
                 setattr(self.player, attribute, max(0.0, current_value - delta_time))
 
+        for timer_key in list(self._special_effect_timers.keys()):
+            current = float(self._special_effect_timers.get(timer_key, 0.0) or 0.0)
+            if current <= 0:
+                self._special_effect_timers[timer_key] = 0.0
+                continue
+            self._special_effect_timers[timer_key] = max(0.0, current - delta_time)
+
         previous_headstart = self.player.headstart
         decay("headstart")
         if previous_headstart > 0 and self.player.headstart <= 0:
@@ -6578,15 +7133,21 @@ class SubwayBlindGame:
             decay("hover_active")
         if self.player.hover_active <= 0:
             self.player.board_extra_jump_available = False
+        previous_sneakers = self.player.super_sneakers
         if self.player.jetpack <= 0 and self.player.headstart <= 0:
             decay("super_sneakers")
+        sneakers_expired = previous_sneakers > 0 and self.player.super_sneakers <= 0
 
         previous_magnet = self.player.magnet
         if self.player.jetpack <= 0 and self.player.headstart <= 0:
             decay("magnet")
+        magnet_expired = previous_magnet > 0 and self.player.magnet <= 0
         if previous_magnet > 0 and self.player.magnet <= 0:
             self.audio.stop("loop_magnet")
             self._magnet_loop_active = False
+            if self._special_active("magnet_echo"):
+                self._set_special_timer("magnet_echo", 3.0 * self._special_duration_scale())
+                self._mark_special_item_consumed("magnet_echo")
             self.audio.play("powerdown", channel="act")
             self.speaker.speak("Magnet expired.", interrupt=False)
         elif self.player.magnet > 0 and not self._magnet_loop_active:
@@ -6595,9 +7156,13 @@ class SubwayBlindGame:
 
         previous_jetpack = self.player.jetpack
         decay("jetpack")
+        jetpack_expired = previous_jetpack > 0 and self.player.jetpack <= 0
         if previous_jetpack > 0 and self.player.jetpack <= 0:
             self.audio.stop("loop_jetpack")
             self._jetpack_loop_active = False
+            if self._special_active("quiet_jet"):
+                self._set_special_timer("quiet_jet_buffer", 2.0 * self._special_duration_scale())
+                self._mark_special_item_consumed("quiet_jet")
             self.audio.play("powerdown", channel="act")
             self.speaker.speak("Jetpack expired.", interrupt=False)
         elif self.player.jetpack > 0 and not self._jetpack_loop_active:
@@ -6607,17 +7172,45 @@ class SubwayBlindGame:
         previous_multiplier = self.player.mult2x
         if self.player.jetpack <= 0 and self.player.headstart <= 0:
             decay("mult2x")
+        mult_expired = previous_multiplier > 0 and self.player.mult2x <= 0
         if previous_multiplier > 0 and self.player.mult2x <= 0:
             self.audio.play("powerdown", channel="act")
             self.speaker.speak("Score boost expired.", interrupt=False)
 
         previous_pogo = self.player.pogo_active
         decay("pogo_active")
+        pogo_expired = previous_pogo > 0 and self.player.pogo_active <= 0
         if previous_pogo > 0 and self.player.pogo_active <= 0:
             self.audio.play("powerdown", channel="act")
             self.speaker.speak("Pogo stick expired.", interrupt=False)
         elif self.player.pogo_active > 0:
             self._launch_pogo_bounce()
+
+        if self._special_active("chain_saver") and "chain_saver_used" not in self._special_run_used_flags:
+            if any((magnet_expired, mult_expired, sneakers_expired, pogo_expired, jetpack_expired)):
+                remaining_chain = max(
+                    float(self.player.magnet),
+                    float(self.player.mult2x),
+                    float(self.player.super_sneakers),
+                    float(self.player.pogo_active),
+                    float(self.player.jetpack),
+                )
+                if remaining_chain <= 0:
+                    restore_duration = 1.8 * self._special_duration_scale()
+                    if magnet_expired:
+                        self._activate_magnet(restore_duration)
+                    elif jetpack_expired:
+                        self._activate_jetpack(restore_duration)
+                    elif mult_expired:
+                        self.player.mult2x = max(self.player.mult2x, restore_duration)
+                    elif sneakers_expired:
+                        self.player.super_sneakers = max(self.player.super_sneakers, restore_duration)
+                    elif pogo_expired:
+                        self.player.pogo_active = max(self.player.pogo_active, restore_duration)
+                    self._special_run_used_flags.add("chain_saver_used")
+                    self._mark_special_item_consumed("chain_saver")
+                    self.audio.play("powerup", channel="act2")
+                    self.speaker.speak("Chain Saver activated.", interrupt=False)
 
         self._guard_loop_timer = max(0.0, self._guard_loop_timer - delta_time)
         if self.state.running and not self.state.paused and self._guard_loop_timer > 0:
@@ -6647,10 +7240,15 @@ class SubwayBlindGame:
                     chosen_pattern, distance = pattern
                     self._spawn_pattern(chosen_pattern, distance)
                     minimum_gap = 1.05 if difficulty == "easy" else 0.85
+                    spawn_gap_scale = 1.0
+                    if self._special_timer("crowd_jammer") > 0:
+                        spawn_gap_scale *= 1.22
+                    if self._season_imprint_matches("spawn_calm"):
+                        spawn_gap_scale *= 1.08
                     self.state.next_spawn = max(
                         minimum_gap,
                         self.spawn_director.next_encounter_gap(progress, difficulty=difficulty),
-                    )
+                    ) * spawn_gap_scale
 
         if not self._practice_mode_active and self.state.next_coinline <= 0:
             lane = self.spawn_director.choose_coin_lane(self.player.lane)
@@ -6741,7 +7339,14 @@ class SubwayBlindGame:
                 elif obstacle.lane == self.player.lane:
                     self._collect_coin(obstacle)
                     obstacle.z = -999
-                elif self.player.magnet > 0 and abs(obstacle.lane - self.player.lane) <= 1:
+                elif (
+                    self.player.magnet > 0
+                    or (
+                        self._special_timer("magnet_echo") > 0
+                        and abs(obstacle.lane - self.player.lane) <= 1
+                        and random.random() < 0.45
+                    )
+                ) and abs(obstacle.lane - self.player.lane) <= 1:
                     self._collect_coin(obstacle)
                     obstacle.z = -999
 
@@ -6779,6 +7384,8 @@ class SubwayBlindGame:
                     continue
                 if obstacle.kind == "high" and self.player.rolling > 0:
                     continue
+                if self._special_timer("quiet_jet_buffer") > 0:
+                    continue
                 self._on_hit(obstacle.kind)
                 obstacle.z = -999
 
@@ -6790,6 +7397,7 @@ class SubwayBlindGame:
             self._coin_pitch_index = min(self._coin_pitch_index + 1, 12)
         pitch = 1.0 + self._coin_pitch_index * 0.08
         self._coin_pitch_timer = 3.0
+        self._coin_streak_grace_timer = 0.0
         self.audio.play("coin", pan=lane_to_pan(obstacle.lane), channel="coin", pitch=pitch)
         announce_every = int(self.settings.get("announce_coins_every", 10) or 0)
         if self._coin_counters_enabled() and announce_every and self.state.coins % announce_every == 0:
@@ -6834,6 +7442,15 @@ class SubwayBlindGame:
         self.speaker.speak("Pogo stick.", interrupt=False)
 
     def _pick_track_box_reward(self) -> str:
+        if self._special_active("jackpot_fuse"):
+            self._box_high_tier_meter += 1
+            bonus = min(0.5, 0.08 * self._box_high_tier_meter)
+            if self._season_imprint_matches("fortune_line"):
+                bonus = min(0.6, bonus + 0.07)
+            if random.random() < bonus:
+                self._box_high_tier_meter = 0
+                self._mark_special_item_consumed("jackpot_fuse")
+                return random.choice(["hover", "key", "headstart", "score_booster"])
         if self._active_event_profile.get("jackpot_bonus"):
             return random.choices(
                 ["coins", "hover", "mult", "key", "headstart", "score_booster", "nothing"],
@@ -6879,6 +7496,11 @@ class SubwayBlindGame:
 
     def _collect_key(self) -> None:
         self.settings["keys"] = int(self.settings.get("keys", 0)) + 1
+        if self._special_active("overclock_key"):
+            chance = 0.35 + (0.1 if self._season_imprint_matches("fortune_line") else 0.0)
+            if random.random() < chance:
+                self._pending_overclock_keys += 1
+                self._mark_special_item_consumed("overclock_key")
         self.audio.play("unlock", channel="ui")
         self.speaker.speak(f"Key collected. Total keys: {self.settings['keys']}.", interrupt=False)
 
@@ -7035,6 +7657,12 @@ class SubwayBlindGame:
         }.get(variant, "stumble")
 
     def _on_hit(self, variant: str = "train") -> None:
+        if self._special_timer("phantom_step") > 0:
+            self._set_special_timer("phantom_step", 0.0)
+            self._mark_special_item_consumed("phantom_step")
+            self.audio.play("swish_mid", channel="act")
+            self.speaker.speak("Phantom Step dodge.", interrupt=False)
+            return
         if self.player.hover_active > 0:
             self.player.hover_active = 0.0
             self.audio.play("crash", channel="act")
@@ -7043,6 +7671,13 @@ class SubwayBlindGame:
             return
 
         self._last_death_reason = self._death_reason_for_variant(variant)
+        if self._special_active("impact_foam") and "impact_foam_used" not in self._special_run_used_flags:
+            self._special_run_used_flags.add("impact_foam_used")
+            self._mark_special_item_consumed("impact_foam")
+            self.player.stumbles = max(0, self.player.stumbles)
+            self.audio.play("stumble", channel="act")
+            self.speaker.speak("Impact Foam consumed.", interrupt=True)
+            return
         self.player.stumbles += 1
         if self.player.stumbles >= 2:
             self._guard_loop_timer = 0.0
@@ -7081,6 +7716,18 @@ class SubwayBlindGame:
             else:
                 sound_key = "swish_short"
             self._record_run_metric("clean_escapes")
+            if self._special_active("crowd_jammer"):
+                crowd_duration = 4.0 * self._special_duration_scale()
+                if self._season_imprint_matches("spawn_calm"):
+                    crowd_duration += 1.0
+                self._extend_special_timer("crowd_jammer", crowd_duration)
+                self._mark_special_item_consumed("crowd_jammer")
+            if self._special_active("risk_converter"):
+                gain = 1
+                if self._season_imprint_matches("risk_bloom"):
+                    gain = 2
+                self.settings["event_state"]["event_coins"] = int(self.settings["event_state"].get("event_coins", 0)) + gain
+                self._mark_special_item_consumed("risk_converter")
             self.audio.play(sound_key, channel=f"near_{obstacle.lane}")
         self._near_miss_signatures = active_signatures
 

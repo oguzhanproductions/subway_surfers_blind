@@ -26,6 +26,23 @@ Update Summary
 - Fixed a jetpack loop audio edge case where menu-side reward handling could leave jetpack loop behavior in an invalid non-run state.
 - Fixed magnet and jetpack loop state synchronization so active loop channels no longer re-trigger from a stale inactive flag after power activation.
 - Added a unified purchase confirmation flow for all coin-spending actions in Shop, Event Shop, Item Upgrades, Character upgrades/unlocks, and Board unlocks.
+- Added a new Wheel Spin system with a dedicated main-menu entry that is available only after account sign-in.
+- Added a weekly spin policy with reset every Wednesday and a maximum of 2 spins per account per week.
+- Added 14 wheel-exclusive special items with dedicated run effects:
+  - Phantom Step: Gives a delayed ghost dodge window after lane changes.
+  - Afterimage Dash: Grants a fast extra lane-shift burst.
+  - Crowd Jammer: Temporarily lowers close obstacle pressure.
+  - Impact Foam: Converts one heavy crash into a safer stumble.
+  - Overclock Key: Gives a chance to duplicate a collected key at run end.
+  - Magnet Echo: Leaves a short weak magnet pull after magnet expiry.
+  - Quiet Jet: Adds a brief post-jetpack collision buffer.
+  - Combo Battery: Adds a short grace window before streak loss.
+  - Hyper Sneakers: Reduces roll transition penalty during super sneakers.
+  - Risk Converter: Turns near-miss moments into small Event Coin rewards.
+  - Jackpot Fuse: Increases high-tier mystery/super box outcome chance.
+  - Chain Saver: Prevents one power-up chain break.
+  - Vault Seal: Protects a portion of vulnerable banked coins.
+  - Season Imprint: Applies a rotating weekly passive bonus.
 
 Audio or UI Updates
 - Keyboard Bindings menu now shows the detected keyboard layout name directly in the menu title.
@@ -47,6 +64,9 @@ Audio or UI Updates
 - Fixed Events menu info rows so pressing Enter now announces the selected event status line instead of triggering a silent no-op.
 - Added an Event Shop entry inside Events and surfaced live Event Coin balance directly in Event Shop labels and title.
 - Added a new Options toggle named Purchase Confirmation so players can enable or disable the "Confirm Purchase?" prompt for economy spending actions.
+- Added a new Wheel Spin menu flow with weekly spin status, season imprint status, spin action, and live unlocked special-item listing.
+- Added Run Setup support for account-linked special item loadout toggles so players can turn owned special effects on or off before each run.
+- Added a dedicated wheel spinning sound effect and changed wheel reward timing so rewards are granted after spin audio playback finishes.
 
 ------------------------------------------------------------
 
