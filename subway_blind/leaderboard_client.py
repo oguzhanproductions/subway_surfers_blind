@@ -165,16 +165,20 @@ class LeaderboardClient:
         claimed_reward_ids: list[str] | None = None,
         consumed_special_item_keys: list[str] | None = None,
     ) -> dict[str, Any]:
+        normalized_claimed_reward_ids = [
+            str(reward_id).strip() for reward_id in list(claimed_reward_ids or []) if str(reward_id).strip()
+        ]
+        normalized_consumed_special_item_keys = [
+            str(item_key).strip() for item_key in list(consumed_special_item_keys or []) if str(item_key).strip()
+        ]
+        payload: dict[str, Any] = {
+            "claimed_reward_ids": normalized_claimed_reward_ids,
+        }
+        if consumed_special_item_keys is not None:
+            payload["consumed_special_item_keys"] = normalized_consumed_special_item_keys
         result = self._request(
             "sync_account",
-            {
-                "claimed_reward_ids": [str(reward_id).strip() for reward_id in list(claimed_reward_ids or []) if str(reward_id).strip()],
-                "consumed_special_item_keys": [
-                    str(item_key).strip()
-                    for item_key in list(consumed_special_item_keys or [])
-                    if str(item_key).strip()
-                ],
-            },
+            payload,
         )
         self.last_account_sync = dict(result)
         return result

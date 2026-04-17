@@ -217,7 +217,7 @@ The current user-facing menus include:
 
 ### Runtime dependencies
 
-- Python 3.11 recommended
+- Python 3.12 recommended
 - `pygame>=2.1`
 - `accessible_output2>=0.14`
 - `pyopenalsoft>=1.0.0`

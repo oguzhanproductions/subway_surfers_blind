@@ -122,6 +122,18 @@ class LeaderboardClientTests(unittest.TestCase):
             },
         )
 
+    def test_sync_account_sends_consumed_special_item_keys_when_provided(self):
+        with mock.patch.object(self.client, "_request", return_value={"pending_rewards": []}) as request_mock:
+            self.client.sync_account(["reward-1"], ["phantom_step", "vault_seal"])
+
+        request_mock.assert_called_once_with(
+            "sync_account",
+            {
+                "claimed_reward_ids": ["reward-1"],
+                "consumed_special_item_keys": ["phantom_step", "vault_seal"],
+            },
+        )
+
     def test_fetch_issue_reports_sends_pagination_and_status(self):
         with mock.patch.object(self.client, "_request", return_value={"entries": []}) as request_mock:
             self.client.fetch_issue_reports(offset=50, limit=50, status="resolved")
