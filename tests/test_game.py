@@ -2272,6 +2272,7 @@ class GameTests(unittest.TestCase):
             "Speech: Off",
             "SAPI Settings",
             "Difficulty: Normal",
+            "Language: English",
             "Main Menu Descriptions: On",
             "Set User Name",
             "Gameplay Announcements",

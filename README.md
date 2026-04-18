@@ -164,6 +164,24 @@ The game supports keyboard plus SDL-compatible Xbox and PlayStation controllers 
 - `Y` / `Triangle`: toggle speech
 - `Menu` / `Options`: pause during a run
 
+## Translation System
+
+The game supports external language files under the `langs` folder.
+
+- Files must use the `.lng` extension (`langs/turkish.lng`, `langs/spanish.lng`, and so on)
+- Each translation line uses `English text [=] Your translation`
+- Lines that start with `;` are comments
+- Matching is case-insensitive
+- `%1` to `%9` parameter placeholders are supported
+- `%t1` to `%t9` translated-parameter placeholders are supported on the left side
+
+You can switch active language from `Options -> Language`.
+
+Included examples:
+
+- `langs/english.lng`
+- `langs/turkish.lng`
+
 ## Menu Surface
 
 The current user-facing menus include:
@@ -191,6 +209,7 @@ The current user-facing menus include:
   - Speech toggle
   - SAPI Settings
   - Difficulty
+  - Language
   - Meter announcements
   - Coin counters
   - Quest change announcements

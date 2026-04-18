@@ -34,6 +34,7 @@ from subway_blind.spatial_audio import SpatialThreatAudio
 from subway_blind.updater import GitHubReleaseUpdater, UpdateCheckResult, UpdateInstallProgress, UpdateInstallResult, version_key
 from subway_blind.version import APP_VERSION
 from subway_blind.strings import ACTIVE_GAMEPLAY_SOUND_KEYS, DIFFICULTY_LABELS, HelpTopic, HOW_TO_TOPICS, ISSUE_STATUS_LABELS, ISSUE_STATUS_ORDER, LEADERBOARD_DIFFICULTY_FILTER_LABELS, LEADERBOARD_DIFFICULTY_FILTER_ORDER, LEADERBOARD_PERIOD_LABELS, LEADERBOARD_PERIOD_ORDER, LEADERBOARD_VERIFICATION_LABELS, LearnSoundEntry, LEARN_SOUND_LIBRARY, RUN_POWERUP_LABELS, SEASON_IMPRINT_TEXT, SPECIAL_ITEM_EFFECT_TEXT, SPECIAL_ITEM_LABELS, SPECIAL_ITEM_ORDER, TEXT, UPGRADE_HELP_TOPICS, sx as _sx
+from subway_blind.translation import available_languages, language_display_name, set_language, translate_text
 LEADERBOARD_CACHE_TTL_SECONDS = 45.0
 GUARD_LOOP_DURATION = 1.35
 POGO_STICK_DURATION = 5.5
@@ -63,6 +64,7 @@ EVENT_SHOP_SCORE_BOOSTER_COST = 24
 EVENT_SHOP_SUPER_BOX_COST = 30
 BINDING_CAPTURE_HOLD_SECONDS = 3.0
 BINDING_CAPTURE_DING_PITCHES = {3: 1.0, 2: 1.15, 1: 1.3}
+LANGUAGE_OPTION_ACTION = "__option_language__"
 
 @dataclass(frozen=True)
 class BindingCaptureRequest:
@@ -110,23 +112,23 @@ def format_play_time(total_seconds: float) -> str:
 
 def difficulty_display_label(value: object) -> str:
     normalized = str(value or _sx(578)).strip().lower()
-    return DIFFICULTY_LABELS.get(normalized, TEXT[_sx(578)])
+    return translate_text(DIFFICULTY_LABELS.get(normalized, TEXT[_sx(578)]))
 
 def leaderboard_period_display_label(value: object) -> str:
     normalized = str(value or _sx(659)).strip().lower()
-    return LEADERBOARD_PERIOD_LABELS.get(normalized, LEADERBOARD_PERIOD_LABELS[_sx(659)])
+    return translate_text(LEADERBOARD_PERIOD_LABELS.get(normalized, LEADERBOARD_PERIOD_LABELS[_sx(659)]))
 
 def leaderboard_difficulty_filter_display_label(value: object) -> str:
     normalized = str(value or _sx(660)).strip().lower()
-    return LEADERBOARD_DIFFICULTY_FILTER_LABELS.get(normalized, LEADERBOARD_DIFFICULTY_FILTER_LABELS[_sx(660)])
+    return translate_text(LEADERBOARD_DIFFICULTY_FILTER_LABELS.get(normalized, LEADERBOARD_DIFFICULTY_FILTER_LABELS[_sx(660)]))
 
 def issue_status_display_label(value: object) -> str:
     normalized = str(value or _sx(660)).strip().lower()
-    return ISSUE_STATUS_LABELS.get(normalized, ISSUE_STATUS_LABELS[_sx(660)])
+    return translate_text(ISSUE_STATUS_LABELS.get(normalized, ISSUE_STATUS_LABELS[_sx(660)]))
 
 def verification_display_label(value: object) -> str:
     normalized = str(value or _sx(786)).strip().lower()
-    return LEADERBOARD_VERIFICATION_LABELS.get(normalized, LEADERBOARD_VERIFICATION_LABELS[_sx(786)])
+    return translate_text(LEADERBOARD_VERIFICATION_LABELS.get(normalized, LEADERBOARD_VERIFICATION_LABELS[_sx(786)]))
 
 def help_topic_segments(topic: HelpTopic, controls_summary: str) -> tuple[str, ...]:
     if topic.key == _sx(649):
@@ -229,6 +231,7 @@ class SubwayBlindGame:
         self.screen = screen
         self.clock = clock
         self.settings = settings
+        self.settings["language"] = set_language(self.settings.get("language"))
         self.speaker = Speaker.from_settings(settings)
         self.audio = Audio(settings)
         self.updater = updater or GitHubReleaseUpdater()
@@ -492,6 +495,10 @@ class SubwayBlindGame:
     def _difficulty_option_label(self) -> str:
         difficulty = DIFFICULTY_LABELS.get(str(self.settings[_sx(318)]), _sx(839))
         return _sx(679).format(difficulty)
+
+    def _language_option_label(self) -> str:
+        language_name = language_display_name(str(self.settings.get("language", "english")))
+        return "Language: {0}".format(language_name)
 
     def _meter_option_label(self) -> str:
         return _sx(680).format(_sx(1598) if self._meters_enabled() else _sx(1599))
@@ -949,7 +956,7 @@ class SubwayBlindGame:
             self.options_menu.index = self._update_option_index(selected_action)
 
     def _build_options_menu_items(self) -> list[MenuItem]:
-        items = [MenuItem(self._sfx_option_label(), _sx(1114)), MenuItem(self._music_option_label(), _sx(1115)), MenuItem(self._updates_option_label(), _sx(1116)), MenuItem(self._audio_output_option_label(), _sx(1117)), MenuItem(self._menu_sound_hrtf_option_label(), _sx(1118)), MenuItem(self._menu_wrap_option_label(), _sx(1119)), MenuItem(self._speech_option_label(), _sx(1120)), MenuItem(self._sapi_menu_entry_label(), _sx(1194)), MenuItem(self._difficulty_option_label(), _sx(1126)), MenuItem(self._main_menu_description_option_label(), _sx(1127)), MenuItem(self._leaderboard_account_option_label(), _sx(1195))]
+        items = [MenuItem(self._sfx_option_label(), _sx(1114)), MenuItem(self._music_option_label(), _sx(1115)), MenuItem(self._updates_option_label(), _sx(1116)), MenuItem(self._audio_output_option_label(), _sx(1117)), MenuItem(self._menu_sound_hrtf_option_label(), _sx(1118)), MenuItem(self._menu_wrap_option_label(), _sx(1119)), MenuItem(self._speech_option_label(), _sx(1120)), MenuItem(self._sapi_menu_entry_label(), _sx(1194)), MenuItem(self._difficulty_option_label(), _sx(1126)), MenuItem(self._language_option_label(), LANGUAGE_OPTION_ACTION), MenuItem(self._main_menu_description_option_label(), _sx(1127)), MenuItem(self._leaderboard_account_option_label(), _sx(1195))]
         if self._leaderboard_is_authenticated():
             items.append(MenuItem(self._leaderboard_logout_option_label(), _sx(1382)))
         items.extend([MenuItem(_sx(809), _sx(1383)), MenuItem(_sx(754), _sx(1384)), MenuItem(self._purchase_confirmation_option_label(), _sx(1129)), MenuItem(self._exit_confirmation_option_label(), _sx(1128)), MenuItem(TEXT[_sx(429)], _sx(429))])
@@ -1608,7 +1615,7 @@ class SubwayBlindGame:
             width, height = self.screen.get_size()
             self.screen.fill((10, 10, 15))
             title_surface = self.big.render(_sx(1303), True, (240, 240, 240))
-            message_surface = self.font.render(str(message or _sx(2)).strip() or _sx(1169), True, (205, 205, 205))
+            message_surface = self._render_text(self.font, str(message or _sx(2)).strip() or _sx(1169), (205, 205, 205))
             title_rect = title_surface.get_rect(center=(width // 2, max(72, height // 2 - 30)))
             message_rect = message_surface.get_rect(center=(width // 2, min(height - 48, height // 2 + 18)))
             self.screen.blit(title_surface, title_rect)
@@ -4896,6 +4903,21 @@ class SubwayBlindGame:
             self._refresh_options_menu_labels()
             self.speaker.speak(self.options_menu.items[self._update_option_index(_sx(1126))].label, interrupt=True)
             return
+        if selected_action == LANGUAGE_OPTION_ACTION:
+            language_options = available_languages()
+            if not language_options:
+                language_options = ["english"]
+            current_language = str(self.settings.get("language", "english")).strip().lower() or "english"
+            try:
+                current_index = language_options.index(current_language)
+            except ValueError:
+                current_index = language_options.index("english") if "english" in language_options else 0
+            selected_language = language_options[(current_index + direction) % len(language_options)]
+            self.settings["language"] = set_language(selected_language)
+            self._play_menu_feedback(_sx(56))
+            self._refresh_options_menu_labels()
+            self.speaker.speak(self.options_menu.items[self._update_option_index(LANGUAGE_OPTION_ACTION)].label, interrupt=True)
+            return
         if selected_action == _sx(1127):
             self.settings[_sx(327)] = direction > 0
             self._play_menu_feedback(_sx(56))
@@ -5875,10 +5897,16 @@ class SubwayBlindGame:
             self.audio.play(sound_key, channel=_sx(1778).format(obstacle.lane))
         self._near_miss_signatures = active_signatures
 
+    def _localized_text(self, value: object) -> str:
+        return translate_text(value)
+
+    def _render_text(self, font: pygame.font.Font, value: object, color: tuple[int, int, int]) -> pygame.Surface:
+        return font.render(self._localized_text(value), True, color)
+
     def _draw_menu(self, menu: Menu) -> None:
         width, height = self.screen.get_size()
         self.screen.fill((10, 10, 15))
-        title_surface = self.big.render(menu.title, True, (240, 240, 240))
+        title_surface = self._render_text(self.big, menu.title, (240, 240, 240))
         self.screen.blit(title_surface, (40, 32))
         list_top = 110
         row_height = 38
@@ -5888,60 +5916,60 @@ class SubwayBlindGame:
         visible_items = menu.items[start_index:start_index + visible_rows]
         y_position = list_top
         if menu in {self.shop_menu, self.me_menu, self.character_menu, self.character_detail_menu, self.board_menu, self.board_detail_menu, self.item_upgrade_menu, self.item_upgrade_detail_menu, self.collection_menu}:
-            coins_surface = self.font.render(self._shop_coins_label(), True, (220, 220, 220))
+            coins_surface = self._render_text(self.font, self._shop_coins_label(), (220, 220, 220))
             self.screen.blit(coins_surface, (70, y_position))
             y_position += 40
         for relative_index, item in enumerate(visible_items):
             actual_index = start_index + relative_index
             color = (255, 255, 0) if actual_index == menu.index else (220, 220, 220)
-            label_surface = self.font.render(item.label, True, color)
+            label_surface = self._render_text(self.font, item.label, color)
             self.screen.blit(label_surface, (70, y_position))
             y_position += row_height
         if start_index > 0:
-            top_more = self.font.render(_sx(1450), True, (160, 160, 160))
+            top_more = self._render_text(self.font, _sx(1450), (160, 160, 160))
             self.screen.blit(top_more, (40, list_top - 28))
         if start_index + len(visible_items) < len(menu.items):
-            bottom_more = self.font.render(_sx(1450), True, (160, 160, 160))
+            bottom_more = self._render_text(self.font, _sx(1450), (160, 160, 160))
             self.screen.blit(bottom_more, (40, y_position - 8))
         hint_text = self._menu_navigation_hint()
         if menu == self.learn_sounds_menu:
             description_lines = textwrap.wrap(self._learn_sound_description, width=62)[:3]
             description_top = min(height - 132, y_position + 18)
-            prompt_surface = self.font.render(_sx(1564), True, (205, 205, 205))
+            prompt_surface = self._render_text(self.font, _sx(1564), (205, 205, 205))
             self.screen.blit(prompt_surface, (40, description_top))
             for line_index, line in enumerate(description_lines):
-                line_surface = self.font.render(line, True, (180, 180, 180))
+                line_surface = self._render_text(self.font, line, (180, 180, 180))
                 self.screen.blit(line_surface, (40, description_top + 32 + line_index * 26))
             hint_text = self._menu_navigation_hint()
         elif menu == self.update_menu:
             description_lines = textwrap.wrap(self._update_status_message, width=62)[:2]
             release_note_lines = textwrap.wrap(self._update_release_notes, width=62)[:5]
             description_top = min(height - 176, y_position + 14)
-            prompt_surface = self.font.render(_sx(1779), True, (205, 205, 205))
+            prompt_surface = self._render_text(self.font, _sx(1779), (205, 205, 205))
             self.screen.blit(prompt_surface, (40, description_top))
             for line_index, line in enumerate(description_lines):
-                line_surface = self.font.render(line, True, (180, 180, 180))
+                line_surface = self._render_text(self.font, line, (180, 180, 180))
                 self.screen.blit(line_surface, (40, description_top + 32 + line_index * 26))
             if self._update_progress_stage in {_sx(761), _sx(1849), _sx(769), _sx(1007)}:
-                progress_surface = self.font.render(_sx(729).format(self._update_progress_message or self._update_status_message), True, (190, 210, 190) if self._update_progress_stage == _sx(769) else (180, 180, 180))
+                progress_surface = self._render_text(self.font, _sx(729).format(self._update_progress_message or self._update_status_message), (190, 210, 190) if self._update_progress_stage == _sx(769) else (180, 180, 180))
                 self.screen.blit(progress_surface, (40, description_top + 88))
-                percent_surface = self.font.render(_sx(1850).format(int(self._update_progress_percent)), True, (220, 220, 120))
+                percent_surface = self._render_text(self.font, _sx(1850).format(int(self._update_progress_percent)), (220, 220, 120))
                 self.screen.blit(percent_surface, (40, description_top + 116))
                 notes_top = description_top + 150
             else:
                 notes_top = description_top + 88
-            notes_label_surface = self.font.render(_sx(1780), True, (205, 205, 205))
+            notes_label_surface = self._render_text(self.font, _sx(1780), (205, 205, 205))
             self.screen.blit(notes_label_surface, (40, notes_top))
             for line_index, line in enumerate(release_note_lines):
-                line_surface = self.font.render(line, True, (180, 180, 180))
+                line_surface = self._render_text(self.font, line, (180, 180, 180))
                 self.screen.blit(line_surface, (40, notes_top + 28 + line_index * 24))
             hint_text = self._menu_navigation_hint()
         elif menu == self.help_topic_menu and self._selected_help_topic is not None:
-            prompt_surface = self.font.render(_sx(1851), True, (205, 205, 205))
+            prompt_surface = self._render_text(self.font, _sx(1851), (205, 205, 205))
             self.screen.blit(prompt_surface, (40, max(height - 100, y_position + 18)))
             hint_text = self._menu_navigation_hint()
         elif menu == self.whats_new_menu and self._selected_info_dialog is not None:
-            prompt_surface = self.font.render(_sx(1851), True, (205, 205, 205))
+            prompt_surface = self._render_text(self.font, _sx(1851), (205, 205, 205))
             self.screen.blit(prompt_surface, (40, max(height - 100, y_position + 18)))
             hint_text = self._menu_navigation_hint()
         elif menu == self.main_menu:
@@ -5949,17 +5977,17 @@ class SubwayBlindGame:
             if selected_description:
                 description_lines = textwrap.wrap(selected_description, width=62)[:3]
                 description_top = min(height - 132, y_position + 18)
-                prompt_surface = self.font.render(_sx(1887), True, (205, 205, 205))
+                prompt_surface = self._render_text(self.font, _sx(1887), (205, 205, 205))
                 self.screen.blit(prompt_surface, (40, description_top))
                 for line_index, line in enumerate(description_lines):
-                    line_surface = self.font.render(line, True, (180, 180, 180))
+                    line_surface = self._render_text(self.font, line, (180, 180, 180))
                     self.screen.blit(line_surface, (40, description_top + 32 + line_index * 26))
         elif menu == self.issue_compose_menu:
             description_top = min(height - 180, y_position + 18)
-            prompt_surface = self.font.render(_sx(1888), True, (205, 205, 205))
+            prompt_surface = self._render_text(self.font, _sx(1888), (205, 205, 205))
             self.screen.blit(prompt_surface, (40, description_top))
             for line_index, line in enumerate(self._issue_draft_preview_lines()):
-                line_surface = self.font.render(line, True, (180, 180, 180))
+                line_surface = self._render_text(self.font, line, (180, 180, 180))
                 self.screen.blit(line_surface, (40, description_top + 32 + line_index * 26))
         elif menu in {self.options_menu, self.sapi_menu, self.announcements_menu}:
             hint_text = _sx(3).format(self._menu_navigation_hint(), self._option_adjustment_hint())
@@ -5972,9 +6000,9 @@ class SubwayBlindGame:
                     capture_prompt = _sx(1895).format(remaining, action_label(self._binding_capture.action_key))
             else:
                 capture_prompt = _sx(1893).format(action_label(self._binding_capture.action_key))
-            prompt_surface = self.font.render(capture_prompt, True, (255, 220, 120))
+            prompt_surface = self._render_text(self.font, capture_prompt, (255, 220, 120))
             self.screen.blit(prompt_surface, (40, max(height - 80, y_position + 18)))
-        hint_surface = self.font.render(hint_text, True, (180, 180, 180))
+        hint_surface = self._render_text(self.font, hint_text, (180, 180, 180))
         hint_rect = hint_surface.get_rect(left=40, bottom=max(40, height - 20))
         self.screen.blit(hint_surface, hint_rect)
 
@@ -6029,7 +6057,7 @@ class SubwayBlindGame:
                 color = (180, 180, 180)
             pygame.draw.rect(self.screen, color, (center_x - size // 2, center_y - size // 2, size, size))
             if obstacle.label:
-                glyph_surface = self.font.render(obstacle.label, True, (20, 20, 20))
+                glyph_surface = self._render_text(self.font, obstacle.label, (20, 20, 20))
                 glyph_rect = glyph_surface.get_rect(center=(center_x, center_y))
                 self.screen.blit(glyph_surface, glyph_rect)
         player_x = (self.player.lane + 1) * lane_width + lane_width // 2
@@ -6055,7 +6083,7 @@ class SubwayBlindGame:
         if self._practice_mode_active:
             remaining_hazards = max(0, self._practice_hazard_target - self._practice_hazards_cleared)
             hud += _sx(1162).format(self._practice_hazards_cleared, self._practice_hazard_target, remaining_hazards)
-        hud_surface = self.font.render(hud, True, (230, 230, 230))
+        hud_surface = self._render_text(self.font, hud, (230, 230, 230))
         self.screen.blit(hud_surface, (15, 10))
         if self._quest_changes_enabled():
             next_threshold = next_season_reward_threshold(self.settings)
@@ -6063,7 +6091,7 @@ class SubwayBlindGame:
             found_letters = str(self.settings.get(_sx(343), _sx(2)))
             season_progress = _sx(1248).format(int(self.settings.get(_sx(347), 0)), next_threshold) if next_threshold is not None else _sx(1572).format(int(self.settings.get(_sx(347), 0)))
             meta_hud = _sx(1163).format(self._mission_status_text(), found_letters or _sx(554), word, season_progress)
-            meta_surface = self.font.render(meta_hud, True, (205, 205, 205))
+            meta_surface = self._render_text(self.font, meta_hud, (205, 205, 205))
             self.screen.blit(meta_surface, (15, 36))
         if self.state.paused:
             overlay = pygame.Surface((width, height), pygame.SRCALPHA)

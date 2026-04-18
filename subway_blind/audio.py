@@ -10,6 +10,7 @@ from xml.sax.saxutils import escape
 import pygame
 from subway_blind.config import resource_path
 from subway_blind.hrtf_audio import OpenALHrtfEngine
+from subway_blind.translation import translate_text
 FIXED_FOOTSTEP_PAN = {_sx(8): -0.18, _sx(9): -0.18, _sx(10): 0.18, _sx(11): 0.18}
 CENTERED_PLAYER_KEYS = {_sx(12), _sx(13), _sx(14), _sx(15), _sx(16), _sx(17), _sx(18), _sx(19), _sx(20), _sx(21), _sx(22), _sx(23), _sx(24), _sx(25), _sx(26), _sx(27), _sx(28)}
 KEY_CHANNEL_OVERRIDES = {_sx(12): _sx(29), _sx(13): _sx(29), _sx(14): _sx(30), _sx(15): _sx(31), _sx(16): _sx(32), _sx(17): _sx(32), _sx(18): _sx(33), _sx(19): _sx(34), _sx(20): _sx(35), _sx(21): _sx(36), _sx(22): _sx(37), _sx(23): _sx(37), _sx(24): _sx(37), _sx(25): _sx(38), _sx(26): _sx(39), _sx(28): _sx(40), _sx(27): _sx(41)}
@@ -212,11 +213,12 @@ class Speaker:
     def speak(self, text: str, interrupt: bool=True) -> None:
         if not self.enabled:
             return
+        localized_text = translate_text(text)
         if self._sapi_voice is not None:
             flags = SAPI_SPEAK_ASYNC
             if interrupt:
                 flags |= SAPI_SPEAK_PURGE_BEFORE_SPEAK
-            message = str(text)
+            message = str(localized_text)
             if self.sapi_pitch != 0:
                 flags |= SAPI_SPEAK_IS_XML
                 message = _sx(125).format(self.sapi_pitch, escape(message))
@@ -227,15 +229,15 @@ class Speaker:
             return
         if self._driver is None:
             try:
-                print(text)
+                print(localized_text)
             except Exception:
                 return
             return
         try:
-            self._driver.speak(text, interrupt=interrupt)
+            self._driver.speak(localized_text, interrupt=interrupt)
         except TypeError:
             try:
-                self._driver.speak(text, interrupt)
+                self._driver.speak(localized_text, interrupt)
             except Exception:
                 return
         except Exception:
