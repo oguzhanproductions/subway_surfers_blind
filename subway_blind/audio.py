@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from subway_blind.strings import sx as _sx
 import audioop
 from dataclasses import dataclass
 import os
@@ -7,109 +7,20 @@ from pathlib import Path
 from typing import Optional
 import wave
 from xml.sax.saxutils import escape
-
 import pygame
-
 from subway_blind.config import resource_path
 from subway_blind.hrtf_audio import OpenALHrtfEngine
-
-FIXED_FOOTSTEP_PAN = {
-    "left_foot": -0.18,
-    "sneakers_left": -0.18,
-    "right_foot": 0.18,
-    "sneakers_right": 0.18,
-}
-
-CENTERED_PLAYER_KEYS = {
-    "jump",
-    "sneakers_jump",
-    "roll",
-    "dodge",
-    "landing",
-    "land_h",
-    "coin",
-    "powerup",
-    "powerdown",
-    "mystery_box",
-    "stumble",
-    "stumble_side",
-    "stumble_bush",
-    "crash",
-    "death",
-    "kick",
-    "guard_catch",
-}
-
-KEY_CHANNEL_OVERRIDES = {
-    "jump": "player_jump",
-    "sneakers_jump": "player_jump",
-    "roll": "player_roll",
-    "dodge": "player_dodge",
-    "landing": "player_land",
-    "land_h": "player_land",
-    "coin": "player_pickup",
-    "powerup": "player_power",
-    "powerdown": "player_powerdown",
-    "mystery_box": "player_box",
-    "stumble": "player_impact",
-    "stumble_side": "player_impact",
-    "stumble_bush": "player_impact",
-    "crash": "player_crash",
-    "death": "player_death",
-    "guard_catch": "player_guard",
-    "kick": "player_kick",
-}
-
-CHANNEL_FALLBACK_OVERRIDES = {
-    "move": "player_move",
-    "act": "player_action",
-    "act2": "player_impact",
-    "coin": "player_pickup",
-    "headstart_end": "player_reward",
-    "headstart_reward": "player_reward",
-}
-
-CHANNEL_POLYPHONY = {
-    "player_pickup": 12,
-    "player_dodge": 4,
-    "player_footstep": 4,
-    "player_jump": 4,
-    "player_roll": 4,
-    "player_land": 4,
-    "player_action": 8,
-    "player_power": 4,
-    "player_powerdown": 4,
-    "player_box": 4,
-    "player_impact": 4,
-    "player_crash": 4,
-    "player_death": 4,
-    "player_guard": 2,
-    "player_kick": 2,
-    "player_reward": 4,
-}
-
-FORCED_MONO_SOUND_KEYS = {
-    "menumove",
-    "menuedge",
-    "menuwrap",
-    "menuopen",
-    "menuclose",
-    "confirm",
-    "binding_countdown",
-    "binding_done",
-    "binding_fail",
-}
-ANNOUNCER_SOUND_FILES = {
-    "announcer_jump_now": "jump_now.mp3",
-    "announcer_move_left_now": "move_left_now.mp3",
-    "announcer_move_right_now": "move_right_now.mp3",
-    "announcer_roll_now": "roll_now.mp3",
-}
+FIXED_FOOTSTEP_PAN = {_sx(8): -0.18, _sx(9): -0.18, _sx(10): 0.18, _sx(11): 0.18}
+CENTERED_PLAYER_KEYS = {_sx(12), _sx(13), _sx(14), _sx(15), _sx(16), _sx(17), _sx(18), _sx(19), _sx(20), _sx(21), _sx(22), _sx(23), _sx(24), _sx(25), _sx(26), _sx(27), _sx(28)}
+KEY_CHANNEL_OVERRIDES = {_sx(12): _sx(29), _sx(13): _sx(29), _sx(14): _sx(30), _sx(15): _sx(31), _sx(16): _sx(32), _sx(17): _sx(32), _sx(18): _sx(33), _sx(19): _sx(34), _sx(20): _sx(35), _sx(21): _sx(36), _sx(22): _sx(37), _sx(23): _sx(37), _sx(24): _sx(37), _sx(25): _sx(38), _sx(26): _sx(39), _sx(28): _sx(40), _sx(27): _sx(41)}
+CHANNEL_FALLBACK_OVERRIDES = {_sx(42): _sx(47), _sx(43): _sx(48), _sx(44): _sx(37), _sx(18): _sx(33), _sx(45): _sx(49), _sx(46): _sx(49)}
+CHANNEL_POLYPHONY = {_sx(33): 12, _sx(31): 4, _sx(50): 4, _sx(29): 4, _sx(30): 4, _sx(32): 4, _sx(48): 8, _sx(34): 4, _sx(35): 4, _sx(36): 4, _sx(37): 4, _sx(38): 4, _sx(39): 4, _sx(40): 2, _sx(41): 2, _sx(49): 4}
+FORCED_MONO_SOUND_KEYS = {_sx(51), _sx(52), _sx(53), _sx(54), _sx(55), _sx(56), _sx(57), _sx(58), _sx(59)}
+ANNOUNCER_SOUND_FILES = {_sx(60): _sx(64), _sx(61): _sx(65), _sx(62): _sx(66), _sx(63): _sx(67)}
 ANNOUNCER_SOUND_KEYS = frozenset(ANNOUNCER_SOUND_FILES)
-
-SYSTEM_DEFAULT_OUTPUT_LABEL = "System Default"
-SAPI_VOICE_UNAVAILABLE_LABEL = "Unavailable"
-SAPI_VOICE_DEFAULT_LABEL = "Default Voice"
+SYSTEM_DEFAULT_OUTPUT_LABEL = _sx(5)
+SAPI_VOICE_UNAVAILABLE_LABEL = _sx(6)
+SAPI_VOICE_DEFAULT_LABEL = _sx(7)
 SAPI_SPEAK_ASYNC = 1
 SAPI_SPEAK_PURGE_BEFORE_SPEAK = 2
 SAPI_SPEAK_IS_XML = 8
@@ -119,27 +30,21 @@ SAPI_PITCH_MIN = -10
 SAPI_PITCH_MAX = 10
 SAPI_VOLUME_MIN = 0
 SAPI_VOLUME_MAX = 100
-MUSIC_FILE_EXTENSIONS = (".ogg", ".wav", ".mp3")
-MUSIC_TRACK_CANDIDATES = {
-    "menu": ("menu_intro", "game_intro", "menu_theme", "menu"),
-    "gameplay": ("gameplay_main", "subway_surfers_theme", "main_theme", "theme", "run_theme"),
-}
+MUSIC_FILE_EXTENSIONS = (_sx(68), _sx(69), _sx(70))
+MUSIC_TRACK_CANDIDATES = {_sx(71): (_sx(74), _sx(75), _sx(76), _sx(71)), _sx(72): (_sx(77), _sx(78), _sx(79), _sx(80), _sx(81))}
 MUSIC_FADE_IN_SECONDS = 1.05
 MUSIC_FADE_OUT_SECONDS = 0.75
 MUSIC_DUCK_FADE_SECONDS = 1.05
 MUSIC_DUCKED_LEVEL = 0.28
-
 
 @dataclass(frozen=True)
 class SapiVoiceChoice:
     voice_id: str
     name: str
 
-
 def normalize_output_device_name(device_name: object) -> str | None:
-    normalized = str(device_name or "").strip()
+    normalized = str(device_name or _sx(2)).strip()
     return normalized or None
-
 
 def list_output_devices() -> list[str]:
     try:
@@ -160,7 +65,6 @@ def list_output_devices() -> list[str]:
         devices.append(normalized)
     return devices
 
-
 def initialize_mixer_output(device_name: object) -> str | None:
     selected_device = normalize_output_device_name(device_name)
     if pygame.mixer.get_init() is not None:
@@ -180,17 +84,9 @@ def initialize_mixer_output(device_name: object) -> str | None:
         return None
     return None
 
-
 class Speaker:
-    def __init__(
-        self,
-        enabled: bool = True,
-        use_sapi: bool = False,
-        sapi_voice_id: str | None = None,
-        sapi_rate: int = 0,
-        sapi_pitch: int = 0,
-        sapi_volume: int = 100,
-    ):
+
+    def __init__(self, enabled: bool=True, use_sapi: bool=False, sapi_voice_id: str | None=None, sapi_rate: int=0, sapi_pitch: int=0, sapi_volume: int=100):
         self.enabled = bool(enabled)
         self.use_sapi = bool(use_sapi)
         self.sapi_voice_id = self._normalize_voice_id(sapi_voice_id)
@@ -205,19 +101,12 @@ class Speaker:
         self._initialize_backend()
 
     @classmethod
-    def from_settings(cls, settings: dict) -> "Speaker":
-        return cls(
-            enabled=bool(settings.get("speech_enabled", True)),
-            use_sapi=bool(settings.get("sapi_speech_enabled", False)),
-            sapi_voice_id=settings.get("sapi_voice_id"),
-            sapi_rate=settings.get("sapi_rate", 0),
-            sapi_pitch=settings.get("sapi_pitch", 0),
-            sapi_volume=settings.get("sapi_volume", 100),
-        )
+    def from_settings(cls, settings: dict) -> _sx(73):
+        return cls(enabled=bool(settings.get(_sx(117), True)), use_sapi=bool(settings.get(_sx(118), False)), sapi_voice_id=settings.get(_sx(119)), sapi_rate=settings.get(_sx(120), 0), sapi_pitch=settings.get(_sx(121), 0), sapi_volume=settings.get(_sx(122), 100))
 
     @staticmethod
     def _normalize_voice_id(voice_id: object) -> str | None:
-        normalized = str(voice_id or "").strip()
+        normalized = str(voice_id or _sx(2)).strip()
         return normalized or None
 
     @staticmethod
@@ -245,26 +134,15 @@ class Speaker:
         return max(SAPI_VOLUME_MIN, min(SAPI_VOLUME_MAX, normalized))
 
     def apply_settings(self, settings: dict) -> None:
-        enabled = bool(settings.get("speech_enabled", True))
-        use_sapi = bool(settings.get("sapi_speech_enabled", False))
-        sapi_voice_id = self._normalize_voice_id(settings.get("sapi_voice_id"))
-        sapi_rate = self._normalize_sapi_rate(settings.get("sapi_rate", 0))
-        sapi_pitch = self._normalize_sapi_pitch(settings.get("sapi_pitch", 0))
-        sapi_volume = self._normalize_sapi_volume(settings.get("sapi_volume", 100))
-        if (
-            enabled == self.enabled
-            and use_sapi == self.use_sapi
-            and sapi_voice_id == self.sapi_voice_id
-            and sapi_rate == self.sapi_rate
-            and sapi_pitch == self.sapi_pitch
-            and sapi_volume == self.sapi_volume
-        ):
+        enabled = bool(settings.get(_sx(117), True))
+        use_sapi = bool(settings.get(_sx(118), False))
+        sapi_voice_id = self._normalize_voice_id(settings.get(_sx(119)))
+        sapi_rate = self._normalize_sapi_rate(settings.get(_sx(120), 0))
+        sapi_pitch = self._normalize_sapi_pitch(settings.get(_sx(121), 0))
+        sapi_volume = self._normalize_sapi_volume(settings.get(_sx(122), 100))
+        if enabled == self.enabled and use_sapi == self.use_sapi and (sapi_voice_id == self.sapi_voice_id) and (sapi_rate == self.sapi_rate) and (sapi_pitch == self.sapi_pitch) and (sapi_volume == self.sapi_volume):
             return
-        should_reinitialize = (
-            enabled != self.enabled
-            or use_sapi != self.use_sapi
-            or (enabled and use_sapi and sapi_voice_id != self.sapi_voice_id)
-        )
+        should_reinitialize = enabled != self.enabled or use_sapi != self.use_sapi or (enabled and use_sapi and (sapi_voice_id != self.sapi_voice_id))
         self.enabled = enabled
         self.use_sapi = use_sapi
         self.sapi_voice_id = sapi_voice_id
@@ -292,34 +170,33 @@ class Speaker:
     def _initialize_accessible_output(self) -> None:
         try:
             from accessible_output2.outputs.auto import Auto
-
             self._driver = Auto()
             self._apply_rate_to_supported_outputs()
         except Exception:
             self._driver = None
 
     def _initialize_sapi(self) -> bool:
-        if os.name != "nt":
+        if os.name != _sx(85):
             return False
         try:
             from win32com.client import Dispatch
         except Exception:
             return False
         try:
-            sapi_voice = Dispatch("SAPI.SpVoice")
+            sapi_voice = Dispatch(_sx(123))
             for voice_choice in self.sapi_voice_choices():
                 if voice_choice.voice_id != self.sapi_voice_id:
                     continue
                 for index in range(sapi_voice.GetVoices().Count):
                     token = sapi_voice.GetVoices().Item(index)
-                    token_id = self._normalize_voice_id(getattr(token, "Id", None))
+                    token_id = self._normalize_voice_id(getattr(token, _sx(185), None))
                     if token_id != voice_choice.voice_id:
                         continue
                     sapi_voice.Voice = token
                     break
                 break
-            current_token = getattr(sapi_voice, "Voice", None)
-            current_voice_id = self._normalize_voice_id(getattr(current_token, "Id", None))
+            current_token = getattr(sapi_voice, _sx(124), None)
+            current_voice_id = self._normalize_voice_id(getattr(current_token, _sx(185), None))
             if current_voice_id is not None:
                 self.sapi_voice_id = current_voice_id
             try:
@@ -332,7 +209,7 @@ class Speaker:
             self._sapi_voice = None
             return False
 
-    def speak(self, text: str, interrupt: bool = True) -> None:
+    def speak(self, text: str, interrupt: bool=True) -> None:
         if not self.enabled:
             return
         if self._sapi_voice is not None:
@@ -342,7 +219,7 @@ class Speaker:
             message = str(text)
             if self.sapi_pitch != 0:
                 flags |= SAPI_SPEAK_IS_XML
-                message = f'<pitch middle="{self.sapi_pitch:+d}">{escape(message)}</pitch>'
+                message = _sx(125).format(self.sapi_pitch, escape(message))
             try:
                 self._sapi_voice.Speak(message, flags)
             except Exception:
@@ -379,14 +256,13 @@ class Speaker:
         if self._sapi_voice_choices_cache is not None:
             return list(self._sapi_voice_choices_cache)
         choices: list[SapiVoiceChoice] = []
-        if os.name == "nt":
+        if os.name == _sx(85):
             try:
                 from win32com.client import Dispatch
-
-                token_collection = Dispatch("SAPI.SpVoice").GetVoices()
+                token_collection = Dispatch(_sx(123)).GetVoices()
                 for index in range(token_collection.Count):
                     token = token_collection.Item(index)
-                    voice_id = self._normalize_voice_id(getattr(token, "Id", None))
+                    voice_id = self._normalize_voice_id(getattr(token, _sx(185), None))
                     if voice_id is None:
                         continue
                     try:
@@ -419,7 +295,7 @@ class Speaker:
         normalized_direction = -1 if direction < 0 else 1
         current_voice_id = self.sapi_voice_id
         try:
-            current_index = next(index for index, choice in enumerate(choices) if choice.voice_id == current_voice_id)
+            current_index = next((index for index, choice in enumerate(choices) if choice.voice_id == current_voice_id))
         except StopIteration:
             current_index = 0
         selected = choices[(current_index + normalized_direction) % len(choices)]
@@ -432,7 +308,7 @@ class Speaker:
     def _apply_sapi_rate(self) -> None:
         if self._sapi_voice is None:
             return
-        dynamic_rate_offset = int(round(-1 + (self._speed_factor * 5.0)))
+        dynamic_rate_offset = int(round(-1 + self._speed_factor * 5.0))
         target_rate = self.sapi_rate + dynamic_rate_offset
         try:
             self._sapi_voice.Rate = max(SAPI_RATE_MIN, min(SAPI_RATE_MAX, target_rate))
@@ -450,20 +326,20 @@ class Speaker:
     def stop(self) -> None:
         if self._sapi_voice is not None:
             try:
-                self._sapi_voice.Speak("", SAPI_SPEAK_ASYNC | SAPI_SPEAK_PURGE_BEFORE_SPEAK)
+                self._sapi_voice.Speak(_sx(2), SAPI_SPEAK_ASYNC | SAPI_SPEAK_PURGE_BEFORE_SPEAK)
             except Exception:
                 pass
 
     def _apply_rate_to_supported_outputs(self) -> None:
         if self._driver is None:
             return
-        outputs = getattr(self._driver, "outputs", [])
+        outputs = getattr(self._driver, _sx(86), [])
         for output in outputs:
-            has_rate = getattr(output, "has_rate", None)
-            set_rate = getattr(output, "set_rate", None)
-            min_rate = getattr(output, "min_rate", None)
-            max_rate = getattr(output, "max_rate", None)
-            if not callable(has_rate) or not callable(set_rate) or not callable(min_rate) or not callable(max_rate):
+            has_rate = getattr(output, _sx(126), None)
+            set_rate = getattr(output, _sx(127), None)
+            min_rate = getattr(output, _sx(128), None)
+            max_rate = getattr(output, _sx(129), None)
+            if not callable(has_rate) or not callable(set_rate) or (not callable(min_rate)) or (not callable(max_rate)):
                 continue
             try:
                 if not has_rate():
@@ -475,8 +351,8 @@ class Speaker:
             except Exception:
                 continue
 
-
 class Audio:
+
     def __init__(self, settings: dict):
         self.settings = settings
         self.sounds: dict[str, pygame.mixer.Sound] = {}
@@ -484,7 +360,7 @@ class Audio:
         self.sound_channel_counts: dict[str, int | None] = {}
         self.channels: dict[str, pygame.mixer.Channel] = {}
         self._next_channel_index = 0
-        self._output_device_name = normalize_output_device_name(settings.get("audio_output_device"))
+        self._output_device_name = normalize_output_device_name(settings.get(_sx(1)))
         self._mixer_ready = pygame.mixer.get_init() is not None
         self._music_catalog: dict[str, str] = {}
         self._music_current_track: str | None = None
@@ -495,7 +371,7 @@ class Audio:
         self._music_ducking_target = 1.0
         self._pitched_sounds: dict[tuple[str, int], pygame.mixer.Sound] = {}
         self._channel_polyphony_index: dict[str, int] = {}
-        self.hrtf = OpenALHrtfEngine(settings.get("sfx_volume", 1.0), self._output_device_name)
+        self.hrtf = OpenALHrtfEngine(settings.get(_sx(130), 1.0), self._output_device_name)
         self._load()
 
     def _load_sound(self, key: str, path: str) -> None:
@@ -514,7 +390,7 @@ class Audio:
             sound = pygame.mixer.Sound(playback_path)
         except Exception:
             return
-        sound.set_volume(float(self.settings["sfx_volume"]))
+        sound.set_volume(float(self.settings[_sx(130)]))
         self.sounds[key] = sound
 
     def _resolve_playback_path(self, key: str, path: str) -> str:
@@ -530,97 +406,95 @@ class Audio:
 
     @staticmethod
     def _read_sound_channel_count(path: str) -> int | None:
-        if not path.lower().endswith(".wav"):
+        if not path.lower().endswith(_sx(69)):
             return None
         try:
-            with wave.open(path, "rb") as reader:
+            with wave.open(path, _sx(189)) as reader:
                 channels = int(reader.getnchannels())
         except Exception:
             return None
         return channels if channels > 0 else None
 
     def _pick_menu_sound(self, base_name: str) -> str:
-        for extension in (".ogg", ".wav"):
-            candidate = resource_path("assets", "menu", f"{base_name}{extension}")
+        for extension in (_sx(68), _sx(69)):
+            candidate = resource_path(_sx(87), _sx(71), _sx(131).format(base_name, extension))
             if os.path.exists(candidate):
                 return candidate
-        return resource_path("assets", "menu", f"{base_name}.wav")
+        return resource_path(_sx(87), _sx(71), _sx(88).format(base_name))
 
     def _pick_sfx_sound(self, base_name: str) -> str:
-        for extension in (".ogg", ".wav", ".mp3"):
-            candidate = resource_path("assets", "sfx", f"{base_name}{extension}")
+        for extension in (_sx(68), _sx(69), _sx(70)):
+            candidate = resource_path(_sx(87), _sx(89), _sx(131).format(base_name, extension))
             if os.path.exists(candidate):
                 return candidate
-        return resource_path("assets", "sfx", f"{base_name}.wav")
+        return resource_path(_sx(87), _sx(89), _sx(88).format(base_name))
 
     def _load(self) -> None:
-        sfx_path = lambda name: resource_path("assets", "sfx", name)
-        announcer_path = lambda name: resource_path("assets", "announcer", name)
-
-        self._load_sound("coin", sfx_path("coin.wav"))
-        self._load_sound("coin_gui", sfx_path("coin_gui.wav"))
-        self._load_sound("jump", sfx_path("jump.wav"))
-        self._load_sound("roll", sfx_path("roll.wav"))
-        self._load_sound("dodge", sfx_path("dodge.wav"))
-        self._load_sound("landing", sfx_path("landing.wav"))
-        self._load_sound("stumble", sfx_path("stumble.wav"))
-        self._load_sound("crash", sfx_path("crash.wav"))
-        self._load_sound("death", sfx_path("death.wav"))
-        self._load_sound("death_bodyfall", sfx_path("death_bodyfall.wav"))
-        self._load_sound("death_hitcam", sfx_path("death_hitcam.wav"))
-        self._load_sound("guard_catch", sfx_path("guard_catch.wav"))
-        self._load_sound("guard_loop", sfx_path("guard_loop.wav"))
-        self._load_sound("powerup", sfx_path("powerup.wav"))
-        self._load_sound("powerdown", sfx_path("powerdown.wav"))
-        self._load_sound("magnet_loop", sfx_path("magnet_loop.wav"))
-        self._load_sound("jetpack_loop", sfx_path("jetpack_loop.wav"))
-        self._load_sound("connect", self._pick_sfx_sound("connect"))
-        self._load_sound("high", self._pick_sfx_sound("high"))
-        self._load_sound("mystery_box", sfx_path("mystery_box.wav"))
-        self._load_sound("mystery_box_open", sfx_path("Hr_mysteryBoxOpen #20822.wav"))
-        self._load_sound("wheel_spin", sfx_path("wheel_spin.mp3"))
-        self._load_sound("mission_reward", sfx_path("mission_reward.wav"))
-        self._load_sound("train_pass", sfx_path("train_pass.wav"))
-        self._load_sound("intro_start", sfx_path("intro_start.wav"))
-        self._load_sound("intro_shake", sfx_path("intro_shake.wav"))
-        self._load_sound("intro_spray", sfx_path("intro_spray.wav"))
-        self._load_sound("gui_cash", sfx_path("Hr_gui_cash #00120.wav"))
-        self._load_sound("gui_close", sfx_path("gui_close.wav"))
-        self._load_sound("gui_tap", sfx_path("gui_tap.wav"))
-        self._load_sound("unlock", sfx_path("unlock.wav"))
-        self._load_sound("left_foot", sfx_path("left_foot.wav"))
-        self._load_sound("right_foot", sfx_path("right_foot.wav"))
-        self._load_sound("sneakers_jump", sfx_path("sneakers_jump.wav"))
-        self._load_sound("sneakers_left", sfx_path("sneakers_left.wav"))
-        self._load_sound("sneakers_right", sfx_path("sneakers_right.wav"))
-        self._load_sound("slide_letters", sfx_path("slide_letters.wav"))
-        self._load_sound("mystery_combo", sfx_path("mystery_combo.wav"))
-        self._load_sound("stumble_side", sfx_path("stumble_side.wav"))
-        self._load_sound("stumble_bush", sfx_path("stumble_bush.wav"))
-        self._load_sound("kick", sfx_path("kick.wav"))
-        self._load_sound("land_h", sfx_path("land_h.wav"))
-        self._load_sound("swish_short", sfx_path("swish_short.wav"))
-        self._load_sound("swish_mid", sfx_path("swish_mid.wav"))
-        self._load_sound("swish_long", sfx_path("swish_long.wav"))
-
-        self._load_sound("menumove", self._pick_menu_sound("menumove"))
-        self._load_sound("menuedge", self._pick_menu_sound("menuedge"))
-        self._load_sound("menuwrap", self._pick_menu_sound("menuwrap"))
-        self._load_sound("menuopen", self._pick_menu_sound("menuopen"))
-        self._load_sound("menuclose", self._pick_menu_sound("menuclose"))
-        self._load_sound("confirm", self._pick_menu_sound("confirm"))
-        self._load_sound("binding_countdown", resource_path("assets", "menu", "binding_countdown.wav"))
-        self._load_sound("binding_done", resource_path("assets", "menu", "binding_done.wav"))
-        self._load_sound("binding_fail", resource_path("assets", "menu", "binding_fail.wav"))
+        sfx_path = lambda name: resource_path(_sx(87), _sx(89), name)
+        announcer_path = lambda name: resource_path(_sx(87), _sx(132), name)
+        self._load_sound(_sx(18), sfx_path(_sx(133)))
+        self._load_sound(_sx(90), sfx_path(_sx(134)))
+        self._load_sound(_sx(12), sfx_path(_sx(135)))
+        self._load_sound(_sx(14), sfx_path(_sx(136)))
+        self._load_sound(_sx(15), sfx_path(_sx(137)))
+        self._load_sound(_sx(16), sfx_path(_sx(138)))
+        self._load_sound(_sx(22), sfx_path(_sx(139)))
+        self._load_sound(_sx(25), sfx_path(_sx(140)))
+        self._load_sound(_sx(26), sfx_path(_sx(141)))
+        self._load_sound(_sx(91), sfx_path(_sx(142)))
+        self._load_sound(_sx(92), sfx_path(_sx(143)))
+        self._load_sound(_sx(28), sfx_path(_sx(144)))
+        self._load_sound(_sx(93), sfx_path(_sx(145)))
+        self._load_sound(_sx(19), sfx_path(_sx(146)))
+        self._load_sound(_sx(20), sfx_path(_sx(147)))
+        self._load_sound(_sx(94), sfx_path(_sx(148)))
+        self._load_sound(_sx(95), sfx_path(_sx(149)))
+        self._load_sound(_sx(96), self._pick_sfx_sound(_sx(96)))
+        self._load_sound(_sx(97), self._pick_sfx_sound(_sx(97)))
+        self._load_sound(_sx(21), sfx_path(_sx(150)))
+        self._load_sound(_sx(98), sfx_path(_sx(151)))
+        self._load_sound(_sx(99), sfx_path(_sx(152)))
+        self._load_sound(_sx(100), sfx_path(_sx(153)))
+        self._load_sound(_sx(101), sfx_path(_sx(154)))
+        self._load_sound(_sx(102), sfx_path(_sx(155)))
+        self._load_sound(_sx(103), sfx_path(_sx(156)))
+        self._load_sound(_sx(104), sfx_path(_sx(157)))
+        self._load_sound(_sx(105), sfx_path(_sx(158)))
+        self._load_sound(_sx(106), sfx_path(_sx(159)))
+        self._load_sound(_sx(107), sfx_path(_sx(160)))
+        self._load_sound(_sx(108), sfx_path(_sx(161)))
+        self._load_sound(_sx(8), sfx_path(_sx(162)))
+        self._load_sound(_sx(10), sfx_path(_sx(163)))
+        self._load_sound(_sx(13), sfx_path(_sx(164)))
+        self._load_sound(_sx(9), sfx_path(_sx(165)))
+        self._load_sound(_sx(11), sfx_path(_sx(166)))
+        self._load_sound(_sx(109), sfx_path(_sx(167)))
+        self._load_sound(_sx(110), sfx_path(_sx(168)))
+        self._load_sound(_sx(23), sfx_path(_sx(169)))
+        self._load_sound(_sx(24), sfx_path(_sx(170)))
+        self._load_sound(_sx(27), sfx_path(_sx(171)))
+        self._load_sound(_sx(17), sfx_path(_sx(172)))
+        self._load_sound(_sx(111), sfx_path(_sx(173)))
+        self._load_sound(_sx(112), sfx_path(_sx(174)))
+        self._load_sound(_sx(113), sfx_path(_sx(175)))
+        self._load_sound(_sx(51), self._pick_menu_sound(_sx(51)))
+        self._load_sound(_sx(52), self._pick_menu_sound(_sx(52)))
+        self._load_sound(_sx(53), self._pick_menu_sound(_sx(53)))
+        self._load_sound(_sx(54), self._pick_menu_sound(_sx(54)))
+        self._load_sound(_sx(55), self._pick_menu_sound(_sx(55)))
+        self._load_sound(_sx(56), self._pick_menu_sound(_sx(56)))
+        self._load_sound(_sx(57), resource_path(_sx(87), _sx(71), _sx(176)))
+        self._load_sound(_sx(58), resource_path(_sx(87), _sx(71), _sx(177)))
+        self._load_sound(_sx(59), resource_path(_sx(87), _sx(71), _sx(178)))
         for key, filename in ANNOUNCER_SOUND_FILES.items():
             self._load_sound(key, announcer_path(filename))
         self._music_catalog = self._discover_music_catalog()
 
     def refresh_volumes(self) -> None:
         if not self._mixer_ready:
-            self.hrtf.set_listener_gain(float(self.settings["sfx_volume"]))
+            self.hrtf.set_listener_gain(float(self.settings[_sx(130)]))
             return
-        sound_volume = float(self.settings["sfx_volume"])
+        sound_volume = float(self.settings[_sx(130)])
         for sound in self.sounds.values():
             try:
                 sound.set_volume(sound_volume)
@@ -631,7 +505,7 @@ class Audio:
 
     def output_device_choices(self) -> list[str | None]:
         devices = [None]
-        current_device = normalize_output_device_name(self.settings.get("audio_output_device"))
+        current_device = normalize_output_device_name(self.settings.get(_sx(1)))
         for device in list_output_devices():
             devices.append(device)
         if current_device is not None and current_device not in devices:
@@ -639,7 +513,7 @@ class Audio:
         return devices
 
     def current_output_device_name(self) -> str | None:
-        return normalize_output_device_name(self.settings.get("audio_output_device"))
+        return normalize_output_device_name(self.settings.get(_sx(1)))
 
     def output_device_display_name(self) -> str:
         return self.current_output_device_name() or SYSTEM_DEFAULT_OUTPUT_LABEL
@@ -653,7 +527,7 @@ class Audio:
             current_index = 0
         requested_device = devices[(current_index + 1) % len(devices)]
         applied_device = self.apply_output_device(requested_device)
-        return requested_device, applied_device
+        return (requested_device, applied_device)
 
     def apply_output_device(self, device_name: str | None) -> str | None:
         requested_device = normalize_output_device_name(device_name)
@@ -661,9 +535,9 @@ class Audio:
         self.shutdown()
         applied_device = initialize_mixer_output(requested_device)
         self._output_device_name = applied_device
-        self.settings["audio_output_device"] = applied_device or ""
+        self.settings[_sx(1)] = applied_device or _sx(2)
         self._mixer_ready = pygame.mixer.get_init() is not None
-        self.hrtf = OpenALHrtfEngine(self.settings.get("sfx_volume", 1.0), applied_device)
+        self.hrtf = OpenALHrtfEngine(self.settings.get(_sx(130), 1.0), applied_device)
         self.sounds.clear()
         self.sound_paths.clear()
         self.sound_channel_counts.clear()
@@ -708,37 +582,17 @@ class Audio:
         self.channels[name] = channel
         return channel
 
-    def play(
-        self,
-        key: str,
-        pan: Optional[float] = None,
-        loop: bool = False,
-        channel: Optional[str] = None,
-        gain: float = 1.0,
-        pitch: float = 1.0,
-    ) -> None:
+    def play(self, key: str, pan: Optional[float]=None, loop: bool=False, channel: Optional[str]=None, gain: float=1.0, pitch: float=1.0) -> None:
         gain = max(0.0, min(1.5, float(gain)))
         pitch = max(0.5, min(2.0, float(pitch)))
         normalized_pan = self._normalize_pan_for_key(key, pan)
         sound_path = self.sound_paths.get(key)
-        requested_channel = channel or f"sfx_{key}"
+        requested_channel = channel or _sx(114).format(key)
         target_channel = self._normalize_channel_for_key(key, requested_channel)
         playback_channel = self._resolve_playback_channel(target_channel, loop)
         if self._should_use_non_spatial_hrtf(key, target_channel) and sound_path is not None:
             x, y, z, profile_pitch, relative = self._hrtf_profile(key, playback_channel, normalized_pan)
-            played = self.hrtf.play_sound(
-                key=key,
-                path=sound_path,
-                channel=playback_channel,
-                x=x,
-                y=y,
-                z=z,
-                gain=gain,
-                pitch=profile_pitch * pitch,
-                loop=loop,
-                relative=relative,
-                spatialize=False,
-            )
+            played = self.hrtf.play_sound(key=key, path=sound_path, channel=playback_channel, x=x, y=y, z=z, gain=gain, pitch=profile_pitch * pitch, loop=loop, relative=relative, spatialize=False)
             if played:
                 return
         if not self._mixer_ready:
@@ -751,17 +605,14 @@ class Audio:
         output_channel = self._get_channel(playback_channel)
         if output_channel is None:
             return
-        base_volume = float(self.settings["sfx_volume"]) * gain
+        base_volume = float(self.settings[_sx(130)]) * gain
         if normalized_pan is None:
             output_channel.set_volume(max(0.0, min(1.0, base_volume)))
         else:
             clamped_pan = max(-1.0, min(1.0, float(normalized_pan)))
             left = max(0.0, min(1.0, 1.0 - max(0.0, clamped_pan)))
             right = max(0.0, min(1.0, 1.0 + min(0.0, clamped_pan)))
-            output_channel.set_volume(
-                max(0.0, min(1.0, left * base_volume)),
-                max(0.0, min(1.0, right * base_volume)),
-            )
+            output_channel.set_volume(max(0.0, min(1.0, left * base_volume)), max(0.0, min(1.0, right * base_volume)))
         try:
             output_channel.play(sound, loops=-1 if loop else 0)
         except Exception:
@@ -777,80 +628,29 @@ class Audio:
         except Exception:
             return
 
-    def play_spatial(
-        self,
-        key: str,
-        channel: str,
-        x: float,
-        y: float,
-        z: float,
-        gain: float,
-        pitch: float = 1.0,
-        fallback_pan: Optional[float] = None,
-        velocity_x: float = 0.0,
-        velocity_y: float = 0.0,
-        velocity_z: float = 0.0,
-    ) -> None:
+    def play_spatial(self, key: str, channel: str, x: float, y: float, z: float, gain: float, pitch: float=1.0, fallback_pan: Optional[float]=None, velocity_x: float=0.0, velocity_y: float=0.0, velocity_z: float=0.0) -> None:
         sound_path = self.sound_paths.get(key)
         played = False
         if sound_path is not None:
-            played = self.hrtf.play_sound(
-                key=key,
-                path=sound_path,
-                channel=channel,
-                x=x,
-                y=y,
-                z=z,
-                gain=gain,
-                pitch=pitch,
-                velocity_x=velocity_x,
-                velocity_y=velocity_y,
-                velocity_z=velocity_z,
-                spatialize=True,
-            )
+            played = self.hrtf.play_sound(key=key, path=sound_path, channel=channel, x=x, y=y, z=z, gain=gain, pitch=pitch, velocity_x=velocity_x, velocity_y=velocity_y, velocity_z=velocity_z, spatialize=True)
         if played:
             return
         self.play(key, pan=fallback_pan, channel=channel, gain=gain)
 
-    def update_spatial(
-        self,
-        channel: str,
-        x: float,
-        y: float,
-        z: float,
-        gain: float,
-        pitch: float = 1.0,
-        fallback_pan: Optional[float] = None,
-        velocity_x: float = 0.0,
-        velocity_y: float = 0.0,
-        velocity_z: float = 0.0,
-    ) -> None:
-        if self.hrtf.update_source(
-            channel=channel,
-            x=x,
-            y=y,
-            z=z,
-            gain=gain,
-            pitch=pitch,
-            velocity_x=velocity_x,
-            velocity_y=velocity_y,
-            velocity_z=velocity_z,
-        ):
+    def update_spatial(self, channel: str, x: float, y: float, z: float, gain: float, pitch: float=1.0, fallback_pan: Optional[float]=None, velocity_x: float=0.0, velocity_y: float=0.0, velocity_z: float=0.0) -> None:
+        if self.hrtf.update_source(channel=channel, x=x, y=y, z=z, gain=gain, pitch=pitch, velocity_x=velocity_x, velocity_y=velocity_y, velocity_z=velocity_z):
             return
         output_channel = self.channels.get(channel)
         if output_channel is None:
             return
-        base_volume = float(self.settings["sfx_volume"]) * max(0.0, min(1.5, float(gain)))
+        base_volume = float(self.settings[_sx(130)]) * max(0.0, min(1.5, float(gain)))
         if fallback_pan is None:
             output_channel.set_volume(max(0.0, min(1.0, base_volume)))
             return
         clamped_pan = max(-1.0, min(1.0, float(fallback_pan)))
         left = max(0.0, min(1.0, 1.0 - max(0.0, clamped_pan)))
         right = max(0.0, min(1.0, 1.0 + min(0.0, clamped_pan)))
-        output_channel.set_volume(
-            max(0.0, min(1.0, left * base_volume)),
-            max(0.0, min(1.0, right * base_volume)),
-        )
+        output_channel.set_volume(max(0.0, min(1.0, left * base_volume)), max(0.0, min(1.0, right * base_volume)))
 
     def _hrtf_profile(self, key: str, channel: str, pan: Optional[float]) -> tuple[float, float, float, float, bool]:
         clamped_pan = 0.0 if pan is None else max(-1.0, min(1.0, float(pan)))
@@ -859,40 +659,27 @@ class Audio:
         z = -1.55
         pitch = 1.0
         relative = False
-
-        if channel.startswith("ui") or channel.startswith("intro") or channel.startswith("boost"):
+        if channel.startswith(_sx(180)) or channel.startswith(_sx(181)) or channel.startswith(_sx(182)):
             x = clamped_pan * 0.6
             z = -0.9
             relative = True
-        elif channel.startswith("move") or channel.startswith("act") or channel.startswith("foot") or channel.startswith("coin"):
+        elif channel.startswith(_sx(42)) or channel.startswith(_sx(43)) or channel.startswith(_sx(190)) or channel.startswith(_sx(18)):
             z = -1.8
-        elif channel.startswith("loop_guard") or key in {"guard_loop", "guard_catch"}:
+        elif channel.startswith(_sx(194)) or key in {_sx(93), _sx(28)}:
             z = 0.7
             x = clamped_pan * 1.2
-        elif channel.startswith("loop_jetpack") or key == "jetpack_loop":
+        elif channel.startswith(_sx(197)) or key == _sx(95):
             z = -1.0
             y = 0.35
-        elif channel.startswith("loop_magnet") or key == "magnet_loop":
+        elif channel.startswith(_sx(198)) or key == _sx(94):
             z = -1.2
             y = 0.1
-
-        if key == "train_pass":
+        if key == _sx(101):
             z = -5.4
             x = clamped_pan * 2.6
             y = -0.08
             pitch = 0.9
-        elif key in {
-            "warning",
-            "menumove",
-            "menuedge",
-            "menuwrap",
-            "menuopen",
-            "menuclose",
-            "confirm",
-            "binding_countdown",
-            "binding_done",
-            "binding_fail",
-        }:
+        elif key in {_sx(191), _sx(51), _sx(52), _sx(53), _sx(54), _sx(55), _sx(56), _sx(57), _sx(58), _sx(59)}:
             z = -0.8
             relative = True
         elif key in ANNOUNCER_SOUND_KEYS:
@@ -900,7 +687,7 @@ class Audio:
             y = 0.0
             z = -0.9
             relative = True
-        elif key in {"left_foot", "right_foot", "sneakers_left", "sneakers_right"}:
+        elif key in {_sx(8), _sx(10), _sx(9), _sx(11)}:
             x = clamped_pan * 1.4
             y = -0.2
             z = -0.95
@@ -910,12 +697,9 @@ class Audio:
             y = 0.0
             z = -1.05
             relative = True
+        return (x, y, z, pitch, relative)
 
-        return x, y, z, pitch, relative
-
-    def _get_pitched_sound(
-        self, key: str, sound: pygame.mixer.Sound, pitch: float,
-    ) -> pygame.mixer.Sound:
+    def _get_pitched_sound(self, key: str, sound: pygame.mixer.Sound, pitch: float) -> pygame.mixer.Sound:
         pitch_key = round(pitch * 100)
         cache_key = (key, pitch_key)
         cached = self._pitched_sounds.get(cache_key)
@@ -942,7 +726,7 @@ class Audio:
             return False
         if self.sound_channel_counts.get(key) != 1:
             return False
-        if channel.startswith("ui") and not bool(self.settings.get("menu_sound_hrtf", True)):
+        if channel.startswith(_sx(180)) and (not bool(self.settings.get(_sx(195), True))):
             return False
         return True
 
@@ -958,7 +742,7 @@ class Audio:
     @staticmethod
     def _normalize_channel_for_key(key: str, channel: str) -> str:
         if key in FIXED_FOOTSTEP_PAN:
-            return "player_footstep"
+            return _sx(50)
         if key in KEY_CHANNEL_OVERRIDES:
             return KEY_CHANNEL_OVERRIDES[key]
         return CHANNEL_FALLBACK_OVERRIDES.get(channel, channel)
@@ -969,18 +753,18 @@ class Audio:
         polyphony = CHANNEL_POLYPHONY.get(channel, 1)
         if polyphony <= 1:
             return channel
-        index_map = getattr(self, "_channel_polyphony_index", None)
+        index_map = getattr(self, _sx(115), None)
         if index_map is None:
             index_map = {}
             self._channel_polyphony_index = index_map
         next_index = index_map.get(channel, 0)
         for offset in range(polyphony):
             slot_index = (next_index + offset) % polyphony
-            candidate_channel = f"{channel}__{slot_index}"
+            candidate_channel = _sx(82).format(channel, slot_index)
             if not self._is_channel_active(candidate_channel):
                 index_map[channel] = (slot_index + 1) % polyphony
                 return candidate_channel
-        fallback_channel = f"{channel}__{next_index}"
+        fallback_channel = _sx(82).format(channel, next_index)
         index_map[channel] = (next_index + 1) % polyphony
         return fallback_channel
 
@@ -1008,13 +792,13 @@ class Audio:
     def _resolve_music_track_path(self, base_names: tuple[str, ...]) -> str | None:
         for base_name in base_names:
             for extension in MUSIC_FILE_EXTENSIONS:
-                candidate = resource_path("assets", "music", f"{base_name}{extension}")
+                candidate = resource_path(_sx(87), _sx(192), _sx(131).format(base_name, extension))
                 if os.path.exists(candidate):
                     return candidate
         return None
 
     def _target_music_volume(self) -> float:
-        return max(0.0, min(1.0, float(self.settings.get("music_volume", 0.0))))
+        return max(0.0, min(1.0, float(self.settings.get(_sx(196), 0.0))))
 
     def _apply_music_volume(self) -> None:
         if not self._mixer_ready:
@@ -1035,7 +819,7 @@ class Audio:
         self._music_fade_level = 0.0
         self._music_transition = None
 
-    def set_music_ducking(self, enabled: bool, level: float = MUSIC_DUCKED_LEVEL) -> None:
+    def set_music_ducking(self, enabled: bool, level: float=MUSIC_DUCKED_LEVEL) -> None:
         target = max(0.0, min(1.0, float(level if enabled else 1.0)))
         self._music_ducking_target = target
         if abs(self._music_ducking_level - target) < 0.001:
@@ -1058,11 +842,11 @@ class Audio:
         self._music_current_track = track_key
         self._music_pending_track = None
         self._music_fade_level = 0.0
-        self._music_transition = "fade_in"
+        self._music_transition = _sx(83)
         self._apply_music_volume()
         return True
 
-    def _begin_music_fade_out(self, next_track: str | None = None) -> None:
+    def _begin_music_fade_out(self, next_track: str | None=None) -> None:
         if not self._mixer_ready:
             self._stop_music_immediately()
             return
@@ -1073,18 +857,18 @@ class Audio:
                 self._stop_music_immediately()
             return
         self._music_pending_track = next_track
-        self._music_transition = "fade_out"
+        self._music_transition = _sx(84)
         if self._music_fade_level <= 0.0:
             self._music_fade_level = 1.0
         self._apply_music_volume()
 
-    def music_start(self, track_key: str = "gameplay") -> None:
-        normalized_track = "menu" if str(track_key).strip().lower() == "menu" else "gameplay"
+    def music_start(self, track_key: str=_sx(72)) -> None:
+        normalized_track = _sx(71) if str(track_key).strip().lower() == _sx(71) else _sx(72)
         if self._music_current_track == normalized_track and self._music_pending_track is None:
-            if self._music_transition == "fade_out":
-                self._music_transition = "fade_in"
+            if self._music_transition == _sx(84):
+                self._music_transition = _sx(83)
             elif self._music_transition is None and self._music_fade_level < 1.0:
-                self._music_transition = "fade_in"
+                self._music_transition = _sx(83)
             self._apply_music_volume()
             return
         if self._music_current_track is None:
@@ -1092,21 +876,21 @@ class Audio:
             return
         self._begin_music_fade_out(normalized_track)
 
-    def music_stop(self, immediate: bool = False) -> None:
+    def music_stop(self, immediate: bool=False) -> None:
         if immediate:
             self._stop_music_immediately()
             return
         self._begin_music_fade_out(None)
 
     def music_is_idle(self) -> bool:
-        return self._music_current_track is None and self._music_pending_track is None and self._music_transition is None
+        return self._music_current_track is None and self._music_pending_track is None and (self._music_transition is None)
 
     def update(self, delta_time: float) -> None:
         if not self._mixer_ready:
             return
-        if not hasattr(self, "_music_ducking_level"):
+        if not hasattr(self, _sx(183)):
             self._music_ducking_level = 1.0
-        if not hasattr(self, "_music_ducking_target"):
+        if not hasattr(self, _sx(184)):
             self._music_ducking_target = 1.0
         duck_step = float(delta_time) / MUSIC_DUCK_FADE_SECONDS if MUSIC_DUCK_FADE_SECONDS > 0 else 1.0
         if self._music_ducking_level < self._music_ducking_target:
@@ -1117,15 +901,15 @@ class Audio:
             self._apply_music_volume()
         if self._music_transition is None:
             return
-        if self._music_transition == "fade_in":
-            self._music_fade_level = min(1.0, self._music_fade_level + (float(delta_time) / MUSIC_FADE_IN_SECONDS))
+        if self._music_transition == _sx(83):
+            self._music_fade_level = min(1.0, self._music_fade_level + float(delta_time) / MUSIC_FADE_IN_SECONDS)
             self._apply_music_volume()
             if self._music_fade_level >= 1.0:
                 self._music_transition = None
             return
-        if self._music_transition != "fade_out":
+        if self._music_transition != _sx(84):
             return
-        self._music_fade_level = max(0.0, self._music_fade_level - (float(delta_time) / MUSIC_FADE_OUT_SECONDS))
+        self._music_fade_level = max(0.0, self._music_fade_level - float(delta_time) / MUSIC_FADE_OUT_SECONDS)
         self._apply_music_volume()
         if self._music_fade_level > 0.0:
             return

@@ -1,5 +1,4 @@
-﻿from __future__ import annotations
-
+from __future__ import annotations
 import ctypes
 import queue
 import sys
@@ -11,258 +10,39 @@ import re
 import threading
 import time
 from typing import Callable, Optional
-
 import pygame
-
 from subway_blind import config as config_module
-from subway_blind.audio import (
-    Audio,
-    Speaker,
-    SAPI_RATE_MAX,
-    SAPI_RATE_MIN,
-    SAPI_PITCH_MAX,
-    SAPI_PITCH_MIN,
-    SAPI_VOICE_UNAVAILABLE_LABEL,
-    SAPI_VOLUME_MAX,
-    SAPI_VOLUME_MIN,
-    SYSTEM_DEFAULT_OUTPUT_LABEL,
-)
+from subway_blind.audio import Audio, Speaker, SAPI_RATE_MAX, SAPI_RATE_MIN, SAPI_PITCH_MAX, SAPI_PITCH_MIN, SAPI_VOICE_UNAVAILABLE_LABEL, SAPI_VOLUME_MAX, SAPI_VOLUME_MIN, SYSTEM_DEFAULT_OUTPUT_LABEL
 from subway_blind.balance import SpeedProfile, speed_profile_for_difficulty
-from subway_blind.boards import (
-    board_definition,
-    board_definitions,
-    board_unlocked,
-    ensure_board_state,
-    selected_board_definition,
-)
-from subway_blind.characters import (
-    CharacterRuntimeBonuses,
-    character_definition,
-    character_definitions,
-    character_level,
-    character_perk_summary,
-    character_runtime_bonuses,
-    character_unlocked,
-    ensure_character_progress_state,
-    next_character_upgrade_cost,
-    selected_character_definition,
-)
+from subway_blind.boards import board_definition, board_definitions, board_unlocked, ensure_board_state, selected_board_definition
+from subway_blind.characters import CharacterRuntimeBonuses, character_definition, character_definitions, character_level, character_perk_summary, character_runtime_bonuses, character_unlocked, ensure_character_progress_state, next_character_upgrade_cost, selected_character_definition
 from subway_blind.config import resource_path
-from subway_blind.collections import (
-    collection_bonus_summary,
-    collection_definitions,
-    collection_progress,
-    collection_runtime_bonuses,
-    completed_collection_keys,
-    ensure_collection_state,
-)
-from subway_blind.controls import (
-    ACTION_DEFINITIONS_BY_KEY,
-    CONTROLLER_ACTION_ORDER,
-    GAME_CONTEXT,
-    KEYBOARD_ACTION_ORDER,
-    MENU_CONTEXT,
-    ControllerSupport,
-    action_label,
-    controller_binding_label,
-    default_keyboard_bindings,
-    family_label,
-    keyboard_binding_label,
-    keyboard_key_label,
-)
-from subway_blind.events import (
-    can_claim_coin_meter_reward,
-    can_claim_daily_high_score_reward,
-    claim_coin_meter_reward,
-    claim_daily_gift,
-    claim_daily_high_score_reward,
-    claim_login_calendar_reward,
-    current_daily_event,
-    daily_gift_available,
-    ensure_event_state,
-    event_runtime_profile,
-    featured_character_key,
-    login_calendar_available,
-    login_calendar_next_day,
-    next_coin_meter_threshold,
-    next_daily_high_score_threshold,
-    record_coin_meter_coins,
-    record_daily_score,
-    reset_daily_event_progress,
-    tomorrow_daily_event,
-)
+from subway_blind.collections import collection_bonus_summary, collection_definitions, collection_progress, collection_runtime_bonuses, completed_collection_keys, ensure_collection_state
+from subway_blind.controls import ACTION_DEFINITIONS_BY_KEY, CONTROLLER_ACTION_ORDER, GAME_CONTEXT, KEYBOARD_ACTION_ORDER, MENU_CONTEXT, ControllerSupport, action_label, controller_binding_label, default_keyboard_bindings, family_label, keyboard_binding_label, keyboard_key_label
+from subway_blind.events import can_claim_coin_meter_reward, can_claim_daily_high_score_reward, claim_coin_meter_reward, claim_daily_gift, claim_daily_high_score_reward, claim_login_calendar_reward, current_daily_event, daily_gift_available, ensure_event_state, event_runtime_profile, featured_character_key, login_calendar_available, login_calendar_next_day, next_coin_meter_threshold, next_daily_high_score_threshold, record_coin_meter_coins, record_daily_score, reset_daily_event_progress, tomorrow_daily_event
 from subway_blind.leaderboard_client import LeaderboardClient, LeaderboardClientError
-from subway_blind.item_upgrades import (
-    DEFAULT_ITEM_UPGRADE_KEY,
-    ensure_item_upgrade_state,
-    item_upgrade_definition,
-    item_upgrade_definitions,
-    item_upgrade_duration,
-    item_upgrade_level,
-    next_item_upgrade_cost,
-)
-from subway_blind.features import (
-    clamp_headstart_uses,
-    HEADSTART_SPEED_BONUS,
-    headstart_duration_for_uses,
-    HOVERBOARD_DURATION,
-    HOVERBOARD_MAX_USES_PER_RUN,
-    pick_headstart_end_reward,
-    pick_mystery_box_reward,
-    pick_shop_mystery_box_reward,
-    revive_cost,
-    REVIVE_MAX_USES_PER_RUN,
-    SHOP_PRICES,
-    shop_box_reward_amount,
-    score_booster_bonus,
-)
+from subway_blind.item_upgrades import DEFAULT_ITEM_UPGRADE_KEY, ensure_item_upgrade_state, item_upgrade_definition, item_upgrade_definitions, item_upgrade_duration, item_upgrade_level, next_item_upgrade_cost
+from subway_blind.features import clamp_headstart_uses, HEADSTART_SPEED_BONUS, headstart_duration_for_uses, HOVERBOARD_DURATION, HOVERBOARD_MAX_USES_PER_RUN, pick_headstart_end_reward, pick_mystery_box_reward, pick_shop_mystery_box_reward, revive_cost, REVIVE_MAX_USES_PER_RUN, SHOP_PRICES, shop_box_reward_amount, score_booster_bonus
 from subway_blind.menu import Menu, MenuItem
 from subway_blind.models import LANES, Obstacle, Player, RunState, lane_name, lane_to_pan, normalize_lane
-from subway_blind.native_windows_credentials import (
-    CredentialPromptCancelled,
-    NativeCredentialPromptError,
-    prompt_for_credentials,
-)
-from subway_blind.native_windows_issue_dialog import (
-    IssueDialogCancelled,
-    NativeIssueDialogError,
-    ISSUE_MESSAGE_LIMIT,
-    ISSUE_TITLE_LIMIT,
-    prompt_for_inline_issue_text,
-)
-from subway_blind.progression import (
-    achievement_definitions,
-    achievement_progress,
-    active_word_for_settings,
-    can_claim_season_reward,
-    claim_season_reward,
-    completed_mission_metrics,
-    ensure_progression_state,
-    mission_goals_for_set,
-    newly_unlocked_achievements,
-    next_season_reward_threshold,
-    pick_super_mystery_box_reward,
-    record_achievement_progress,
-    register_season_token,
-    register_word_letter,
-    remaining_word_letters,
-    reset_daily_word_hunt_progress,
-    set_achievement_progress_max,
-    update_word_hunt_streak,
-    word_hunt_reward_for_streak,
-)
-from subway_blind.quests import (
-    can_claim_meter_reward,
-    claim_meter_reward,
-    claim_quest,
-    daily_quests,
-    ensure_quest_state,
-    next_meter_threshold,
-    quest_claimed,
-    quest_completed,
-    quest_progress,
-    quest_sneakers,
-    record_quest_metric,
-    reset_daily_quest_progress,
-    seasonal_quests,
-)
+from subway_blind.native_windows_credentials import CredentialPromptCancelled, NativeCredentialPromptError, prompt_for_credentials
+from subway_blind.native_windows_issue_dialog import IssueDialogCancelled, NativeIssueDialogError, ISSUE_MESSAGE_LIMIT, ISSUE_TITLE_LIMIT, prompt_for_inline_issue_text
+from subway_blind.progression import achievement_definitions, achievement_progress, active_word_for_settings, can_claim_season_reward, claim_season_reward, completed_mission_metrics, ensure_progression_state, mission_goals_for_set, newly_unlocked_achievements, next_season_reward_threshold, pick_super_mystery_box_reward, record_achievement_progress, register_season_token, register_word_letter, remaining_word_letters, reset_daily_word_hunt_progress, set_achievement_progress_max, update_word_hunt_streak, word_hunt_reward_for_streak
+from subway_blind.quests import can_claim_meter_reward, claim_meter_reward, claim_quest, daily_quests, ensure_quest_state, next_meter_threshold, quest_claimed, quest_completed, quest_progress, quest_sneakers, record_quest_metric, reset_daily_quest_progress, seasonal_quests
 from subway_blind.spawn import RoutePattern, SpawnDirector
 from subway_blind.spatial_audio import SpatialThreatAudio
-from subway_blind.updater import (
-    GitHubReleaseUpdater,
-    UpdateCheckResult,
-    UpdateInstallProgress,
-    UpdateInstallResult,
-    version_key,
-)
+from subway_blind.updater import GitHubReleaseUpdater, UpdateCheckResult, UpdateInstallProgress, UpdateInstallResult, version_key
 from subway_blind.version import APP_VERSION
-
-DIFFICULTY_LABELS = {
-    "easy": "Easy",
-    "normal": "Normal",
-    "hard": "Hard",
-}
-LEADERBOARD_PERIOD_LABELS = {
-    "season": "Weekly Season",
-}
-LEADERBOARD_PERIOD_ORDER = tuple(LEADERBOARD_PERIOD_LABELS.keys())
-LEADERBOARD_DIFFICULTY_FILTER_LABELS = {
-    "all": "All Difficulties",
-    "easy": "Easy Only",
-    "normal": "Normal Only",
-    "hard": "Hard Only",
-    "unknown": "Unknown Difficulty",
-}
-LEADERBOARD_DIFFICULTY_FILTER_ORDER = ("all", "easy", "normal", "hard")
-LEADERBOARD_VERIFICATION_LABELS = {
-    "verified": "Verified",
-    "suspicious": "Suspicious",
-}
-ISSUE_STATUS_LABELS = {
-    "all": "All Statuses",
-    "investigating": "Investigating",
-    "resolved": "Resolved",
-}
-ISSUE_STATUS_ORDER = ("all", "investigating", "resolved")
-RUN_POWERUP_LABELS = {
-    "magnet": "Magnet",
-    "jetpack": "Jetpack",
-    "mult2x": "Double Score",
-    "sneakers": "Super Sneakers",
-    "pogo": "Pogo Stick",
-    "hoverboard": "Hoverboard",
-}
-SPECIAL_ITEM_LABELS = {
-    "phantom_step": "Phantom Step",
-    "afterimage_dash": "Afterimage Dash",
-    "crowd_jammer": "Crowd Jammer",
-    "impact_foam": "Impact Foam",
-    "overclock_key": "Overclock Key",
-    "magnet_echo": "Magnet Echo",
-    "quiet_jet": "Quiet Jet",
-    "combo_battery": "Combo Battery",
-    "hyper_sneakers": "Hyper Sneakers",
-    "risk_converter": "Risk Converter",
-    "jackpot_fuse": "Jackpot Fuse",
-    "chain_saver": "Chain Saver",
-    "vault_seal": "Vault Seal",
-    "season_imprint": "Season Imprint",
-}
-SPECIAL_ITEM_EFFECT_TEXT = {
-    "phantom_step": "8 seconds of delayed ghost dodge after lane change.",
-    "afterimage_dash": "Two quick extra lane shifts are available in sequence.",
-    "crowd_jammer": "Nearby hazard spawn pressure is reduced for a short time.",
-    "impact_foam": "One collision becomes a stumble instead of a full crash.",
-    "overclock_key": "Collected run keys can duplicate by +1 at run end.",
-    "magnet_echo": "A weaker magnet pull lingers for 3 seconds after magnet ends.",
-    "quiet_jet": "2 seconds of collision buffer after jetpack landing.",
-    "combo_battery": "Coin streak keeps a short grace window before reset.",
-    "hyper_sneakers": "Roll transition penalty is reduced during sneakers.",
-    "risk_converter": "Near misses grant small Event Coin rewards.",
-    "jackpot_fuse": "Mystery and Super box high-tier drop chance ramps up.",
-    "chain_saver": "One power-up chain break is prevented per run.",
-    "vault_seal": "A portion of banked coin loss is prevented when loss effects trigger.",
-    "season_imprint": "Weekly passive bonus rotates with the active season imprint.",
-}
-SEASON_IMPRINT_TEXT = {
-    "coin_drift": "Coin rewards are slightly increased.",
-    "risk_bloom": "Near-miss rewards are stronger.",
-    "safe_stride": "Run safety effects last a little longer.",
-    "power_echo": "Temporary power-up durations are slightly extended.",
-    "fortune_line": "Box jackpots are slightly more likely.",
-    "streak_guard": "Coin streak grace lasts longer.",
-    "spawn_calm": "Hazard pressure reduction is slightly stronger.",
-}
-SPECIAL_ITEM_ORDER = tuple(SPECIAL_ITEM_LABELS.keys())
-
+from subway_blind.strings import ACTIVE_GAMEPLAY_SOUND_KEYS, DIFFICULTY_LABELS, HelpTopic, HOW_TO_TOPICS, ISSUE_STATUS_LABELS, ISSUE_STATUS_ORDER, LEADERBOARD_DIFFICULTY_FILTER_LABELS, LEADERBOARD_DIFFICULTY_FILTER_ORDER, LEADERBOARD_PERIOD_LABELS, LEADERBOARD_PERIOD_ORDER, LEADERBOARD_VERIFICATION_LABELS, LearnSoundEntry, LEARN_SOUND_LIBRARY, RUN_POWERUP_LABELS, SEASON_IMPRINT_TEXT, SPECIAL_ITEM_EFFECT_TEXT, SPECIAL_ITEM_LABELS, SPECIAL_ITEM_ORDER, TEXT, UPGRADE_HELP_TOPICS, sx as _sx
+LEADERBOARD_CACHE_TTL_SECONDS = 45.0
 GUARD_LOOP_DURATION = 1.35
 POGO_STICK_DURATION = 5.5
 MENU_REPEAT_INITIAL_DELAY = 0.34
 MENU_REPEAT_INTERVAL = 0.075
-LEARN_SOUND_PREVIEW_CHANNEL = "learn_sound_preview"
+LEARN_SOUND_PREVIEW_CHANNEL = _sx(640)
 LEARN_SOUND_LOOP_PREVIEW_DURATION = 2.6
-HEADSTART_SHAKE_CHANNEL = "intro_headstart_shake"
-HEADSTART_SPRAY_CHANNEL = "intro_headstart_spray"
+HEADSTART_SHAKE_CHANNEL = _sx(641)
+HEADSTART_SPRAY_CHANNEL = _sx(642)
 MIN_WINDOW_WIDTH = 640
 MIN_WINDOW_HEIGHT = 360
 ISSUE_REPORT_PAGE_SIZE = 50
@@ -274,8 +54,8 @@ PRACTICE_TARGET_HAZARDS = 24
 PRACTICE_TARGET_HAZARDS_MIN = 1
 PRACTICE_TARGET_HAZARDS_MAX = 10000
 PRACTICE_PROGRESS_STEP = 6
-PRACTICE_HAZARD_KINDS = {"train", "low", "high", "bush"}
-EVENT_CHARACTER_OFFER_KEYS = ("lucy", "prince_k", "brody", "tasha", "ella", "ninja")
+PRACTICE_HAZARD_KINDS = {_sx(643), _sx(644), _sx(97), _sx(645)}
+EVENT_CHARACTER_OFFER_KEYS = (_sx(268), _sx(271), _sx(274), _sx(277), _sx(280), _sx(283))
 EVENT_SHOP_KEY_COST = 18
 EVENT_SHOP_HOVERBOARD_PACK_COST = 16
 EVENT_SHOP_HEADSTART_COST = 20
@@ -284,12 +64,10 @@ EVENT_SHOP_SUPER_BOX_COST = 30
 BINDING_CAPTURE_HOLD_SECONDS = 3.0
 BINDING_CAPTURE_DING_PITCHES = {3: 1.0, 2: 1.15, 1: 1.3}
 
-
 @dataclass(frozen=True)
 class BindingCaptureRequest:
     device: str
     action_key: str
-
 
 @dataclass
 class KeyboardBindingHoldState:
@@ -299,28 +77,10 @@ class KeyboardBindingHoldState:
     remaining_seconds: float
     next_ding_mark: int
 
-
-@dataclass(frozen=True)
-class LearnSoundEntry:
-    key: str
-    label: str
-    description: str
-    loop: bool = False
-    gain: float = 1.0
-
-
-@dataclass(frozen=True)
-class HelpTopic:
-    key: str
-    label: str
-    description: str
-
-
 @dataclass(frozen=True)
 class InfoDialogContent:
     title: str
     lines: tuple[str, ...]
-
 
 @dataclass(frozen=True)
 class LeaderboardOperationResult:
@@ -329,269 +89,90 @@ class LeaderboardOperationResult:
     success: bool
     payload: object
 
-
-LEADERBOARD_CACHE_TTL_SECONDS = 45.0
-
-
-LEARN_SOUND_DETAILS: dict[str, LearnSoundEntry] = {
-    "coin": LearnSoundEntry("coin", "Coin Pickup", "Plays when you collect a coin on the track."),
-    "coin_gui": LearnSoundEntry("coin_gui", "Coin Bank", "Plays when coins are added to your saved total."),
-    "jump": LearnSoundEntry("jump", "Jump", "Plays when you perform a normal jump."),
-    "roll": LearnSoundEntry("roll", "Roll", "Plays when you duck under a high obstacle."),
-    "dodge": LearnSoundEntry("dodge", "Lane Change", "Plays when you move left or right between lanes."),
-    "announcer_jump_now": LearnSoundEntry("announcer_jump_now", "Announcer Jump Now", "Voice callout that tells you to jump immediately."),
-    "announcer_roll_now": LearnSoundEntry("announcer_roll_now", "Announcer Roll Now", "Voice callout that tells you to roll immediately."),
-    "announcer_move_left_now": LearnSoundEntry("announcer_move_left_now", "Announcer Move Left Now", "Voice callout that tells you to move left immediately."),
-    "announcer_move_right_now": LearnSoundEntry("announcer_move_right_now", "Announcer Move Right Now", "Voice callout that tells you to move right immediately."),
-    "landing": LearnSoundEntry("landing", "Landing", "Plays when you land after a normal jump."),
-    "stumble": LearnSoundEntry("stumble", "Stumble", "Plays after a standard hit that still leaves one chance."),
-    "stumble_side": LearnSoundEntry("stumble_side", "Side Stumble", "Plays after a side impact warning stumble."),
-    "stumble_bush": LearnSoundEntry("stumble_bush", "Bush Stumble", "Plays when you hit a bush and survive the impact."),
-    "crash": LearnSoundEntry("crash", "Crash", "Plays when a hoverboard absorbs a crash."),
-    "death": LearnSoundEntry("death", "Death", "Main run over sound after the final hit."),
-    "death_bodyfall": LearnSoundEntry("death_bodyfall", "Body Fall", "Body impact layer used during a full run loss."),
-    "death_hitcam": LearnSoundEntry("death_hitcam", "Hit Camera", "Heavy hit layer used during the run over sequence."),
-    "guard_catch": LearnSoundEntry("guard_catch", "Guard Catch", "Plays when the guard reaches you after a serious collision."),
-    "guard_loop": LearnSoundEntry("guard_loop", "Guard Loop", "Short guard pressure loop after the first stumble.", loop=True, gain=0.72),
-    "powerup": LearnSoundEntry("powerup", "Power Up", "Plays when you collect or activate a positive power item."),
-    "powerdown": LearnSoundEntry("powerdown", "Power Down", "Plays when a temporary power effect expires."),
-    "magnet_loop": LearnSoundEntry("magnet_loop", "Magnet Loop", "Looping sound while the coin magnet is active.", loop=True, gain=0.88),
-    "jetpack_loop": LearnSoundEntry("jetpack_loop", "Jetpack Loop", "Looping sound while the jetpack is active.", loop=True, gain=0.88),
-    "mystery_box": LearnSoundEntry("mystery_box", "Mystery Box", "Plays when a mystery box is collected or opened."),
-    "mission_reward": LearnSoundEntry("mission_reward", "Mission Reward", "Reward chime for milestones, missions, and progress."),
-    "train_pass": LearnSoundEntry("train_pass", "Train Pass", "Warning fly-by for a train moving through the scene."),
-    "intro_start": LearnSoundEntry("intro_start", "Run Start", "Opening sound when a new run begins."),
-    "intro_shake": LearnSoundEntry("intro_shake", "Headstart Shake", "Headstart launch shake effect."),
-    "intro_spray": LearnSoundEntry("intro_spray", "Headstart Spray", "Headstart spray layer during the run intro."),
-    "gui_cash": LearnSoundEntry("gui_cash", "Cash Reward", "Reward sound for large coin payouts."),
-    "gui_close": LearnSoundEntry("gui_close", "Close Burst", "Sharp UI burst used before the revive choice."),
-    "gui_tap": LearnSoundEntry("gui_tap", "Shop Tap", "Plays when a shop purchase is accepted."),
-    "unlock": LearnSoundEntry("unlock", "Unlock", "Reward unlock sound for items and keys."),
-    "left_foot": LearnSoundEntry("left_foot", "Left Footstep", "Regular left foot running step."),
-    "right_foot": LearnSoundEntry("right_foot", "Right Footstep", "Regular right foot running step."),
-    "sneakers_jump": LearnSoundEntry("sneakers_jump", "Super Sneakers Jump", "High jump launch used by super sneakers and pogo."),
-    "sneakers_left": LearnSoundEntry("sneakers_left", "Super Sneakers Left Step", "Enhanced left footstep while super sneakers are active."),
-    "sneakers_right": LearnSoundEntry("sneakers_right", "Super Sneakers Right Step", "Enhanced right footstep while super sneakers are active."),
-    "slide_letters": LearnSoundEntry("slide_letters", "Letter Slide", "Plays when word hunt letters or intro tiles slide in."),
-    "mystery_combo": LearnSoundEntry("mystery_combo", "Mystery Combo", "Bonus layer used for special mystery rewards."),
-    "kick": LearnSoundEntry("kick", "Kick", "Impact layer used in the run over sequence."),
-    "land_h": LearnSoundEntry("land_h", "Heavy Landing", "Heavy landing used after strong jumps or headstart endings."),
-    "swish_short": LearnSoundEntry("swish_short", "Short Near Miss", "Short near-miss pass sound for a very quick close call."),
-    "swish_mid": LearnSoundEntry("swish_mid", "Medium Near Miss", "Medium near-miss pass sound for a close call."),
-    "swish_long": LearnSoundEntry("swish_long", "Long Near Miss", "Long near-miss pass sound for a sweeping close call."),
-}
-ACTIVE_GAMEPLAY_SOUND_KEYS: tuple[str, ...] = (
-    "coin",
-    "coin_gui",
-    "jump",
-    "roll",
-    "dodge",
-    "announcer_jump_now",
-    "announcer_roll_now",
-    "announcer_move_left_now",
-    "announcer_move_right_now",
-    "landing",
-    "stumble",
-    "stumble_side",
-    "stumble_bush",
-    "crash",
-    "death",
-    "death_bodyfall",
-    "death_hitcam",
-    "guard_catch",
-    "guard_loop",
-    "powerup",
-    "powerdown",
-    "magnet_loop",
-    "jetpack_loop",
-    "mystery_box",
-    "mission_reward",
-    "train_pass",
-    "intro_start",
-    "intro_shake",
-    "intro_spray",
-    "gui_cash",
-    "gui_close",
-    "gui_tap",
-    "unlock",
-    "left_foot",
-    "right_foot",
-    "sneakers_jump",
-    "sneakers_left",
-    "sneakers_right",
-    "slide_letters",
-    "mystery_combo",
-    "kick",
-    "land_h",
-    "swish_short",
-    "swish_mid",
-    "swish_long",
-)
-LEARN_SOUND_LIBRARY: tuple[LearnSoundEntry, ...] = tuple(
-    LEARN_SOUND_DETAILS[key] for key in ACTIVE_GAMEPLAY_SOUND_KEYS
-)
-HOW_TO_TOPICS: tuple[HelpTopic, ...] = (
-    HelpTopic(
-        "movement",
-        "Movement and Actions",
-        "Move left and right to change lanes. Jump over low barriers and bushes. Roll under high barriers. Press Space to activate your selected hoverboard. Open Start Game to review your active board, headstarts, and score boosters before a run.",
-    ),
-    HelpTopic(
-        "warnings",
-        "Hazards and Warnings",
-        "Listen for the announcer callouts and the train fly-by sound. The callout focuses on the action needed for your current lane, such as jump, roll, move left, or move right. Near misses, collisions, hoverboard breaks, and guard pressure all have distinct audio layers.",
-    ),
-    HelpTopic(
-        "powerups",
-        "Power Ups and Boards",
-        "Collect magnets, jetpacks, double score, super sneakers, and pogo sticks to survive longer and build bigger scores. Your selected board also changes hoverboard behavior. Different boards can add double jump, super jump, super speed, smooth drift, sideways zaps, or longer low rolls.",
-    ),
-    HelpTopic(
-        "events",
-        "Events and Daily Rewards",
-        "Open Events from the main menu to review the current daily event, Daily High Score, Coin Meter, the mini mystery box daily gift, and the Daily Login Calendar. Daily events rotate through Super Mysterizer, Mega Jackpot, featured character bonuses, Super Mystery Box Mania, and Wordy Weekend.",
-    ),
-    HelpTopic(
-        "quests",
-        "Missions and Quests",
-        "Open Missions from the main menu to review mission sets, quests, and achievements. Mission sets raise your permanent multiplier. Daily and seasonal quests award sneakers, and sneakers fill the quest meter for extra rewards. Word Hunt letters and Season Hunt tokens still appear during runs and remain part of progression.",
-    ),
-    HelpTopic(
-        "collections",
-        "Boards and Collections",
-        "Open Me from the main menu to manage characters, boards, item upgrades, and collections. Collections complete when you unlock specific character or board sets. Finished collections grant passive bonuses such as stronger coin banking, longer hoverboards, longer power-up duration, or a higher starting multiplier.",
-    ),
-    HelpTopic(
-        "economy",
-        "Coins, Keys, and Shop",
-        "Collect coins during runs and bank them when the run ends. Keys can revive you after a crash. Spend saved coins in Shop on hoverboards, headstarts, score boosters, mystery boxes, and upgrades. Shop also includes the free daily gift when it is available.",
-    ),
-    HelpTopic(
-        "leaderboard",
-        "Leaderboard and Publishing",
-        "Open Leaderboard from the main menu after signing in through Options. The board tracks the current weekly season, shows the remaining time and active reward, lets you filter by difficulty, inspect player profiles, and publish finished runs with extended run details and verification status.",
-    ),
-    HelpTopic(
-        "navigation",
-        "Menu Navigation",
-        "The main menu is organized into Start Game, Events, Missions, Me, Shop, Leaderboard, Options, How to Play, Learn Game Sounds, Check for Updates, and Exit. Use Up and Down to move, Enter to confirm, Escape to go back, and Left or Right when adjusting options.",
-    ),
-)
-UPGRADE_HELP_TOPICS: dict[str, tuple[HelpTopic, ...]] = {
-    "1.1.3": (
-        HelpTopic(
-            "update_1_1_3_audio",
-            "Audio Routing Fixes",
-            "Version 1.1.3 keeps reward and interface sounds out of the forced HRTF mono path while preserving mono menu feedback cues.",
-        ),
-        HelpTopic(
-            "update_1_1_3_items",
-            "Item Upgrades",
-            "The Shop now includes an original-style Item Upgrades submenu for Coin Magnet, Jetpack, 2X Multiplier, and Super Sneakers, each with persistent upgrade levels and longer pickup durations.",
-        ),
-    ),
-}
 def step_volume(value: float, direction: int) -> float:
-    stepped = round(float(value) + (0.05 * direction), 2)
+    stepped = round(float(value) + 0.05 * direction, 2)
     return max(0.0, min(1.0, stepped))
-
 
 def step_int(value: int, direction: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, int(value) + direction))
 
-
 def format_duration_seconds(duration: float) -> str:
-    formatted = f"{float(duration):.1f}".rstrip("0").rstrip(".")
-    return f"{formatted}s"
-
+    formatted = _sx(298).format(float(duration)).rstrip(_sx(297)).rstrip(_sx(292))
+    return _sx(646).format(formatted)
 
 def format_play_time(total_seconds: float) -> str:
     total = max(0, int(round(float(total_seconds))))
     hours, remainder = divmod(total, 3600)
     minutes, seconds = divmod(remainder, 60)
     if hours > 0:
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-    return f"{minutes:02d}:{seconds:02d}"
-
+        return _sx(648).format(hours, minutes, seconds)
+    return _sx(647).format(minutes, seconds)
 
 def difficulty_display_label(value: object) -> str:
-    normalized = str(value or "unknown").strip().lower()
-    return DIFFICULTY_LABELS.get(normalized, "Unknown")
-
+    normalized = str(value or _sx(578)).strip().lower()
+    return DIFFICULTY_LABELS.get(normalized, TEXT[_sx(578)])
 
 def leaderboard_period_display_label(value: object) -> str:
-    normalized = str(value or "season").strip().lower()
-    return LEADERBOARD_PERIOD_LABELS.get(normalized, LEADERBOARD_PERIOD_LABELS["season"])
-
+    normalized = str(value or _sx(659)).strip().lower()
+    return LEADERBOARD_PERIOD_LABELS.get(normalized, LEADERBOARD_PERIOD_LABELS[_sx(659)])
 
 def leaderboard_difficulty_filter_display_label(value: object) -> str:
-    normalized = str(value or "all").strip().lower()
-    return LEADERBOARD_DIFFICULTY_FILTER_LABELS.get(normalized, LEADERBOARD_DIFFICULTY_FILTER_LABELS["all"])
-
+    normalized = str(value or _sx(660)).strip().lower()
+    return LEADERBOARD_DIFFICULTY_FILTER_LABELS.get(normalized, LEADERBOARD_DIFFICULTY_FILTER_LABELS[_sx(660)])
 
 def issue_status_display_label(value: object) -> str:
-    normalized = str(value or "all").strip().lower()
-    return ISSUE_STATUS_LABELS.get(normalized, ISSUE_STATUS_LABELS["all"])
-
+    normalized = str(value or _sx(660)).strip().lower()
+    return ISSUE_STATUS_LABELS.get(normalized, ISSUE_STATUS_LABELS[_sx(660)])
 
 def verification_display_label(value: object) -> str:
-    normalized = str(value or "verified").strip().lower()
-    return LEADERBOARD_VERIFICATION_LABELS.get(normalized, LEADERBOARD_VERIFICATION_LABELS["verified"])
-
+    normalized = str(value or _sx(786)).strip().lower()
+    return LEADERBOARD_VERIFICATION_LABELS.get(normalized, LEADERBOARD_VERIFICATION_LABELS[_sx(786)])
 
 def help_topic_segments(topic: HelpTopic, controls_summary: str) -> tuple[str, ...]:
-    if topic.key == "movement":
-        text = f"Controls: {controls_summary} {topic.description}"
+    if topic.key == _sx(649):
+        text = _sx(650).format(controls_summary, topic.description)
     else:
         text = topic.description
-    parts = [segment.strip() for segment in re.split(r"(?<=[.!?])\s+", text) if segment.strip()]
+    parts = [segment.strip() for segment in re.split(_sx(1164), text) if segment.strip()]
     return tuple(parts) if parts else (text.strip(),)
 
-
 def load_whats_new_content() -> InfoDialogContent:
-    fallback = InfoDialogContent(
-        title=f"What's New   {APP_VERSION}",
-        lines=("No update notes were provided for this version.",),
-    )
+    fallback = InfoDialogContent(title=_sx(788).format(TEXT[_sx(1782)], APP_VERSION), lines=(TEXT[_sx(1576)],))
     try:
-        changelog_path = resource_path("CHANGELOG.txt")
-        with open(changelog_path, "r", encoding="utf-8") as handle:
+        changelog_path = resource_path(_sx(789))
+        with open(changelog_path, _sx(385), encoding=_sx(386)) as handle:
             lines = [line.rstrip() for line in handle]
     except Exception:
         return fallback
-
     entry_lines: list[str] = []
     found_date = False
     for line in lines:
         stripped = line.strip()
         if not found_date:
-            if stripped.startswith("Date: "):
+            if stripped.startswith(_sx(1165)):
                 found_date = True
             continue
-        if stripped == "------------------------------------------------------------":
+        if stripped == _sx(790):
             break
         if stripped:
             entry_lines.append(stripped)
-
     if not entry_lines:
         return fallback
-    return InfoDialogContent(title=f"What's New   {APP_VERSION}", lines=tuple(entry_lines))
-
+    return InfoDialogContent(title=_sx(788).format(TEXT[_sx(1782)], APP_VERSION), lines=tuple(entry_lines))
 
 def copy_text_to_clipboard(text: str) -> bool:
-    normalized_text = str(text).replace("\r\n", "\n").replace("\r", "\n")
-    if sys.platform == "win32" and _copy_text_to_clipboard_windows(normalized_text):
+    normalized_text = str(text).replace(_sx(1166), _sx(652)).replace(_sx(651), _sx(652))
+    if sys.platform == _sx(791) and _copy_text_to_clipboard_windows(normalized_text):
         return True
     return _copy_text_to_clipboard_pygame(normalized_text)
 
-
 def _copy_text_to_clipboard_windows(text: str) -> bool:
-    user32 = getattr(ctypes, "windll", None)
+    user32 = getattr(ctypes, _sx(653), None)
     if user32 is None:
         return False
     user32 = user32.user32
     kernel32 = ctypes.windll.kernel32
-    window_handle = int(pygame.display.get_wm_info().get("window", 0) or 0)
+    window_handle = int(pygame.display.get_wm_info().get(_sx(1167), 0) or 0)
     clipboard_handle = ctypes.c_void_p(window_handle) if window_handle else None
     for _ in range(8):
         if user32.OpenClipboard(clipboard_handle):
@@ -605,7 +186,7 @@ def _copy_text_to_clipboard_windows(text: str) -> bool:
             return False
         buffer = ctypes.create_unicode_buffer(text)
         bytes_required = ctypes.sizeof(buffer)
-        global_handle = kernel32.GlobalAlloc(0x0002, bytes_required)
+        global_handle = kernel32.GlobalAlloc(2, bytes_required)
         if not global_handle:
             return False
         locked_memory = kernel32.GlobalLock(global_handle)
@@ -628,9 +209,8 @@ def _copy_text_to_clipboard_windows(text: str) -> bool:
         if global_handle:
             kernel32.GlobalFree(global_handle)
 
-
 def _copy_text_to_clipboard_pygame(text: str) -> bool:
-    scrap = getattr(pygame, "scrap", None)
+    scrap = getattr(pygame, _sx(654), None)
     if scrap is None or not pygame.display.get_init():
         return False
     try:
@@ -638,30 +218,23 @@ def _copy_text_to_clipboard_pygame(text: str) -> bool:
     except Exception:
         pass
     try:
-        scrap.put(pygame.SCRAP_TEXT, text.encode("utf-8"))
+        scrap.put(pygame.SCRAP_TEXT, text.encode(_sx(386)))
     except Exception:
         return False
     return True
 
-
 class SubwayBlindGame:
-    def __init__(
-        self,
-        screen: pygame.Surface,
-        clock: pygame.time.Clock,
-        settings: dict,
-        updater: GitHubReleaseUpdater | None = None,
-        packaged_build: bool | None = None,
-    ):
+
+    def __init__(self, screen: pygame.Surface, clock: pygame.time.Clock, settings: dict, updater: GitHubReleaseUpdater | None=None, packaged_build: bool | None=None):
         self.screen = screen
         self.clock = clock
         self.settings = settings
         self.speaker = Speaker.from_settings(settings)
         self.audio = Audio(settings)
         self.updater = updater or GitHubReleaseUpdater()
-        self.packaged_build = bool(getattr(sys, "frozen", False)) if packaged_build is None else bool(packaged_build)
-        self.font = pygame.font.SysFont("segoeui", 22)
-        self.big = pygame.font.SysFont("segoeui", 38, bold=True)
+        self.packaged_build = bool(getattr(sys, _sx(362), False)) if packaged_build is None else bool(packaged_build)
+        self.font = pygame.font.SysFont(_sx(792), 22)
+        self.big = pygame.font.SysFont(_sx(792), 38, bold=True)
         ensure_progression_state(self.settings)
         ensure_character_progress_state(self.settings)
         ensure_board_state(self.settings)
@@ -669,11 +242,10 @@ class SubwayBlindGame:
         ensure_collection_state(self.settings)
         ensure_quest_state(self.settings)
         ensure_event_state(self.settings)
-
         self.state = RunState()
         self.player = Player()
         self.obstacles: list[Obstacle] = []
-        self.speed_profile: SpeedProfile = speed_profile_for_difficulty(str(self.settings["difficulty"]))
+        self.speed_profile: SpeedProfile = speed_profile_for_difficulty(str(self.settings[_sx(318)]))
         self.spatial_audio = SpatialThreatAudio()
         self.spawn_director = SpawnDirector()
         self.selected_headstarts = 0
@@ -688,23 +260,21 @@ class SubwayBlindGame:
         self._coin_streak = 0
         self._menu_repeat_key: int | None = None
         self._menu_repeat_delay_remaining = 0.0
-        self._learn_sound_entries_by_action = {
-            f"learn_sound:{entry.key}": entry for entry in LEARN_SOUND_LIBRARY
-        }
-        self._learn_sound_description = "Press Enter to play the selected game sound."
+        self._learn_sound_entries_by_action = {_sx(793).format(entry.key): entry for entry in LEARN_SOUND_LIBRARY}
+        self._learn_sound_description = _sx(655)
         self._learn_sound_preview_timer = 0.0
         self._exit_requested = False
         self._latest_update_result: UpdateCheckResult | None = None
-        self._update_status_message = "Check GitHub Releases for a newer version."
-        self._update_release_notes = "No release notes were provided."
+        self._update_status_message = _sx(656)
+        self._update_release_notes = _sx(657)
         self._update_progress_percent = 0.0
-        self._update_progress_message = ""
-        self._update_progress_stage = "idle"
+        self._update_progress_message = _sx(2)
+        self._update_progress_stage = _sx(658)
         self._update_progress_announced_bucket = -1
         self._update_install_thread: threading.Thread | None = None
         self._update_install_result: UpdateInstallResult | None = None
         self._update_restart_script_path: str | None = None
-        self._update_install_error = ""
+        self._update_install_error = _sx(2)
         self._update_ready_announced = False
         self._showing_upgrade_help = False
         self._active_character_bonuses = CharacterRuntimeBonuses()
@@ -717,15 +287,15 @@ class SubwayBlindGame:
         self._binding_capture: BindingCaptureRequest | None = None
         self._keyboard_binding_hold: KeyboardBindingHoldState | None = None
         self._pressed_keys: set[int] = set()
-        self._selected_binding_device = "controller" if self.controls.active_controller() is not None else "keyboard"
+        self._selected_binding_device = _sx(565) if self.controls.active_controller() is not None else _sx(563)
         self.leaderboard_client = LeaderboardClient()
-        self._leaderboard_username = str(self.settings.get("leaderboard_username", "") or "").strip()
+        self._leaderboard_username = str(self.settings.get(_sx(330), _sx(2)) or _sx(2)).strip()
         self._restore_persisted_leaderboard_session()
         self._server_special_items: dict[str, int] = {}
         self._server_special_item_loadout: dict[str, bool] = {key: False for key in SPECIAL_ITEM_ORDER}
         self._server_wheel_status: dict[str, object] = {}
-        self._season_imprint_bonus_key = ""
-        self._special_toggle_item_key = ""
+        self._season_imprint_bonus_key = _sx(2)
+        self._special_toggle_item_key = _sx(2)
         self._active_special_run_items: set[str] = set()
         self._special_effect_timers: dict[str, float] = {}
         self._special_run_used_flags: set[str] = set()
@@ -734,8 +304,8 @@ class SubwayBlindGame:
         self._pending_overclock_keys = 0
         self._box_high_tier_meter = 0
         self._coin_streak_grace_timer = 0.0
-        self._leaderboard_period_filter = "season"
-        self._leaderboard_difficulty_filter = "all"
+        self._leaderboard_period_filter = _sx(659)
+        self._leaderboard_difficulty_filter = _sx(660)
         self._leaderboard_season: dict[str, object] = {}
         self._leaderboard_entries: list[dict[str, object]] = []
         self._leaderboard_total_players = 0
@@ -748,15 +318,15 @@ class SubwayBlindGame:
         self._leaderboard_active_operation: str | None = None
         self._leaderboard_return_menu: Menu | None = None
         self._leaderboard_startup_sync_started = False
-        self._issue_status_filter = "all"
+        self._issue_status_filter = _sx(660)
         self._issue_entries: list[dict[str, object]] = []
         self._issue_total_reports = 0
         self._issue_offset = 0
         self._issue_cache_loaded_at = 0.0
         self._selected_issue_report: dict[str, object] | None = None
         self._selected_issue_detail_content: InfoDialogContent | None = None
-        self._issue_draft_title = ""
-        self._issue_draft_message = ""
+        self._issue_draft_title = _sx(2)
+        self._issue_draft_message = _sx(2)
         self._meta_return_menu: Menu | None = None
         self._options_return_menu: Menu | None = None
         self._publish_confirm_return_menu: Menu | None = None
@@ -768,10 +338,10 @@ class SubwayBlindGame:
         self._pending_purchase_return_index = 0
         self._pending_wheel_spin_reward: dict[str, object] | None = None
         self._pending_wheel_spin_reward_delay = 0.0
-        self._game_over_publish_state = "idle"
+        self._game_over_publish_state = _sx(658)
         self._active_run_stats = self._empty_run_stats()
         self._game_over_summary = self._empty_game_over_summary()
-        self._last_death_reason = "Run ended."
+        self._last_death_reason = _sx(661)
         self._practice_mode_active = False
         self._practice_speed_scaling_active = False
         self._pending_practice_setup = False
@@ -782,351 +352,53 @@ class SubwayBlindGame:
         self._menu_last_indices: dict[int, int] = {}
         self._magnet_loop_active = False
         self._jetpack_loop_active = False
-
-        self.pause_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Paused",
-            [
-                MenuItem("Resume", "resume"),
-                MenuItem("Return to Main Menu", "to_main"),
-                MenuItem("Options", "pause_options"),
-            ],
-        )
-        self.pause_confirm_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Return to Main Menu?",
-            [
-                MenuItem("Yes", "confirm_to_main"),
-                MenuItem("No", "cancel_to_main"),
-            ],
-        )
-        self.leaderboard_logout_confirm_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Log Out of Leaderboard?",
-            [
-                MenuItem("Yes", "confirm_leaderboard_logout"),
-                MenuItem("No", "cancel_leaderboard_logout"),
-            ],
-        )
-        self.exit_confirm_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Return to Desktop?",
-            [
-                MenuItem("Yes", "confirm_exit"),
-                MenuItem("No", "cancel_exit"),
-            ],
-        )
-        self.revive_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Revive",
-            [
-                MenuItem(self._revive_option_label(), "revive"),
-                MenuItem("End Run", "end_run"),
-            ],
-        )
-        self.publish_confirm_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Publish to Leaderboard?",
-            [
-                MenuItem("Yes", "publish_confirm_yes"),
-                MenuItem("No", "publish_confirm_no"),
-            ],
-        )
-        self.purchase_confirm_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Confirm Purchase?",
-            [
-                MenuItem("Yes", "confirm_purchase_yes"),
-                MenuItem("No", "confirm_purchase_no"),
-            ],
-        )
-        self.game_over_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Game Over",
-            [
-                MenuItem("Score: 0", "game_over_info_score"),
-                MenuItem("Coins: 0", "game_over_info_coins"),
-                MenuItem("Play Time: 00:00", "game_over_info_time"),
-                MenuItem("Death reason: Run ended.", "game_over_info_reason"),
-                MenuItem("Run again", "game_over_retry"),
-                MenuItem("Main menu", "game_over_main_menu"),
-            ],
-        )
-        self.main_menu = Menu(
-            self.speaker,
-            self.audio,
-            self._main_menu_title(),
-            self._main_menu_items(),
-            description_enabled=self._main_menu_descriptions_enabled,
-        )
-        self.loadout_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Run Setup",
-            [],
-        )
-        self.events_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Events",
-            [],
-        )
-        self.wheel_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Wheel Spin",
-            [],
-        )
-        self.event_shop_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Event Shop",
-            [],
-        )
-        self.missions_hub_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Missions",
-            [],
-        )
-        self.mission_set_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Mission Set",
-            [],
-        )
-        self.quests_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Quests",
-            [],
-        )
-        self.me_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Me",
-            [],
-        )
-        self.options_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Options",
-            self._build_options_menu_items(),
-        )
-        self.sapi_menu = Menu(
-            self.speaker,
-            self.audio,
-            "SAPI Settings",
-            [
-                MenuItem(self._sapi_speech_option_label(), "opt_sapi"),
-                MenuItem(self._sapi_volume_option_label(), "opt_sapi_volume"),
-                MenuItem(self._sapi_voice_option_label(), "opt_sapi_voice"),
-                MenuItem(self._sapi_rate_option_label(), "opt_sapi_rate"),
-                MenuItem(self._sapi_pitch_option_label(), "opt_sapi_pitch"),
-                MenuItem("Back", "back"),
-            ],
-        )
-        self.announcements_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Gameplay Announcements",
-            [
-                MenuItem(self._meter_option_label(), "opt_meters"),
-                MenuItem(self._coin_counter_option_label(), "opt_coin_counters"),
-                MenuItem(self._quest_changes_option_label(), "opt_quest_changes"),
-                MenuItem(self._pause_on_focus_loss_option_label(), "opt_pause_on_focus_loss"),
-                MenuItem("Back", "back"),
-            ],
-        )
-        self.controls_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Controls",
-            [],
-        )
-        self.server_status_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Server",
-            [
-                MenuItem("Connecting to server...", "server_status_info"),
-                MenuItem("Back", "back"),
-            ],
-        )
-        self.leaderboard_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Leaderboard",
-            [
-                MenuItem("Connect to the server to load leaderboard entries.", "leaderboard_info"),
-                MenuItem("Refresh", "leaderboard_refresh"),
-                MenuItem("Back", "back"),
-            ],
-        )
-        self.leaderboard_profile_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Player",
-            [MenuItem("Back", "back")],
-        )
-        self.leaderboard_run_detail_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Published Run",
-            [MenuItem("Back", "back")],
-        )
-        self.issue_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Report a Bug",
-            [
-                MenuItem("Report an Issue", "issue_submit"),
-                MenuItem("Status: All Statuses", "issue_cycle_status"),
-                MenuItem("Connect to the server to load bug reports.", "issue_info"),
-                MenuItem("Page 1 of 1", "issue_page_info"),
-                MenuItem("Previous Page", "issue_prev_page"),
-                MenuItem("Next Page", "issue_next_page"),
-                MenuItem("Refresh", "issue_refresh"),
-                MenuItem("Back", "back"),
-            ],
-        )
-        self.issue_detail_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Bug Report",
-            [MenuItem("Back", "back")],
-        )
-        self.issue_compose_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Report a Bug",
-            [
-                MenuItem("Title: Not set", "issue_edit_title"),
-                MenuItem("Message: Not set", "issue_edit_message"),
-                MenuItem("Submit Report", "issue_submit_confirm"),
-                MenuItem("Back", "back"),
-            ],
-        )
-        self.keyboard_bindings_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Keyboard Bindings",
-            [],
-        )
-        self.controller_bindings_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Controller Bindings",
-            [],
-        )
-        self.shop_menu = Menu(
-            self.speaker,
-            self.audio,
-            self._shop_title(),
-            [
-                MenuItem(self._shop_hoverboard_label(), "buy_hoverboard"),
-                MenuItem(self._shop_box_label(), "buy_box"),
-                MenuItem(self._shop_headstart_label(), "buy_headstart"),
-                MenuItem(self._shop_score_booster_label(), "buy_score_booster"),
-                MenuItem(self._shop_daily_gift_label(), "claim_daily_gift"),
-                MenuItem(self._shop_item_upgrade_label(), "open_item_upgrades"),
-                MenuItem(self._shop_character_upgrade_label(), "open_character_upgrades"),
-                MenuItem("Back", "back"),
-            ],
-        )
-        self.item_upgrade_menu = Menu(
-            self.speaker,
-            self.audio,
-            self._item_upgrade_menu_title(),
-            [],
-        )
-        self.item_upgrade_detail_menu = Menu(
-            self.speaker,
-            self.audio,
-            item_upgrade_definition(self._item_upgrade_detail_key).name,
-            [],
-        )
-        self.character_menu = Menu(
-            self.speaker,
-            self.audio,
-            self._character_menu_title(),
-            [],
-        )
-        self.character_detail_menu = Menu(
-            self.speaker,
-            self.audio,
-            selected_character_definition(self.settings).name,
-            [],
-        )
-        self.board_menu = Menu(
-            self.speaker,
-            self.audio,
-            self._board_menu_title(),
-            [],
-        )
-        self.board_detail_menu = Menu(
-            self.speaker,
-            self.audio,
-            selected_board_definition(self.settings).name,
-            [],
-        )
-        self.collection_menu = Menu(
-            self.speaker,
-            self.audio,
-            self._collection_menu_title(),
-            [],
-        )
-        self.learn_sounds_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Learn Game Sounds",
-            [MenuItem(entry.label, f"learn_sound:{entry.key}") for entry in LEARN_SOUND_LIBRARY] + [MenuItem("Back", "back")],
-        )
-        self.howto_menu = Menu(
-            self.speaker,
-            self.audio,
-            "How to Play",
-            [],
-        )
+        self.pause_menu = Menu(self.speaker, self.audio, _sx(794), [MenuItem(_sx(1577), _sx(1420)), MenuItem(_sx(1578), _sx(1422)), MenuItem(_sx(479), _sx(1421))])
+        self.pause_confirm_menu = Menu(self.speaker, self.audio, _sx(795), [MenuItem(TEXT[_sx(1783)], _sx(1423)), MenuItem(TEXT[_sx(1784)], _sx(1424))])
+        self.leaderboard_logout_confirm_menu = Menu(self.speaker, self.audio, _sx(796), [MenuItem(TEXT[_sx(1783)], _sx(1425)), MenuItem(TEXT[_sx(1784)], _sx(1426))])
+        self.exit_confirm_menu = Menu(self.speaker, self.audio, _sx(797), [MenuItem(TEXT[_sx(1783)], _sx(1431)), MenuItem(TEXT[_sx(1784)], _sx(1432))])
+        self.revive_menu = Menu(self.speaker, self.audio, _sx(798), [MenuItem(self._revive_option_label(), _sx(1433)), MenuItem(_sx(1579), _sx(1580))])
+        self.publish_confirm_menu = Menu(self.speaker, self.audio, _sx(799), [MenuItem(TEXT[_sx(1783)], _sx(1427)), MenuItem(TEXT[_sx(1784)], _sx(1428))])
+        self.purchase_confirm_menu = Menu(self.speaker, self.audio, _sx(800), [MenuItem(TEXT[_sx(1783)], _sx(1429)), MenuItem(TEXT[_sx(1784)], _sx(1430))])
+        self.game_over_menu = Menu(self.speaker, self.audio, _sx(801), [MenuItem(_sx(1581), _sx(1582)), MenuItem(_sx(1583), _sx(1584)), MenuItem(_sx(1585), _sx(1586)), MenuItem(_sx(1587), _sx(1588)), MenuItem(_sx(751), _sx(964)), MenuItem(_sx(752), _sx(965))])
+        self.main_menu = Menu(self.speaker, self.audio, self._main_menu_title(), self._main_menu_items(), description_enabled=self._main_menu_descriptions_enabled)
+        self.loadout_menu = Menu(self.speaker, self.audio, _sx(802), [])
+        self.events_menu = Menu(self.speaker, self.audio, _sx(803), [])
+        self.wheel_menu = Menu(self.speaker, self.audio, _sx(703), [])
+        self.event_shop_menu = Menu(self.speaker, self.audio, _sx(804), [])
+        self.missions_hub_menu = Menu(self.speaker, self.audio, _sx(805), [])
+        self.mission_set_menu = Menu(self.speaker, self.audio, _sx(806), [])
+        self.quests_menu = Menu(self.speaker, self.audio, _sx(807), [])
+        self.me_menu = Menu(self.speaker, self.audio, _sx(808), [])
+        self.options_menu = Menu(self.speaker, self.audio, _sx(479), self._build_options_menu_items())
+        self.sapi_menu = Menu(self.speaker, self.audio, _sx(671), [MenuItem(self._sapi_speech_option_label(), _sx(1121)), MenuItem(self._sapi_volume_option_label(), _sx(1122)), MenuItem(self._sapi_voice_option_label(), _sx(1123)), MenuItem(self._sapi_rate_option_label(), _sx(1124)), MenuItem(self._sapi_pitch_option_label(), _sx(1125)), MenuItem(TEXT[_sx(429)], _sx(429))])
+        self.announcements_menu = Menu(self.speaker, self.audio, _sx(809), [MenuItem(self._meter_option_label(), _sx(1130)), MenuItem(self._coin_counter_option_label(), _sx(1131)), MenuItem(self._quest_changes_option_label(), _sx(1132)), MenuItem(self._pause_on_focus_loss_option_label(), _sx(1133)), MenuItem(TEXT[_sx(429)], _sx(429))])
+        self.controls_menu = Menu(self.speaker, self.audio, _sx(754), [])
+        self.server_status_menu = Menu(self.speaker, self.audio, _sx(810), [MenuItem(_sx(1086), _sx(1589)), MenuItem(TEXT[_sx(429)], _sx(429))])
+        self.leaderboard_menu = Menu(self.speaker, self.audio, _sx(811), [MenuItem(_sx(1590), _sx(1390)), MenuItem(_sx(1452), _sx(1083)), MenuItem(TEXT[_sx(429)], _sx(429))])
+        self.leaderboard_profile_menu = Menu(self.speaker, self.audio, _sx(812), [MenuItem(TEXT[_sx(429)], _sx(429))])
+        self.leaderboard_run_detail_menu = Menu(self.speaker, self.audio, _sx(777), [MenuItem(TEXT[_sx(429)], _sx(429))])
+        self.issue_menu = Menu(self.speaker, self.audio, _sx(813), [MenuItem(_sx(1489), _sx(1073)), MenuItem(_sx(1591), _sx(1392)), MenuItem(_sx(1592), _sx(1593)), MenuItem(_sx(1594), _sx(1595)), MenuItem(_sx(1596), _sx(1101)), MenuItem(_sx(1597), _sx(1102)), MenuItem(_sx(1452), _sx(1100)), MenuItem(TEXT[_sx(429)], _sx(429))])
+        self.issue_detail_menu = Menu(self.speaker, self.audio, _sx(814), [MenuItem(TEXT[_sx(429)], _sx(429))])
+        self.issue_compose_menu = Menu(self.speaker, self.audio, _sx(813), [MenuItem(_sx(1090), _sx(1108)), MenuItem(_sx(1093), _sx(1109)), MenuItem(_sx(1490), _sx(1394)), MenuItem(TEXT[_sx(429)], _sx(429))])
+        self.keyboard_bindings_menu = Menu(self.speaker, self.audio, _sx(815), [])
+        self.controller_bindings_menu = Menu(self.speaker, self.audio, _sx(816), [])
+        self.shop_menu = Menu(self.speaker, self.audio, self._shop_title(), [MenuItem(self._shop_hoverboard_label(), _sx(1397)), MenuItem(self._shop_box_label(), _sx(1398)), MenuItem(self._shop_headstart_label(), _sx(1399)), MenuItem(self._shop_score_booster_label(), _sx(1400)), MenuItem(self._shop_daily_gift_label(), _sx(1219)), MenuItem(self._shop_item_upgrade_label(), _sx(1245)), MenuItem(self._shop_character_upgrade_label(), _sx(1401)), MenuItem(TEXT[_sx(429)], _sx(429))])
+        self.item_upgrade_menu = Menu(self.speaker, self.audio, self._item_upgrade_menu_title(), [])
+        self.item_upgrade_detail_menu = Menu(self.speaker, self.audio, item_upgrade_definition(self._item_upgrade_detail_key).name, [])
+        self.character_menu = Menu(self.speaker, self.audio, self._character_menu_title(), [])
+        self.character_detail_menu = Menu(self.speaker, self.audio, selected_character_definition(self.settings).name, [])
+        self.board_menu = Menu(self.speaker, self.audio, self._board_menu_title(), [])
+        self.board_detail_menu = Menu(self.speaker, self.audio, selected_board_definition(self.settings).name, [])
+        self.collection_menu = Menu(self.speaker, self.audio, self._collection_menu_title(), [])
+        self.learn_sounds_menu = Menu(self.speaker, self.audio, _sx(817), [MenuItem(entry.label, _sx(793).format(entry.key)) for entry in LEARN_SOUND_LIBRARY] + [MenuItem(TEXT[_sx(429)], _sx(429))])
+        self.howto_menu = Menu(self.speaker, self.audio, _sx(818), [])
         self._refresh_howto_menu_labels()
-        self.help_topic_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Help",
-            [MenuItem("Back", "back")],
-        )
+        self.help_topic_menu = Menu(self.speaker, self.audio, _sx(819), [MenuItem(TEXT[_sx(429)], _sx(429))])
         self._selected_help_topic: HelpTopic | None = None
-        self.whats_new_menu = Menu(
-            self.speaker,
-            self.audio,
-            "What's New",
-            [MenuItem("Back", "back")],
-        )
+        self.whats_new_menu = Menu(self.speaker, self.audio, _sx(820), [MenuItem(TEXT[_sx(429)], _sx(429))])
         self._selected_info_dialog: InfoDialogContent | None = None
-        self.achievements_menu = Menu(
-            self.speaker,
-            self.audio,
-            self._achievements_menu_title(),
-            [],
-        )
-        self.update_menu = Menu(
-            self.speaker,
-            self.audio,
-            "Update Required",
-            [
-                MenuItem("Download and Install Update", "download_update"),
-                MenuItem("Open Release Page", "open_release_page"),
-                MenuItem("Quit Game", "quit"),
-            ],
-        )
+        self.achievements_menu = Menu(self.speaker, self.audio, self._achievements_menu_title(), [])
+        self.update_menu = Menu(self.speaker, self.audio, _sx(821), [MenuItem(_sx(994), _sx(995)), MenuItem(_sx(756), _sx(757)), MenuItem(_sx(767), _sx(768))])
         self._refresh_item_upgrade_menu_labels()
         self._refresh_item_upgrade_detail_menu_labels(self._item_upgrade_detail_key)
         self._refresh_character_menu_labels()
@@ -1142,12 +414,11 @@ class SubwayBlindGame:
         self._refresh_issue_menu()
         self._refresh_control_menus()
         self._refresh_game_over_menu()
-
         self.active_menu: Optional[Menu] = self.main_menu
-        if self.packaged_build and bool(self.settings.get("check_updates_on_startup", True)):
-            self._show_startup_status("Checking for updates.")
+        if self.packaged_build and bool(self.settings.get(_sx(316), True)):
+            self._show_startup_status(_sx(1169))
             self._check_for_updates(announce_result=False, automatic=True)
-        if self.active_menu == self.main_menu and not self.main_menu.opened:
+        if self.active_menu == self.main_menu and (not self.main_menu.opened):
             self.active_menu.open()
             self._sync_music_context()
         self._sync_character_progress()
@@ -1155,99 +426,97 @@ class SubwayBlindGame:
         self._start_background_leaderboard_sync()
 
     def _sfx_option_label(self) -> str:
-        return f"SFX Volume: {int(float(self.settings['sfx_volume']) * 100)}"
+        return _sx(662).format(int(float(self.settings[_sx(130)]) * 100))
 
     def _main_menu_title(self) -> str:
-        return f"Main Menu   Version: {APP_VERSION}"
+        return _sx(663).format(APP_VERSION)
 
     def _achievements_menu_title(self) -> str:
-        unlocked = len(self.settings.get("achievements_unlocked", []))
+        unlocked = len(self.settings.get(_sx(350), []))
         total = len(achievement_definitions())
-        return f"Achievements   {unlocked}/{total}"
+        return _sx(664).format(unlocked, total)
 
     def _howto_menu_title(self) -> str:
-        return f"Updated Help   {APP_VERSION}" if self._showing_upgrade_help else "How to Play"
+        return _sx(826).format(APP_VERSION) if self._showing_upgrade_help else _sx(818)
 
     def _shop_title(self) -> str:
-        return "Shop"
+        return _sx(665)
 
     def _shop_coins_label(self) -> str:
-        return f"Coins: {int(self.settings.get('bank_coins', 0))}"
+        return _sx(666).format(int(self.settings.get(_sx(333), 0)))
 
     def _shop_max_purchasable(self, item_key: str) -> int:
-        coins = int(self.settings.get("bank_coins", 0))
+        coins = int(self.settings.get(_sx(333), 0))
         cost = int(SHOP_PRICES.get(item_key, 0))
         if cost <= 0:
             return 0
         return max(0, coins // cost)
 
     def _music_option_label(self) -> str:
-        return f"Music Volume: {int(float(self.settings['music_volume']) * 100)}"
+        return _sx(667).format(int(float(self.settings[_sx(196)]) * 100))
 
     def _updates_option_label(self) -> str:
-        return (
-            f"Check for Updates on Startup: "
-            f"{'On' if self.settings['check_updates_on_startup'] else 'Off'}"
-        )
+        return _sx(668).format(_sx(1598) if self.settings[_sx(316)] else _sx(1599))
+
     def _speech_option_label(self) -> str:
-        return f"Speech: {'On' if self.settings['speech_enabled'] else 'Off'}"
+        return _sx(669).format(_sx(1598) if self.settings[_sx(117)] else _sx(1599))
 
     def _sapi_speech_option_label(self) -> str:
-        return f"SAPI Speech: {'On' if self.settings['sapi_speech_enabled'] else 'Off'}"
+        return _sx(670).format(_sx(1598) if self.settings[_sx(118)] else _sx(1599))
 
     def _sapi_menu_entry_label(self) -> str:
-        return "SAPI Settings"
+        return _sx(671)
 
     def _audio_output_option_label(self) -> str:
-        return f"Output Device: {self.audio.output_device_display_name()}"
+        return _sx(672).format(self.audio.output_device_display_name())
 
     def _menu_sound_hrtf_option_label(self) -> str:
-        return f"Menu Sound HRTF: {'On' if self.settings['menu_sound_hrtf'] else 'Off'}"
+        return _sx(673).format(_sx(1598) if self.settings[_sx(195)] else _sx(1599))
 
     def _menu_wrap_option_label(self) -> str:
-        return f"Menu Wrap: {'On' if self.settings.get('menu_wrap_enabled', False) else 'Off'}"
+        return _sx(674).format(_sx(1598) if self.settings.get(_sx(315), False) else _sx(1599))
 
     def _sapi_voice_option_label(self) -> str:
         voice_name = self.speaker.current_sapi_voice_display_name()
-        return f"SAPI Voice: {voice_name}"
+        return _sx(675).format(voice_name)
 
     def _sapi_rate_option_label(self) -> str:
-        return f"SAPI Rate: {int(self.settings.get('sapi_rate', 0))}"
+        return _sx(676).format(int(self.settings.get(_sx(120), 0)))
 
     def _sapi_pitch_option_label(self) -> str:
-        return f"SAPI Pitch: {int(self.settings.get('sapi_pitch', 0))}"
+        return _sx(677).format(int(self.settings.get(_sx(121), 0)))
 
     def _sapi_volume_option_label(self) -> str:
-        return f"SAPI Volume: {int(self.settings.get('sapi_volume', 100))}"
+        return _sx(678).format(int(self.settings.get(_sx(122), 100)))
 
     def _difficulty_option_label(self) -> str:
-        difficulty = DIFFICULTY_LABELS.get(str(self.settings["difficulty"]), "Normal")
-        return f"Difficulty: {difficulty}"
+        difficulty = DIFFICULTY_LABELS.get(str(self.settings[_sx(318)]), _sx(839))
+        return _sx(679).format(difficulty)
 
     def _meter_option_label(self) -> str:
-        return f"Meters: {'On' if self._meters_enabled() else 'Off'}"
+        return _sx(680).format(_sx(1598) if self._meters_enabled() else _sx(1599))
 
     def _coin_counter_option_label(self) -> str:
-        return f"Coin Counters: {'On' if self._coin_counters_enabled() else 'Off'}"
+        return _sx(681).format(_sx(1598) if self._coin_counters_enabled() else _sx(1599))
 
     def _quest_changes_option_label(self) -> str:
-        return f"Quest Announcements: {'On' if self._quest_changes_enabled() else 'Off'}"
+        return _sx(682).format(_sx(1598) if self._quest_changes_enabled() else _sx(1599))
 
     def _pause_on_focus_loss_option_label(self) -> str:
-        return f"Pause on Focus Loss: {'On' if self._pause_on_focus_loss_enabled() else 'Off'}"
+        return _sx(683).format(_sx(1598) if self._pause_on_focus_loss_enabled() else _sx(1599))
 
     def _main_menu_description_option_label(self) -> str:
-        return f"Main Menu Descriptions: {'On' if self._main_menu_descriptions_enabled() else 'Off'}"
+        return _sx(684).format(_sx(1598) if self._main_menu_descriptions_enabled() else _sx(1599))
 
     def _leaderboard_account_option_label(self) -> str:
         if self._leaderboard_username:
-            return f"Set User Name: {self._leaderboard_username}"
-        return "Set User Name"
+            return _sx(846).format(self._leaderboard_username)
+        return _sx(685)
 
     def _leaderboard_logout_option_label(self) -> str:
         if self._leaderboard_username:
-            return f"Log Out: {self._leaderboard_username}"
-        return "Log Out"
+            return _sx(847).format(self._leaderboard_username)
+        return _sx(686)
 
     def _leaderboard_is_authenticated(self) -> bool:
         return self.leaderboard_client.is_authenticated()
@@ -1255,85 +524,66 @@ class SubwayBlindGame:
     def _leaderboard_has_publish_identity(self) -> bool:
         if self._leaderboard_is_authenticated():
             return True
-        return bool(str(self._leaderboard_username or "").strip())
+        return bool(str(self._leaderboard_username or _sx(2)).strip())
 
     def _exit_confirmation_option_label(self) -> str:
-        return f"Exit Confirmation: {'On' if self._exit_confirmation_enabled() else 'Off'}"
+        return _sx(687).format(_sx(1598) if self._exit_confirmation_enabled() else _sx(1599))
 
     def _purchase_confirmation_option_label(self) -> str:
-        return f"Purchase Confirmation: {'On' if self._purchase_confirmation_enabled() else 'Off'}"
+        return _sx(688).format(_sx(1598) if self._purchase_confirmation_enabled() else _sx(1599))
 
     def _headstart_option_label(self) -> str:
-        owned = int(self.settings.get("headstarts", 0))
-        return f"Headstart: {self.selected_headstarts}   Owned: {owned}"
+        owned = int(self.settings.get(_sx(336), 0))
+        return _sx(689).format(self.selected_headstarts, owned)
 
     def _score_booster_option_label(self) -> str:
-        owned = int(self.settings.get("score_boosters", 0))
-        return f"Score Booster: {self.selected_score_boosters}   Owned: {owned}"
+        owned = int(self.settings.get(_sx(337), 0))
+        return _sx(690).format(self.selected_score_boosters, owned)
 
     def _revive_option_label(self) -> str:
         if int(self.state.revives_used) >= REVIVE_MAX_USES_PER_RUN:
-            return f"Revive unavailable   Limit reached: {REVIVE_MAX_USES_PER_RUN} per run"
+            return _sx(853).format(REVIVE_MAX_USES_PER_RUN)
         cost = revive_cost(self.state.revives_used)
-        owned = int(self.settings.get("keys", 0))
-        return f"Use {cost} key{'s' if cost != 1 else ''} to revive   Owned: {owned}"
+        owned = int(self.settings.get(_sx(334), 0))
+        return _sx(691).format(cost, _sx(294) if cost != 1 else _sx(2), owned)
 
     def _shop_hoverboard_label(self) -> str:
-        max_buy = self._shop_max_purchasable("hoverboard")
-        return (
-            f"Buy Hoverboard   Cost: {SHOP_PRICES['hoverboard']} Coins   "
-            f"Owned: {int(self.settings.get('hoverboards', 0))}   "
-            f"Max Buy: {max_buy}"
-        )
+        max_buy = self._shop_max_purchasable(_sx(594))
+        return _sx(692).format(SHOP_PRICES[_sx(594)], int(self.settings.get(_sx(335), 0)), max_buy)
 
     def _shop_box_label(self) -> str:
-        max_buy = self._shop_max_purchasable("mystery_box")
-        return (
-            f"Open Mystery Box   Cost: {SHOP_PRICES['mystery_box']} Coins   "
-            f"Max Buy: {max_buy}"
-        )
+        max_buy = self._shop_max_purchasable(_sx(21))
+        return _sx(693).format(SHOP_PRICES[_sx(21)], max_buy)
 
     def _shop_headstart_label(self) -> str:
-        max_buy = self._shop_max_purchasable("headstart")
-        return (
-            f"Buy Headstart   Cost: {SHOP_PRICES['headstart']} Coins   "
-            f"Owned: {int(self.settings.get('headstarts', 0))}   "
-            f"Max Buy: {max_buy}"
-        )
+        max_buy = self._shop_max_purchasable(_sx(595))
+        return _sx(694).format(SHOP_PRICES[_sx(595)], int(self.settings.get(_sx(336), 0)), max_buy)
 
     def _shop_score_booster_label(self) -> str:
-        max_buy = self._shop_max_purchasable("score_booster")
-        return (
-            f"Buy Score Booster   Cost: {SHOP_PRICES['score_booster']} Coins   "
-            f"Owned: {int(self.settings.get('score_boosters', 0))}   "
-            f"Max Buy: {max_buy}"
-        )
+        max_buy = self._shop_max_purchasable(_sx(596))
+        return _sx(695).format(SHOP_PRICES[_sx(596)], int(self.settings.get(_sx(337), 0)), max_buy)
 
     def _shop_item_upgrade_label(self) -> str:
-        maxed = sum(
-            1
-            for definition in item_upgrade_definitions()
-            if item_upgrade_level(self.settings, definition.key) >= definition.max_level
-        )
-        return f"Item Upgrades   Maxed: {maxed}/{len(item_upgrade_definitions())}"
+        maxed = sum((1 for definition in item_upgrade_definitions() if item_upgrade_level(self.settings, definition.key) >= definition.max_level))
+        return _sx(696).format(maxed, len(item_upgrade_definitions()))
 
     def _shop_character_upgrade_label(self) -> str:
         active_character = selected_character_definition(self.settings)
-        return f"Character Upgrades   Active: {active_character.name}"
+        return _sx(697).format(active_character.name)
 
     def _shop_daily_gift_label(self) -> str:
-        return "Free Daily Gift   Available" if daily_gift_available(self.settings) else "Free Daily Gift   Claimed Today"
+        return _sx(866) if daily_gift_available(self.settings) else _sx(867)
 
     def _loadout_board_label(self) -> str:
         board = selected_board_definition(self.settings)
-        return f"Board: {board.name}   Power: {board.power_label}"
+        return _sx(698).format(board.name, board.power_label)
 
     def _loadout_title(self) -> str:
-        return "Practice Setup" if self._pending_practice_setup else "Run Setup"
+        return _sx(870) if self._pending_practice_setup else _sx(802)
 
     @staticmethod
     def _special_item_label(item_key: str) -> str:
-        return SPECIAL_ITEM_LABELS.get(str(item_key or "").strip().lower(), "Special Item")
+        return SPECIAL_ITEM_LABELS.get(str(item_key or _sx(2)).strip().lower(), _sx(871))
 
     def _special_item_owned_count(self, item_key: str) -> int:
         return max(0, int(self._server_special_items.get(item_key, 0) or 0))
@@ -1344,91 +594,70 @@ class SubwayBlindGame:
         return bool(self._server_special_item_loadout.get(item_key, False))
 
     def _special_item_loadout_label(self, item_key: str) -> str:
-        return (
-            f"{self._special_item_label(item_key)}: "
-            f"{'On' if self._special_item_enabled(item_key) else 'Off'}   "
-            f"Owned: {self._special_item_owned_count(item_key)}"
-        )
+        return _sx(699).format(self._special_item_label(item_key), _sx(1598) if self._special_item_enabled(item_key) else _sx(1599), self._special_item_owned_count(item_key))
 
     def _wheel_status_label(self) -> str:
-        spins_remaining = int(self._server_wheel_status.get("spins_remaining", 0) or 0)
-        max_spins = int(self._server_wheel_status.get("max_spins", 2) or 2)
-        return f"Weekly Spins: {spins_remaining}/{max_spins} remaining"
+        spins_remaining = int(self._server_wheel_status.get(_sx(1600), 0) or 0)
+        max_spins = int(self._server_wheel_status.get(_sx(1601), 2) or 2)
+        return _sx(700).format(spins_remaining, max_spins)
 
     def _season_imprint_status_label(self) -> str:
-        bonus_key = str(self._season_imprint_bonus_key or "").strip().lower()
+        bonus_key = str(self._season_imprint_bonus_key or _sx(2)).strip().lower()
         if not bonus_key:
-            return "Season Imprint: Syncing..."
-        description = SEASON_IMPRINT_TEXT.get(bonus_key, "Weekly bonus is active.")
-        return f"Season Imprint: {bonus_key.replace('_', ' ').title()}   {description}"
+            return _sx(874)
+        description = SEASON_IMPRINT_TEXT.get(bonus_key, _sx(875))
+        return _sx(701).format(bonus_key.replace(_sx(553), _sx(4)).title(), description)
 
     def _wheel_spin_action_label(self) -> str:
         if not self._leaderboard_is_authenticated():
-            return "Spin Wheel   Sign in required"
-        spins_remaining = int(self._server_wheel_status.get("spins_remaining", 0) or 0)
+            return _sx(878)
+        spins_remaining = int(self._server_wheel_status.get(_sx(1600), 0) or 0)
         if spins_remaining <= 0:
-            return "Spin Wheel   No spins left this week"
-        return "Spin Wheel"
+            return _sx(879)
+        return _sx(702)
 
     def _refresh_wheel_menu_labels(self) -> None:
-        items = [
-            MenuItem(self._wheel_status_label(), "wheel_info"),
-            MenuItem(self._season_imprint_status_label(), "wheel_info"),
-            MenuItem(self._wheel_spin_action_label(), "wheel_spin_now"),
-        ]
+        items = [MenuItem(self._wheel_status_label(), _sx(1175)), MenuItem(self._season_imprint_status_label(), _sx(1175)), MenuItem(self._wheel_spin_action_label(), _sx(1176))]
         for item_key in SPECIAL_ITEM_ORDER:
             owned = self._special_item_owned_count(item_key)
             if owned <= 0:
                 continue
-            items.append(MenuItem(self._special_item_loadout_label(item_key), f"wheel_item_info:{item_key}"))
-        items.append(MenuItem("Back", "back"))
-        self.wheel_menu.title = "Wheel Spin"
+            items.append(MenuItem(self._special_item_loadout_label(item_key), _sx(1602).format(item_key)))
+        items.append(MenuItem(TEXT[_sx(429)], _sx(429)))
+        self.wheel_menu.title = _sx(703)
         self.wheel_menu.items = items
 
     def _practice_speed_scaling_option_label(self) -> str:
-        return f"Practice Speed Scaling: {'On' if self._practice_speed_scaling_enabled() else 'Off'}"
+        return _sx(704).format(_sx(1598) if self._practice_speed_scaling_enabled() else _sx(1599))
 
     def _practice_hazard_target_option_label(self) -> str:
-        return f"Practice Hazard Target: {self._practice_hazard_target_setting()}"
+        return _sx(705).format(self._practice_hazard_target_setting())
 
     def _build_loadout_menu_items(self) -> list[MenuItem]:
         if self._pending_practice_setup:
-            return [
-                MenuItem(self._practice_hazard_target_option_label(), "edit_practice_hazard_target"),
-                MenuItem(self._practice_speed_scaling_option_label(), "toggle_practice_speed_scaling"),
-                MenuItem("Begin Practice", "begin_run"),
-                MenuItem("Back", "back"),
-            ]
-        items = [
-            MenuItem(self._loadout_board_label(), "loadout_board_info"),
-            MenuItem(self._headstart_option_label(), "toggle_headstart"),
-            MenuItem(self._score_booster_option_label(), "toggle_score_booster"),
-        ]
+            return [MenuItem(self._practice_hazard_target_option_label(), _sx(1110)), MenuItem(self._practice_speed_scaling_option_label(), _sx(1378)), MenuItem(_sx(1603), _sx(1379)), MenuItem(TEXT[_sx(429)], _sx(429))]
+        items = [MenuItem(self._loadout_board_label(), _sx(1177)), MenuItem(self._headstart_option_label(), _sx(1178)), MenuItem(self._score_booster_option_label(), _sx(1179))]
         if self._leaderboard_is_authenticated():
             for item_key in SPECIAL_ITEM_ORDER:
                 if self._special_item_owned_count(item_key) <= 0:
                     continue
-                items.append(MenuItem(self._special_item_loadout_label(item_key), f"toggle_special_item:{item_key}"))
-        items.extend([MenuItem("Begin Run", "begin_run"), MenuItem("Back", "back")])
+                items.append(MenuItem(self._special_item_loadout_label(item_key), _sx(1785).format(item_key)))
+        items.extend([MenuItem(_sx(1604), _sx(1379)), MenuItem(TEXT[_sx(429)], _sx(429))])
         return items
 
     def _events_menu_title(self) -> str:
         event = current_daily_event()
-        event_coins = int(self.settings.get("event_state", {}).get("event_coins", 0) or 0)
-        return f"Events   {event.label}   Event Coins: {event_coins}"
+        event_coins = int(self.settings.get(_sx(352), {}).get(_sx(597), 0) or 0)
+        return _sx(706).format(event.label, event_coins)
 
     def _event_shop_title(self) -> str:
-        return f"Event Shop   Event Coins: {self._event_coin_balance()}"
+        return _sx(707).format(self._event_coin_balance())
 
     def _event_coin_balance(self) -> int:
-        return int(self.settings.get("event_state", {}).get("event_coins", 0) or 0)
+        return int(self.settings.get(_sx(352), {}).get(_sx(597), 0) or 0)
 
     def _event_shop_character_offer_key(self) -> str | None:
-        event_candidates = [
-            definition
-            for definition in character_definitions()
-            if definition.key in EVENT_CHARACTER_OFFER_KEYS and not character_unlocked(self.settings, definition.key)
-        ]
+        event_candidates = [definition for definition in character_definitions() if definition.key in EVENT_CHARACTER_OFFER_KEYS and (not character_unlocked(self.settings, definition.key))]
         if event_candidates:
             return event_candidates[date.today().toordinal() % len(event_candidates)].key
         featured_key = featured_character_key()
@@ -1460,310 +689,270 @@ class SubwayBlindGame:
     def _event_shop_character_label(self) -> str:
         key = self._event_shop_character_offer_key()
         if key is None:
-            return "Season Character   All unlocked"
+            return _sx(885)
         definition = character_definition(key)
         cost = self._event_shop_character_offer_cost(key)
-        status = "Owned" if character_unlocked(self.settings, key) else f"Cost: {cost} Event Coins"
-        return f"Season Character: {definition.name}   {status}"
+        status = _sx(886) if character_unlocked(self.settings, key) else _sx(887).format(cost)
+        return _sx(708).format(definition.name, status)
 
     def _event_shop_board_label(self) -> str:
         key = self._event_shop_board_offer_key()
         if key is None:
-            return "Season Board   All unlocked"
+            return _sx(889)
         definition = board_definition(key)
         cost = self._event_shop_board_offer_cost(key)
-        status = "Owned" if board_unlocked(self.settings, key) else f"Cost: {cost} Event Coins"
-        return f"Season Board: {definition.name}   {status}"
+        status = _sx(886) if board_unlocked(self.settings, key) else _sx(887).format(cost)
+        return _sx(709).format(definition.name, status)
 
     def _event_shop_key_label(self) -> str:
-        return f"Buy Key   Cost: {EVENT_SHOP_KEY_COST} Event Coins   Owned: {int(self.settings.get('keys', 0))}"
+        return _sx(710).format(EVENT_SHOP_KEY_COST, int(self.settings.get(_sx(334), 0)))
 
     def _event_shop_hoverboard_label(self) -> str:
-        return (
-            f"Buy Hoverboard Pack (2)   Cost: {EVENT_SHOP_HOVERBOARD_PACK_COST} Event Coins   "
-            f"Owned: {int(self.settings.get('hoverboards', 0))}"
-        )
+        return _sx(711).format(EVENT_SHOP_HOVERBOARD_PACK_COST, int(self.settings.get(_sx(335), 0)))
 
     def _event_shop_headstart_label(self) -> str:
-        return (
-            f"Buy Headstart   Cost: {EVENT_SHOP_HEADSTART_COST} Event Coins   "
-            f"Owned: {int(self.settings.get('headstarts', 0))}"
-        )
+        return _sx(712).format(EVENT_SHOP_HEADSTART_COST, int(self.settings.get(_sx(336), 0)))
 
     def _event_shop_score_booster_label(self) -> str:
-        return (
-            f"Buy Score Booster   Cost: {EVENT_SHOP_SCORE_BOOSTER_COST} Event Coins   "
-            f"Owned: {int(self.settings.get('score_boosters', 0))}"
-        )
+        return _sx(713).format(EVENT_SHOP_SCORE_BOOSTER_COST, int(self.settings.get(_sx(337), 0)))
 
     def _event_shop_super_box_label(self) -> str:
-        return f"Open Super Mystery Box   Cost: {EVENT_SHOP_SUPER_BOX_COST} Event Coins"
+        return _sx(714).format(EVENT_SHOP_SUPER_BOX_COST)
 
     def _daily_event_info_label(self) -> str:
         event = current_daily_event()
         tomorrow = tomorrow_daily_event()
         featured_key = featured_character_key()
-        if event.key == "featured_character_bonus":
+        if event.key == _sx(624):
             featured_name = character_definition(featured_key).name
-            return f"Today: {event.label}   Featured Runner: {featured_name}   Tomorrow: {tomorrow.label}"
-        return f"Today: {event.label}   Tomorrow: {tomorrow.label}"
+            return _sx(896).format(event.label, featured_name, tomorrow.label)
+        return _sx(715).format(event.label, tomorrow.label)
 
     def _daily_high_score_status_label(self) -> str:
-        total = int(self.settings.get("event_state", {}).get("daily_high_score_total", 0) or 0)
+        total = int(self.settings.get(_sx(352), {}).get(_sx(600), 0) or 0)
         next_threshold = next_daily_high_score_threshold(self.settings)
         if next_threshold is None:
-            return f"Daily High Score: {total}   All rewards claimed"
-        return f"Daily High Score: {total} of {next_threshold}"
+            return _sx(899).format(total)
+        return _sx(716).format(total, next_threshold)
 
     def _daily_high_score_action_label(self) -> str:
         if can_claim_daily_high_score_reward(self.settings):
-            return "Claim Daily High Score Reward"
+            return _sx(902)
         next_threshold = next_daily_high_score_threshold(self.settings)
         if next_threshold is None:
-            return "Daily High Score Rewards Complete"
-        return f"Next Daily High Score Reward at {next_threshold}"
+            return _sx(903)
+        return _sx(717).format(next_threshold)
 
     def _coin_meter_status_label(self) -> str:
-        coins = int(self.settings.get("event_state", {}).get("coin_meter_coins", 0) or 0)
+        coins = int(self.settings.get(_sx(352), {}).get(_sx(603), 0) or 0)
         next_threshold = next_coin_meter_threshold(self.settings)
         if next_threshold is None:
-            return f"Coin Meter: {coins}   All chests opened"
-        return f"Coin Meter: {coins} of {next_threshold}"
+            return _sx(905).format(coins)
+        return _sx(718).format(coins, next_threshold)
 
     def _coin_meter_action_label(self) -> str:
         if can_claim_coin_meter_reward(self.settings):
-            return "Open Coin Meter Chest"
+            return _sx(907)
         next_threshold = next_coin_meter_threshold(self.settings)
         if next_threshold is None:
-            return "Coin Meter Complete"
-        return f"Next Coin Meter Chest at {next_threshold}"
+            return _sx(908)
+        return _sx(719).format(next_threshold)
 
     def _login_calendar_status_label(self) -> str:
         next_day = login_calendar_next_day(self.settings)
-        availability = "Available" if login_calendar_available(self.settings) else "Already claimed today"
-        return f"Daily Login Calendar: Day {next_day} of 7   {availability}"
+        availability = _sx(910) if login_calendar_available(self.settings) else _sx(911)
+        return _sx(720).format(next_day, availability)
 
     def _login_calendar_action_label(self) -> str:
         if login_calendar_available(self.settings):
-            return f"Claim Login Reward   Day {login_calendar_next_day(self.settings)}"
-        return "Login Reward Claimed Today"
+            return _sx(914).format(login_calendar_next_day(self.settings))
+        return _sx(721)
 
     def _word_hunt_status_label(self) -> str:
         active_word = active_word_for_settings(self.settings)
         collected = len(active_word) - len(self._remaining_word_letters())
-        return f"Word Hunt: {active_word}   {collected}/{len(active_word)} letters"
+        return _sx(722).format(active_word, collected, len(active_word))
 
     def _season_hunt_status_label(self) -> str:
-        total = int(self.settings.get("season_tokens", 0) or 0)
+        total = int(self.settings.get(_sx(347), 0) or 0)
         next_threshold = next_season_reward_threshold(self.settings)
         if next_threshold is None:
-            return f"Season Hunt: {total} tokens   Track complete"
-        return f"Season Hunt: {total} of {next_threshold} tokens"
+            return _sx(917).format(total)
+        return _sx(723).format(total, next_threshold)
 
     def _missions_hub_title(self) -> str:
         completed = len(completed_mission_metrics(self.settings))
-        return f"Missions   Set {int(self.settings.get('mission_set', 1))}   {completed}/3"
+        return _sx(724).format(int(self.settings.get(_sx(339), 1)), completed)
 
     def _mission_set_menu_title(self) -> str:
-        return f"Mission Set {int(self.settings.get('mission_set', 1))}"
+        return _sx(725).format(int(self.settings.get(_sx(339), 1)))
 
     def _me_menu_title(self) -> str:
-        return f"Me   {selected_character_definition(self.settings).name}   {selected_board_definition(self.settings).name}"
+        return _sx(726).format(selected_character_definition(self.settings).name, selected_board_definition(self.settings).name)
 
     def _board_menu_title(self) -> str:
         active_board = selected_board_definition(self.settings)
-        return f"Boards   Active: {active_board.name}"
+        return _sx(727).format(active_board.name)
 
     def _board_list_item_label(self, key: str) -> str:
         definition = board_definition(key)
         if not board_unlocked(self.settings, definition.key):
-            return f"{definition.name}   Locked   Unlock: {definition.unlock_cost} Coins"
-        status = "Active" if selected_board_definition(self.settings).key == definition.key else "Unlocked"
-        return f"{definition.name}   {status}   {definition.power_label}"
+            return _sx(925).format(definition.name, definition.unlock_cost)
+        status = _sx(926) if selected_board_definition(self.settings).key == definition.key else _sx(927)
+        return _sx(728).format(definition.name, status, definition.power_label)
 
     def _board_status_label(self, key: str) -> str:
         definition = board_definition(key)
         if not board_unlocked(self.settings, definition.key):
-            return f"Status: Locked   Unlock cost: {definition.unlock_cost} Coins"
-        status = "Active" if selected_board_definition(self.settings).key == definition.key else "Unlocked"
-        return f"Status: {status}"
+            return _sx(928).format(definition.unlock_cost)
+        status = _sx(926) if selected_board_definition(self.settings).key == definition.key else _sx(927)
+        return _sx(729).format(status)
 
     def _board_power_label(self, key: str) -> str:
         definition = board_definition(key)
-        return f"Power: {definition.power_label}   {definition.description}"
+        return _sx(730).format(definition.power_label, definition.description)
 
     def _board_action_label(self, key: str) -> str:
         definition = board_definition(key)
         if not board_unlocked(self.settings, definition.key):
-            return f"Unlock Board   Cost: {definition.unlock_cost} Coins"
+            return _sx(931).format(definition.unlock_cost)
         if selected_board_definition(self.settings).key == definition.key:
-            return "Board Active"
-        return "Set as Active Board"
+            return _sx(932)
+        return _sx(731)
 
     def _collection_menu_title(self) -> str:
         completed = len(completed_collection_keys(self.settings))
         total = len(collection_definitions())
-        return f"Collections   {completed}/{total}"
+        return _sx(732).format(completed, total)
 
     def _collection_item_label(self, key: str) -> str:
-        definition = next(item for item in collection_definitions() if item.key == key)
+        definition = next((item for item in collection_definitions() if item.key == key))
         owned, total = collection_progress(self.settings, definition)
-        status = "Complete" if key in completed_collection_keys(self.settings) else "In Progress"
-        return f"{definition.name}   {status}   {owned}/{total}   {collection_bonus_summary(definition)}"
+        status = _sx(934) if key in completed_collection_keys(self.settings) else _sx(935)
+        return _sx(733).format(definition.name, status, owned, total, collection_bonus_summary(definition))
 
     def _quest_menu_title(self) -> str:
-        return f"Quests   Sneakers: {quest_sneakers(self.settings)}"
+        return _sx(734).format(quest_sneakers(self.settings))
 
     def _quest_item_label(self, quest_key: str) -> str:
-        quest = next(
-            item for item in daily_quests() + seasonal_quests() if item.key == quest_key
-        )
+        quest = next((item for item in daily_quests() + seasonal_quests() if item.key == quest_key))
         progress = min(quest_progress(self.settings, quest), quest.target)
-        status = "Claimed" if quest_claimed(self.settings, quest) else ("Ready" if quest_completed(self.settings, quest) else "Active")
-        scope_label = "Daily" if quest.scope == "daily" else "Seasonal"
-        return f"{scope_label}: {quest.label}   {progress}/{quest.target}   {status}   Sneakers {quest.sneaker_reward}"
+        status = _sx(937) if quest_claimed(self.settings, quest) else _sx(1189) if quest_completed(self.settings, quest) else _sx(926)
+        scope_label = _sx(938) if quest.scope == _sx(1190) else _sx(939)
+        return _sx(735).format(scope_label, quest.label, progress, quest.target, status, quest.sneaker_reward)
 
     def _quest_meter_label(self) -> str:
         next_threshold = next_meter_threshold(self.settings)
         if next_threshold is None:
-            return f"Sneaker Meter: {quest_sneakers(self.settings)}   Complete"
-        return f"Sneaker Meter: {quest_sneakers(self.settings)} of {next_threshold}"
+            return _sx(941).format(quest_sneakers(self.settings))
+        return _sx(736).format(quest_sneakers(self.settings), next_threshold)
 
     def _quest_meter_action_label(self) -> str:
         if can_claim_meter_reward(self.settings):
-            return "Claim Sneaker Meter Reward"
+            return _sx(943)
         next_threshold = next_meter_threshold(self.settings)
         if next_threshold is None:
-            return "Sneaker Meter Complete"
-        return f"Next Sneaker Meter Reward at {next_threshold}"
+            return _sx(944)
+        return _sx(737).format(next_threshold)
 
     def _mission_goal_item_label(self, goal) -> str:
-        progress = int(self.settings.get("mission_metrics", {}).get(goal.metric, 0) or 0)
+        progress = int(self.settings.get(_sx(341), {}).get(goal.metric, 0) or 0)
         visible_progress = min(progress, goal.target)
-        status = "Completed" if progress >= goal.target else "Active"
-        return f"{goal.label}   {visible_progress}/{goal.target}   {status}"
+        status = _sx(946) if progress >= goal.target else _sx(926)
+        return _sx(738).format(goal.label, visible_progress, goal.target, status)
 
     def _daily_progress_reset_label(self) -> str:
-        return "Reset Today's Progress   Keeps claimed rewards"
+        return _sx(739)
 
     def _item_upgrade_menu_title(self) -> str:
-        maxed = sum(
-            1
-            for definition in item_upgrade_definitions()
-            if item_upgrade_level(self.settings, definition.key) >= definition.max_level
-        )
-        return f"Item Upgrades   Maxed: {maxed}/{len(item_upgrade_definitions())}"
+        maxed = sum((1 for definition in item_upgrade_definitions() if item_upgrade_level(self.settings, definition.key) >= definition.max_level))
+        return _sx(696).format(maxed, len(item_upgrade_definitions()))
 
     def _item_upgrade_list_item_label(self, key: str) -> str:
         definition = item_upgrade_definition(key)
         level = item_upgrade_level(self.settings, definition.key)
         duration = item_upgrade_duration(self.settings, definition.key)
-        return f"{definition.name}   Level {level}/{definition.max_level}   {self._format_duration_seconds(duration)}"
+        return _sx(740).format(definition.name, level, definition.max_level, self._format_duration_seconds(duration))
 
     def _item_upgrade_status_label(self, key: str) -> str:
         definition = item_upgrade_definition(key)
         level = item_upgrade_level(self.settings, definition.key)
-        return f"Status: Level {level} of {definition.max_level}"
+        return _sx(741).format(level, definition.max_level)
 
     def _item_upgrade_effect_label(self, key: str) -> str:
         definition = item_upgrade_definition(key)
         current_duration = item_upgrade_duration(self.settings, definition.key)
         next_cost = next_item_upgrade_cost(self.settings, definition.key)
         if next_cost is None:
-            return f"Effect: {definition.description} Pickup duration {self._format_duration_seconds(current_duration)}"
+            return _sx(949).format(definition.description, self._format_duration_seconds(current_duration))
         next_level = item_upgrade_level(self.settings, definition.key) + 1
         next_duration = float(definition.durations[next_level])
-        return (
-            f"Effect: {definition.description} Current {self._format_duration_seconds(current_duration)}   "
-            f"Next {self._format_duration_seconds(next_duration)}"
-        )
+        return _sx(742).format(definition.description, self._format_duration_seconds(current_duration), self._format_duration_seconds(next_duration))
 
     def _item_upgrade_action_label(self, key: str) -> str:
         definition = item_upgrade_definition(key)
         next_cost = next_item_upgrade_cost(self.settings, definition.key)
         if next_cost is None:
-            return "Max Level Reached"
+            return _sx(953)
         next_level = item_upgrade_level(self.settings, definition.key) + 1
-        return f"Upgrade to Level {next_level}   Cost: {next_cost} Coins"
+        return _sx(743).format(next_level, next_cost)
 
     def _character_menu_title(self) -> str:
         active_character = selected_character_definition(self.settings)
-        return f"Character Upgrades   Active: {active_character.name}"
+        return _sx(697).format(active_character.name)
 
     def _character_list_item_label(self, key: str) -> str:
         definition = character_definition(key)
         if not character_unlocked(self.settings, key):
-            return f"{definition.name}   Locked   Unlock: {definition.unlock_cost} Coins"
+            return _sx(925).format(definition.name, definition.unlock_cost)
         level = character_level(self.settings, key)
-        active_status = "Active" if selected_character_definition(self.settings).key == key else "Unlocked"
-        return (
-            f"{definition.name}   {active_status}   Level {level}/{definition.max_level}   "
-            f"{character_perk_summary(definition, level)}"
-        )
+        active_status = _sx(926) if selected_character_definition(self.settings).key == key else _sx(927)
+        return _sx(744).format(definition.name, active_status, level, definition.max_level, character_perk_summary(definition, level))
 
     def _character_status_label(self, key: str) -> str:
         definition = character_definition(key)
         if not character_unlocked(self.settings, key):
-            return f"Status: Locked   Unlock cost: {definition.unlock_cost} Coins"
+            return _sx(928).format(definition.unlock_cost)
         level = character_level(self.settings, key)
-        active_status = "Active" if selected_character_definition(self.settings).key == key else "Unlocked"
-        return f"Status: {active_status}   Level {level} of {definition.max_level}"
+        active_status = _sx(926) if selected_character_definition(self.settings).key == key else _sx(927)
+        return _sx(745).format(active_status, level, definition.max_level)
 
     def _character_perk_label(self, key: str) -> str:
         definition = character_definition(key)
         level = character_level(self.settings, key)
-        return f"Perk: {character_perk_summary(definition, level)}"
+        return _sx(746).format(character_perk_summary(definition, level))
 
     def _character_primary_action_label(self, key: str) -> str:
         definition = character_definition(key)
         if not character_unlocked(self.settings, key):
-            return f"Unlock Character   Cost: {definition.unlock_cost} Coins"
+            return _sx(958).format(definition.unlock_cost)
         if selected_character_definition(self.settings).key == key:
-            return "Character Active"
-        return "Set as Active Character"
+            return _sx(959)
+        return _sx(747)
 
     def _character_upgrade_action_label(self, key: str) -> str:
         if not character_unlocked(self.settings, key):
-            return "Unlock character first to upgrade"
+            return _sx(960)
         definition = character_definition(key)
         next_cost = next_character_upgrade_cost(self.settings, key)
         if next_cost is None:
-            return "Max Level Reached"
+            return _sx(953)
         next_level = character_level(self.settings, key) + 1
-        return f"Upgrade to Level {next_level}   Cost: {next_cost} Coins"
+        return _sx(743).format(next_level, next_cost)
 
     def _refresh_options_menu_labels(self) -> None:
-        selected_action = ""
+        selected_action = _sx(2)
         if self.options_menu.items:
             selected_action = self.options_menu.items[min(self.options_menu.index, len(self.options_menu.items) - 1)].action
         self.options_menu.items = self._build_options_menu_items()
         if selected_action:
             self.options_menu.index = self._update_option_index(selected_action)
+
     def _build_options_menu_items(self) -> list[MenuItem]:
-        items = [
-            MenuItem(self._sfx_option_label(), "opt_sfx"),
-            MenuItem(self._music_option_label(), "opt_music"),
-            MenuItem(self._updates_option_label(), "opt_updates"),
-            MenuItem(self._audio_output_option_label(), "opt_output"),
-            MenuItem(self._menu_sound_hrtf_option_label(), "opt_menu_hrtf"),
-            MenuItem(self._menu_wrap_option_label(), "opt_menu_wrap"),
-            MenuItem(self._speech_option_label(), "opt_speech"),
-            MenuItem(self._sapi_menu_entry_label(), "opt_sapi_menu"),
-            MenuItem(self._difficulty_option_label(), "opt_diff"),
-            MenuItem(self._main_menu_description_option_label(), "opt_main_menu_descriptions"),
-            MenuItem(self._leaderboard_account_option_label(), "opt_leaderboard_account"),
-        ]
+        items = [MenuItem(self._sfx_option_label(), _sx(1114)), MenuItem(self._music_option_label(), _sx(1115)), MenuItem(self._updates_option_label(), _sx(1116)), MenuItem(self._audio_output_option_label(), _sx(1117)), MenuItem(self._menu_sound_hrtf_option_label(), _sx(1118)), MenuItem(self._menu_wrap_option_label(), _sx(1119)), MenuItem(self._speech_option_label(), _sx(1120)), MenuItem(self._sapi_menu_entry_label(), _sx(1194)), MenuItem(self._difficulty_option_label(), _sx(1126)), MenuItem(self._main_menu_description_option_label(), _sx(1127)), MenuItem(self._leaderboard_account_option_label(), _sx(1195))]
         if self._leaderboard_is_authenticated():
-            items.append(MenuItem(self._leaderboard_logout_option_label(), "opt_leaderboard_logout"))
-        items.extend(
-            [
-                MenuItem("Gameplay Announcements", "opt_gameplay_announcements"),
-                MenuItem("Controls", "opt_controls"),
-                MenuItem(self._purchase_confirmation_option_label(), "opt_purchase_confirmation"),
-                MenuItem(self._exit_confirmation_option_label(), "opt_exit_confirmation"),
-                MenuItem("Back", "back"),
-            ]
-        )
+            items.append(MenuItem(self._leaderboard_logout_option_label(), _sx(1382)))
+        items.extend([MenuItem(_sx(809), _sx(1383)), MenuItem(_sx(754), _sx(1384)), MenuItem(self._purchase_confirmation_option_label(), _sx(1129)), MenuItem(self._exit_confirmation_option_label(), _sx(1128)), MenuItem(TEXT[_sx(429)], _sx(429))])
         return items
 
     def _refresh_announcements_menu_labels(self) -> None:
@@ -1780,7 +969,7 @@ class SubwayBlindGame:
         self.sapi_menu.items[4].label = self._sapi_pitch_option_label()
 
     def _refresh_loadout_menu_labels(self) -> None:
-        selected_action = ""
+        selected_action = _sx(2)
         if self.loadout_menu.items:
             selected_action = self.loadout_menu.items[min(self.loadout_menu.index, len(self.loadout_menu.items) - 1)].action
         self.loadout_menu.title = self._loadout_title()
@@ -1793,42 +982,23 @@ class SubwayBlindGame:
 
     def _refresh_game_over_menu(self) -> None:
         summary = self._game_over_summary
-        self.game_over_menu.items[0].label = f"Score: {int(summary['score'])}"
-        self.game_over_menu.items[1].label = f"Coins: {int(summary['coins'])}"
-        self.game_over_menu.items[2].label = f"Play Time: {format_play_time(summary['play_time_seconds'])}"
-        self.game_over_menu.items[3].label = f"Death reason: {summary['death_reason']}"
-        run_again_index = self._menu_index_for_action(self.game_over_menu, "game_over_retry")
-        main_menu_index = self._menu_index_for_action(self.game_over_menu, "game_over_main_menu")
-        self.game_over_menu.items[run_again_index].label = "Run again"
-        self.game_over_menu.items[main_menu_index].label = "Main menu"
+        self.game_over_menu.items[0].label = _sx(748).format(int(summary[_sx(968)]))
+        self.game_over_menu.items[1].label = _sx(666).format(int(summary[_sx(363)]))
+        self.game_over_menu.items[2].label = _sx(749).format(format_play_time(summary[_sx(969)]))
+        self.game_over_menu.items[3].label = _sx(750).format(summary[_sx(970)])
+        run_again_index = self._menu_index_for_action(self.game_over_menu, _sx(964))
+        main_menu_index = self._menu_index_for_action(self.game_over_menu, _sx(965))
+        self.game_over_menu.items[run_again_index].label = _sx(751)
+        self.game_over_menu.items[main_menu_index].label = _sx(752)
 
     @staticmethod
     def _empty_run_stats() -> dict[str, object]:
-        return {
-            "jumps": 0,
-            "rolls": 0,
-            "dodges": 0,
-            "powerups": 0,
-            "boxes": 0,
-            "clean_escapes": 0,
-            "powerup_usage": {key: 0 for key in RUN_POWERUP_LABELS},
-        }
+        return {_sx(364): 0, _sx(365): 0, _sx(366): 0, _sx(367): 0, _sx(368): 0, _sx(966): 0, _sx(967): {key: 0 for key in RUN_POWERUP_LABELS}}
 
     def _empty_game_over_summary(self) -> dict[str, object]:
-        return {
-            "score": 0,
-            "coins": 0,
-            "play_time_seconds": 0,
-            "death_reason": "Run ended.",
-            "game_version": APP_VERSION,
-            "difficulty": self._difficulty_key(),
-            "distance_meters": 0,
-            "clean_escapes": 0,
-            "revives_used": 0,
-            "powerup_usage": {},
-        }
+        return {_sx(968): 0, _sx(363): 0, _sx(969): 0, _sx(970): _sx(661), _sx(971): APP_VERSION, _sx(318): self._difficulty_key(), _sx(972): 0, _sx(966): 0, _sx(973): 0, _sx(967): {}}
 
-    def _record_run_metric(self, metric: str, amount: int = 1) -> None:
+    def _record_run_metric(self, metric: str, amount: int=1) -> None:
         if amount <= 0:
             return
         current_value = int(self._active_run_stats.get(metric, 0) or 0)
@@ -1837,17 +1007,17 @@ class SubwayBlindGame:
             return
         for quest in record_quest_metric(self.settings, metric, amount):
             if self._quest_changes_enabled():
-                self.audio.play("mission_reward", channel="ui")
-                self.speaker.speak(f"Quest ready: {quest.label}.", interrupt=False)
+                self.audio.play(_sx(100), channel=_sx(180))
+                self.speaker.speak(_sx(1358).format(quest.label), interrupt=False)
 
-    def _record_run_powerup(self, powerup_key: str, amount: int = 1) -> None:
+    def _record_run_powerup(self, powerup_key: str, amount: int=1) -> None:
         if amount <= 0:
             return
-        usage = self._active_run_stats.get("powerup_usage")
+        usage = self._active_run_stats.get(_sx(967))
         if not isinstance(usage, dict):
             usage = {key: 0 for key in RUN_POWERUP_LABELS}
-            self._active_run_stats["powerup_usage"] = usage
-        normalized_key = str(powerup_key or "").strip().lower()
+            self._active_run_stats[_sx(967)] = usage
+        normalized_key = str(powerup_key or _sx(2)).strip().lower()
         if normalized_key not in RUN_POWERUP_LABELS:
             return
         usage[normalized_key] = int(usage.get(normalized_key, 0) or 0) + int(amount)
@@ -1866,9 +1036,9 @@ class SubwayBlindGame:
     def _powerup_usage_label(self, powerup_usage: object) -> str:
         normalized_usage = self._compact_powerup_usage(powerup_usage)
         if not normalized_usage:
-            return "Power-ups: none"
-        segments = [f"{RUN_POWERUP_LABELS[key]} {normalized_usage[key]}" for key in RUN_POWERUP_LABELS if key in normalized_usage]
-        return "Power-ups: " + ", ".join(segments)
+            return _sx(974)
+        segments = [_sx(3).format(RUN_POWERUP_LABELS[key], normalized_usage[key]) for key in RUN_POWERUP_LABELS if key in normalized_usage]
+        return _sx(975) + _sx(996).join(segments)
 
     def _refresh_shop_menu_labels(self) -> None:
         self.shop_menu.title = self._shop_title()
@@ -1882,155 +1052,97 @@ class SubwayBlindGame:
 
     def _refresh_item_upgrade_menu_labels(self) -> None:
         self.item_upgrade_menu.title = self._item_upgrade_menu_title()
-        self.item_upgrade_menu.items = [
-            MenuItem(self._item_upgrade_list_item_label(definition.key), f"item_upgrade_open:{definition.key}")
-            for definition in item_upgrade_definitions()
-        ] + [MenuItem("Back", "back")]
+        self.item_upgrade_menu.items = [MenuItem(self._item_upgrade_list_item_label(definition.key), _sx(1605).format(definition.key)) for definition in item_upgrade_definitions()] + [MenuItem(TEXT[_sx(429)], _sx(429))]
 
     def _refresh_item_upgrade_detail_menu_labels(self, key: str) -> None:
         definition = item_upgrade_definition(key)
         self._item_upgrade_detail_key = definition.key
         next_cost = next_item_upgrade_cost(self.settings, definition.key)
-        upgrade_action = (
-            f"item_upgrade_purchase:{definition.key}"
-            if next_cost is not None
-            else f"item_upgrade_max_info:{definition.key}"
-        )
+        upgrade_action = _sx(976).format(definition.key) if next_cost is not None else _sx(977).format(definition.key)
         self.item_upgrade_detail_menu.title = definition.name
-        self.item_upgrade_detail_menu.items = [
-            MenuItem(self._item_upgrade_status_label(definition.key), f"item_upgrade_status_info:{definition.key}"),
-            MenuItem(self._item_upgrade_effect_label(definition.key), f"item_upgrade_effect_info:{definition.key}"),
-            MenuItem(self._item_upgrade_action_label(definition.key), upgrade_action),
-            MenuItem("Back", "back"),
-        ]
+        self.item_upgrade_detail_menu.items = [MenuItem(self._item_upgrade_status_label(definition.key), _sx(1198).format(definition.key)), MenuItem(self._item_upgrade_effect_label(definition.key), _sx(1199).format(definition.key)), MenuItem(self._item_upgrade_action_label(definition.key), upgrade_action), MenuItem(TEXT[_sx(429)], _sx(429))]
 
     def _refresh_character_menu_labels(self) -> None:
         self.character_menu.title = self._character_menu_title()
-        self.character_menu.items = [
-            MenuItem(self._character_list_item_label(definition.key), f"character_open:{definition.key}")
-            for definition in character_definitions()
-        ] + [MenuItem("Back", "back")]
+        self.character_menu.items = [MenuItem(self._character_list_item_label(definition.key), _sx(1606).format(definition.key)) for definition in character_definitions()] + [MenuItem(TEXT[_sx(429)], _sx(429))]
 
     def _refresh_character_detail_menu_labels(self, key: str) -> None:
         definition = character_definition(key)
         self._character_detail_key = definition.key
         self.character_detail_menu.title = definition.name
         if not character_unlocked(self.settings, key):
-            primary_action = f"character_unlock:{definition.key}"
+            primary_action = _sx(978).format(definition.key)
         elif selected_character_definition(self.settings).key == definition.key:
-            primary_action = f"character_active_info:{definition.key}"
+            primary_action = _sx(1201).format(definition.key)
         else:
-            primary_action = f"character_select:{definition.key}"
+            primary_action = _sx(1202).format(definition.key)
         next_upgrade_cost = next_character_upgrade_cost(self.settings, key)
         if not character_unlocked(self.settings, key):
-            upgrade_action = f"character_unlock_hint:{definition.key}"
+            upgrade_action = _sx(979).format(definition.key)
         elif next_upgrade_cost is None:
-            upgrade_action = f"character_max_info:{definition.key}"
+            upgrade_action = _sx(1204).format(definition.key)
         else:
-            upgrade_action = f"character_upgrade:{definition.key}"
-        self.character_detail_menu.items = [
-            MenuItem(self._character_status_label(definition.key), f"character_status_info:{definition.key}"),
-            MenuItem(self._character_perk_label(definition.key), f"character_perk_info:{definition.key}"),
-            MenuItem(self._character_primary_action_label(definition.key), primary_action),
-            MenuItem(self._character_upgrade_action_label(definition.key), upgrade_action),
-            MenuItem("Back", "back"),
-        ]
+            upgrade_action = _sx(1205).format(definition.key)
+        self.character_detail_menu.items = [MenuItem(self._character_status_label(definition.key), _sx(1206).format(definition.key)), MenuItem(self._character_perk_label(definition.key), _sx(1207).format(definition.key)), MenuItem(self._character_primary_action_label(definition.key), primary_action), MenuItem(self._character_upgrade_action_label(definition.key), upgrade_action), MenuItem(TEXT[_sx(429)], _sx(429))]
 
     def _refresh_board_menu_labels(self) -> None:
         self.board_menu.title = self._board_menu_title()
-        self.board_menu.items = [
-            MenuItem(self._board_list_item_label(definition.key), f"board_open:{definition.key}")
-            for definition in board_definitions()
-        ] + [MenuItem("Back", "back")]
+        self.board_menu.items = [MenuItem(self._board_list_item_label(definition.key), _sx(1607).format(definition.key)) for definition in board_definitions()] + [MenuItem(TEXT[_sx(429)], _sx(429))]
 
     def _refresh_board_detail_menu_labels(self, key: str) -> None:
         definition = board_definition(key)
         self._board_detail_key = definition.key
         self.board_detail_menu.title = definition.name
         if not board_unlocked(self.settings, definition.key):
-            primary_action = f"board_unlock:{definition.key}"
+            primary_action = _sx(980).format(definition.key)
         elif selected_board_definition(self.settings).key == definition.key:
-            primary_action = f"board_active_info:{definition.key}"
+            primary_action = _sx(1209).format(definition.key)
         else:
-            primary_action = f"board_select:{definition.key}"
-        self.board_detail_menu.items = [
-            MenuItem(self._board_status_label(definition.key), f"board_status_info:{definition.key}"),
-            MenuItem(self._board_power_label(definition.key), f"board_power_info:{definition.key}"),
-            MenuItem(self._board_action_label(definition.key), primary_action),
-            MenuItem("Back", "back"),
-        ]
+            primary_action = _sx(1210).format(definition.key)
+        self.board_detail_menu.items = [MenuItem(self._board_status_label(definition.key), _sx(1211).format(definition.key)), MenuItem(self._board_power_label(definition.key), _sx(1212).format(definition.key)), MenuItem(self._board_action_label(definition.key), primary_action), MenuItem(TEXT[_sx(429)], _sx(429))]
 
     def _refresh_collection_menu_labels(self) -> None:
         self.collection_menu.title = self._collection_menu_title()
-        self.collection_menu.items = [
-            MenuItem(self._collection_item_label(definition.key), f"collection_info:{definition.key}")
-            for definition in collection_definitions()
-        ] + [MenuItem("Back", "back")]
+        self.collection_menu.items = [MenuItem(self._collection_item_label(definition.key), _sx(1608).format(definition.key)) for definition in collection_definitions()] + [MenuItem(TEXT[_sx(429)], _sx(429))]
 
     def _refresh_events_menu_labels(self) -> None:
         ensure_event_state(self.settings)
         self.events_menu.title = self._events_menu_title()
-        self.events_menu.items = [
-            MenuItem(self._daily_event_info_label(), "event_info"),
-            MenuItem("Open Event Shop", "open_event_shop"),
-            MenuItem(self._daily_high_score_status_label(), "event_info"),
-            MenuItem(self._daily_high_score_action_label(), "claim_daily_high_score"),
-            MenuItem(self._coin_meter_status_label(), "event_info"),
-            MenuItem(self._coin_meter_action_label(), "claim_coin_meter"),
-            MenuItem(f"Mini Mystery Box: {'Ready' if daily_gift_available(self.settings) else 'Claimed Today'}", "event_info"),
-            MenuItem(self._shop_daily_gift_label(), "claim_daily_gift"),
-            MenuItem(self._login_calendar_status_label(), "event_info"),
-            MenuItem(self._login_calendar_action_label(), "claim_login_reward"),
-            MenuItem(self._word_hunt_status_label(), "event_info"),
-            MenuItem(self._season_hunt_status_label(), "event_info"),
-            MenuItem("Back", "back"),
-        ]
+        self.events_menu.items = [MenuItem(self._daily_event_info_label(), _sx(1213)), MenuItem(_sx(1214), _sx(1215)), MenuItem(self._daily_high_score_status_label(), _sx(1213)), MenuItem(self._daily_high_score_action_label(), _sx(1216)), MenuItem(self._coin_meter_status_label(), _sx(1213)), MenuItem(self._coin_meter_action_label(), _sx(1217)), MenuItem(_sx(1218).format(_sx(1189) if daily_gift_available(self.settings) else _sx(1852)), _sx(1213)), MenuItem(self._shop_daily_gift_label(), _sx(1219)), MenuItem(self._login_calendar_status_label(), _sx(1213)), MenuItem(self._login_calendar_action_label(), _sx(1220)), MenuItem(self._word_hunt_status_label(), _sx(1213)), MenuItem(self._season_hunt_status_label(), _sx(1213)), MenuItem(TEXT[_sx(429)], _sx(429))]
         self._refresh_event_shop_menu_labels()
 
     def _refresh_event_shop_menu_labels(self) -> None:
         self.event_shop_menu.title = self._event_shop_title()
-        self.event_shop_menu.items = [
-            MenuItem(self._event_shop_character_label(), "event_shop_buy_character"),
-            MenuItem(self._event_shop_board_label(), "event_shop_buy_board"),
-            MenuItem(self._event_shop_key_label(), "event_shop_buy_key"),
-            MenuItem(self._event_shop_hoverboard_label(), "event_shop_buy_hoverboards"),
-            MenuItem(self._event_shop_headstart_label(), "event_shop_buy_headstart"),
-            MenuItem(self._event_shop_score_booster_label(), "event_shop_buy_score_booster"),
-            MenuItem(self._event_shop_super_box_label(), "event_shop_buy_super_box"),
-            MenuItem("Back", "back"),
-        ]
+        self.event_shop_menu.items = [MenuItem(self._event_shop_character_label(), _sx(1221)), MenuItem(self._event_shop_board_label(), _sx(1222)), MenuItem(self._event_shop_key_label(), _sx(1223)), MenuItem(self._event_shop_hoverboard_label(), _sx(1224)), MenuItem(self._event_shop_headstart_label(), _sx(1225)), MenuItem(self._event_shop_score_booster_label(), _sx(1226)), MenuItem(self._event_shop_super_box_label(), _sx(1227)), MenuItem(TEXT[_sx(429)], _sx(429))]
 
     def _spend_event_coins(self, cost: int) -> bool:
         ensure_event_state(self.settings)
         safe_cost = max(1, int(cost))
         current = self._event_coin_balance()
         if current < safe_cost:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak(
-                f"Not enough Event Coins. {safe_cost} needed, {current} available.",
-                interrupt=True,
-            )
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1228).format(safe_cost, current), interrupt=True)
             return False
-        self.settings["event_state"]["event_coins"] = current - safe_cost
-        self.audio.play("gui_cash", channel="ui")
+        self.settings[_sx(352)][_sx(597)] = current - safe_cost
+        self.audio.play(_sx(105), channel=_sx(180))
         return True
 
     def _buy_event_shop_character(self) -> None:
         offer_key = self._event_shop_character_offer_key()
         if offer_key is None:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("All season character offers are already unlocked.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1229), interrupt=True)
             return
         definition = character_definition(offer_key)
         if character_unlocked(self.settings, offer_key):
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak(f"{definition.name} is already unlocked.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1230).format(definition.name), interrupt=True)
             return
         cost = self._event_shop_character_offer_cost(offer_key)
         if not self._spend_event_coins(cost):
             return
         previous_completed = completed_collection_keys(self.settings)
-        self.settings["character_progress"][definition.key]["unlocked"] = True
+        self.settings[_sx(240)][definition.key][_sx(239)] = True
         self._sync_character_progress()
         self._refresh_character_menu_labels()
         self._refresh_character_detail_menu_labels(definition.key)
@@ -2039,26 +1151,26 @@ class SubwayBlindGame:
         self._refresh_shop_menu_labels()
         self._refresh_events_menu_labels()
         self._persist_settings()
-        self.audio.play("unlock", channel="ui3")
-        self.speaker.speak(f"{definition.name} unlocked with Event Coins.", interrupt=True)
+        self.audio.play(_sx(108), channel=_sx(1231))
+        self.speaker.speak(_sx(981).format(definition.name), interrupt=True)
         self._announce_collection_unlocks(previous_completed)
 
     def _buy_event_shop_board(self) -> None:
         offer_key = self._event_shop_board_offer_key()
         if offer_key is None:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("All season board offers are already unlocked.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1233), interrupt=True)
             return
         definition = board_definition(offer_key)
         if board_unlocked(self.settings, offer_key):
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak(f"{definition.name} is already unlocked.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1230).format(definition.name), interrupt=True)
             return
         cost = self._event_shop_board_offer_cost(offer_key)
         if not self._spend_event_coins(cost):
             return
         previous_completed = completed_collection_keys(self.settings)
-        self.settings["board_progress"][definition.key]["unlocked"] = True
+        self.settings[_sx(202)][definition.key][_sx(239)] = True
         self._sync_character_progress()
         self._refresh_board_menu_labels()
         self._refresh_board_detail_menu_labels(definition.key)
@@ -2066,8 +1178,8 @@ class SubwayBlindGame:
         self._refresh_me_menu_labels()
         self._refresh_events_menu_labels()
         self._persist_settings()
-        self.audio.play("unlock", channel="ui3")
-        self.speaker.speak(f"{definition.name} unlocked with Event Coins.", interrupt=True)
+        self.audio.play(_sx(108), channel=_sx(1231))
+        self.speaker.speak(_sx(981).format(definition.name), interrupt=True)
         self._announce_collection_unlocks(previous_completed)
 
     def _buy_event_shop_reward(self, cost: int, reward: dict[str, object], source: str) -> None:
@@ -2081,39 +1193,28 @@ class SubwayBlindGame:
     def _refresh_missions_hub_menu_labels(self) -> None:
         ensure_quest_state(self.settings)
         self.missions_hub_menu.title = self._missions_hub_title()
-        self.missions_hub_menu.items = [
-            MenuItem(self._quest_menu_title(), "open_quests"),
-            MenuItem(self._mission_status_text(), "open_mission_set"),
-            MenuItem(self._achievements_menu_title(), "open_achievements"),
-            MenuItem("Back", "back"),
-        ]
+        self.missions_hub_menu.items = [MenuItem(self._quest_menu_title(), _sx(1234)), MenuItem(self._mission_status_text(), _sx(1235)), MenuItem(self._achievements_menu_title(), _sx(1236)), MenuItem(TEXT[_sx(429)], _sx(429))]
 
     def _refresh_mission_set_menu_labels(self) -> None:
         ensure_progression_state(self.settings)
         self.mission_set_menu.title = self._mission_set_menu_title()
-        items = [
-            MenuItem(self._mission_goal_item_label(goal), "mission_info")
-            for goal in self._mission_goals()
-        ]
-        items.append(MenuItem(f"Permanent Multiplier: x{1 + int(self.settings.get('mission_multiplier_bonus', 0))}", "mission_info"))
-        items.append(MenuItem("Back", "back"))
+        items = [MenuItem(self._mission_goal_item_label(goal), _sx(1237)) for goal in self._mission_goals()]
+        items.append(MenuItem(_sx(1238).format(1 + int(self.settings.get(_sx(340), 0))), _sx(1237)))
+        items.append(MenuItem(TEXT[_sx(429)], _sx(429)))
         self.mission_set_menu.items = items
 
     def _refresh_quest_menu_labels(self) -> None:
         ensure_quest_state(self.settings)
         self.quests_menu.title = self._quest_menu_title()
-        items = [
-            MenuItem(self._quest_meter_label(), "quest_info"),
-            MenuItem(self._quest_meter_action_label(), "claim_quest_meter"),
-        ]
+        items = [MenuItem(self._quest_meter_label(), _sx(1239)), MenuItem(self._quest_meter_action_label(), _sx(1240))]
         for quest in daily_quests():
-            action = f"claim_quest:{quest.key}" if quest_completed(self.settings, quest) and not quest_claimed(self.settings, quest) else "quest_info"
+            action = _sx(1241).format(quest.key) if quest_completed(self.settings, quest) and (not quest_claimed(self.settings, quest)) else _sx(1239)
             items.append(MenuItem(self._quest_item_label(quest.key), action))
         for quest in seasonal_quests():
-            action = f"claim_quest:{quest.key}" if quest_completed(self.settings, quest) and not quest_claimed(self.settings, quest) else "quest_info"
+            action = _sx(1241).format(quest.key) if quest_completed(self.settings, quest) and (not quest_claimed(self.settings, quest)) else _sx(1239)
             items.append(MenuItem(self._quest_item_label(quest.key), action))
-        items.append(MenuItem(self._daily_progress_reset_label(), "reset_daily_progress"))
-        items.append(MenuItem("Back", "back"))
+        items.append(MenuItem(self._daily_progress_reset_label(), _sx(1242)))
+        items.append(MenuItem(TEXT[_sx(429)], _sx(429)))
         self.quests_menu.items = items
 
     def _refresh_me_menu_labels(self) -> None:
@@ -2122,13 +1223,7 @@ class SubwayBlindGame:
         self.me_menu.title = self._me_menu_title()
         completed = len(completed_collection_keys(self.settings))
         total = len(collection_definitions())
-        self.me_menu.items = [
-            MenuItem(self._character_menu_title(), "open_characters"),
-            MenuItem(self._board_menu_title(), "open_boards"),
-            MenuItem(self._item_upgrade_menu_title(), "open_item_upgrades"),
-            MenuItem(f"Collections   {completed}/{total}", "open_collections"),
-            MenuItem("Back", "back"),
-        ]
+        self.me_menu.items = [MenuItem(self._character_menu_title(), _sx(1243)), MenuItem(self._board_menu_title(), _sx(1244)), MenuItem(self._item_upgrade_menu_title(), _sx(1245)), MenuItem(_sx(732).format(completed, total), _sx(1246)), MenuItem(TEXT[_sx(429)], _sx(429))]
 
     def _howto_topics(self) -> tuple[HelpTopic, ...]:
         if self._showing_upgrade_help:
@@ -2137,9 +1232,7 @@ class SubwayBlindGame:
 
     def _refresh_howto_menu_labels(self) -> None:
         self.howto_menu.title = self._howto_menu_title()
-        self.howto_menu.items = [MenuItem(topic.label, f"howto:{topic.key}") for topic in self._howto_topics()] + [
-            MenuItem("Back", "back")
-        ]
+        self.howto_menu.items = [MenuItem(topic.label, _sx(1615).format(topic.key)) for topic in self._howto_topics()] + [MenuItem(TEXT[_sx(429)], _sx(429))]
 
     def _help_topic_for_key(self, key: str) -> HelpTopic | None:
         for topic in UPGRADE_HELP_TOPICS.get(APP_VERSION, ()):
@@ -2164,32 +1257,30 @@ class SubwayBlindGame:
     def _open_help_topic(self, key: str) -> None:
         topic = self._help_topic_for_key(key)
         if topic is None:
-            self._play_menu_feedback("menuedge")
+            self._play_menu_feedback(_sx(52))
             return
         self._selected_help_topic = topic
         self.help_topic_menu.title = topic.label
-        self.help_topic_menu.items = [
-            MenuItem(segment, "copy_info_line") for segment in help_topic_segments(topic, self._gameplay_controls_summary())
-        ] + [MenuItem("Copy All", "copy_info_all"), MenuItem("Back", "back")]
+        self.help_topic_menu.items = [MenuItem(segment, _sx(1395)) for segment in help_topic_segments(topic, self._gameplay_controls_summary())] + [MenuItem(_sx(1616), _sx(1396)), MenuItem(TEXT[_sx(429)], _sx(429))]
         self._set_active_menu(self.help_topic_menu)
 
     def _open_info_dialog(self, content: InfoDialogContent, menu: Menu) -> None:
         self._selected_info_dialog = content
         menu.title = content.title
-        menu.items = [MenuItem(line, "copy_info_line") for line in content.lines] + [MenuItem("Copy All", "copy_info_all"), MenuItem("Back", "back")]
+        menu.items = [MenuItem(line, _sx(1395)) for line in content.lines] + [MenuItem(_sx(1616), _sx(1396)), MenuItem(TEXT[_sx(429)], _sx(429))]
         self._set_active_menu(menu)
 
     def _copy_menu_text(self, text: str, success_message: str) -> bool:
         if not text:
-            self._play_menu_feedback("menuedge")
-            self.speaker.speak("Nothing available to copy.", interrupt=True)
+            self._play_menu_feedback(_sx(52))
+            self.speaker.speak(_sx(1247), interrupt=True)
             return True
         if copy_text_to_clipboard(text):
-            self._play_menu_feedback("confirm")
+            self._play_menu_feedback(_sx(56))
             self.speaker.speak(success_message, interrupt=True)
             return True
-        self._play_menu_feedback("menuedge")
-        self.speaker.speak("Unable to copy text to the clipboard.", interrupt=True)
+        self._play_menu_feedback(_sx(52))
+        self.speaker.speak(_sx(982), interrupt=True)
         return True
 
     def _selected_info_menu_lines(self, menu: Menu) -> tuple[str, ...]:
@@ -2204,51 +1295,48 @@ class SubwayBlindGame:
     def _selected_info_copy_all_text(self, menu: Menu) -> str:
         lines = self._selected_info_menu_lines(menu)
         if not lines:
-            return ""
-        return "\n".join((menu.title, "", *lines))
+            return _sx(2)
+        return _sx(652).join((menu.title, _sx(2), *lines))
 
     @staticmethod
     def _selected_info_copy_all_message(menu: Menu) -> str:
-        return f"{menu.title} copied to clipboard."
+        return _sx(753).format(menu.title)
 
     def _mark_current_version_seen(self) -> None:
-        seen_version = str(self.settings.get("last_seen_version", "") or "").strip()
+        seen_version = str(self.settings.get(_sx(317), _sx(2)) or _sx(2)).strip()
         if not seen_version:
-            self.settings["last_seen_version"] = APP_VERSION
+            self.settings[_sx(317)] = APP_VERSION
             return
         if version_key(APP_VERSION) <= version_key(seen_version):
-            self.settings["last_seen_version"] = APP_VERSION
+            self.settings[_sx(317)] = APP_VERSION
             return
-        self.settings["last_seen_version"] = APP_VERSION
+        self.settings[_sx(317)] = APP_VERSION
 
     def _achievement_item_label(self, key: str) -> str:
         progress = achievement_progress(self.settings)
-        unlocked = set(self.settings.get("achievements_unlocked", []))
+        unlocked = set(self.settings.get(_sx(350), []))
         for achievement in achievement_definitions():
             if achievement.key != key:
                 continue
             current = min(int(progress.get(achievement.metric, 0)), achievement.target)
-            status = "Unlocked" if key in unlocked else f"{current}/{achievement.target}"
-            return f"{achievement.label}   {status}"
+            status = _sx(927) if key in unlocked else _sx(1248).format(current, achievement.target)
+            return _sx(788).format(achievement.label, status)
         return key
 
     def _refresh_achievements_menu_labels(self) -> None:
         self.achievements_menu.title = self._achievements_menu_title()
-        self.achievements_menu.items = [
-            MenuItem(self._achievement_item_label(achievement.key), f"achievement:{achievement.key}")
-            for achievement in achievement_definitions()
-        ] + [MenuItem("Back", "back")]
+        self.achievements_menu.items = [MenuItem(self._achievement_item_label(achievement.key), _sx(1617).format(achievement.key)) for achievement in achievement_definitions()] + [MenuItem(TEXT[_sx(429)], _sx(429))]
 
     def _announce_achievement_unlocks(self) -> None:
         unlocks = newly_unlocked_achievements(self.settings)
         if not unlocks:
             return
-        self.audio.play("unlock", channel="ui")
+        self.audio.play(_sx(108), channel=_sx(180))
         for achievement in unlocks:
-            self.speaker.speak(f"Achievement unlocked: {achievement.label}.", interrupt=False)
+            self.speaker.speak(_sx(1249).format(achievement.label), interrupt=False)
         self._refresh_achievements_menu_labels()
 
-    def _record_achievement_metric(self, metric: str, amount: int = 1) -> None:
+    def _record_achievement_metric(self, metric: str, amount: int=1) -> None:
         record_achievement_progress(self.settings, metric, amount)
         self._announce_achievement_unlocks()
 
@@ -2261,63 +1349,55 @@ class SubwayBlindGame:
         new_keys = [key for key in current_completed if key not in previous_completed]
         if not new_keys:
             return
-        self.settings["collections_completed"] = list(current_completed)
-        self.audio.play("unlock", channel="ui")
-        self.audio.play("mission_reward", channel="ui2")
+        self.settings[_sx(300)] = list(current_completed)
+        self.audio.play(_sx(108), channel=_sx(180))
+        self.audio.play(_sx(100), channel=_sx(1250))
         for key in new_keys:
-            definition = next(item for item in collection_definitions() if item.key == key)
-            self.speaker.speak(
-                f"Collection complete: {definition.name}. {collection_bonus_summary(definition)}.",
-                interrupt=False,
-            )
+            definition = next((item for item in collection_definitions() if item.key == key))
+            self.speaker.speak(_sx(1251).format(definition.name, collection_bonus_summary(definition)), interrupt=False)
         self._sync_character_progress()
         self._refresh_collection_menu_labels()
         self._refresh_me_menu_labels()
 
     def _build_controls_menu(self) -> None:
         self._sync_selected_binding_device()
-        items = [
-            MenuItem(f"Active Input: {self.controls.current_input_label()}", "announce_active_input"),
-            MenuItem(f"Binding Profile: {self._selected_binding_profile_label()}", "select_binding_profile"),
-            MenuItem("Customize Bindings", "open_selected_bindings"),
-            MenuItem(f"Reset {self._selected_binding_profile_label()}", "reset_selected_bindings"),
-        ]
-        items.append(MenuItem("Back", "back"))
+        items = [MenuItem(_sx(1252).format(self.controls.current_input_label()), _sx(1253)), MenuItem(_sx(1254).format(self._selected_binding_profile_label()), _sx(984)), MenuItem(_sx(1255), _sx(1256)), MenuItem(_sx(1257).format(self._selected_binding_profile_label()), _sx(1258))]
+        items.append(MenuItem(TEXT[_sx(429)], _sx(429)))
         self.controls_menu.items = items
-        self.controls_menu.title = "Controls"
+        self.controls_menu.title = _sx(754)
 
     def _sync_selected_binding_device(self) -> None:
         if self.controls.active_controller() is None:
-            self._selected_binding_device = "keyboard"
+            self._selected_binding_device = _sx(563)
             return
-        if self._selected_binding_device not in {"keyboard", "controller"}:
-            self._selected_binding_device = "controller"
+        if self._selected_binding_device not in {_sx(563), _sx(565)}:
+            self._selected_binding_device = _sx(565)
             return
-        if self.controls.last_input_source == "controller":
-            self._selected_binding_device = "controller"
+        if self.controls.last_input_source == _sx(565):
+            self._selected_binding_device = _sx(565)
 
     def _selected_binding_profile_label(self) -> str:
-        if self._selected_binding_device == "controller" and self.controls.active_controller() is not None:
+        if self._selected_binding_device == _sx(565) and self.controls.active_controller() is not None:
             return family_label(self.controls.current_controller_family())
-        return "Keyboard"
+        return _sx(573)
 
     def _cycle_selected_binding_device(self, direction: int) -> None:
         if direction not in (-1, 1):
             return
-        available_devices = ["keyboard"]
+        available_devices = [_sx(563)]
         if self.controls.active_controller() is not None:
-            available_devices.append("controller")
+            available_devices.append(_sx(565))
         if len(available_devices) == 1:
-            self._play_menu_feedback("menuedge")
+            self._play_menu_feedback(_sx(52))
             return
         try:
             current_index = available_devices.index(self._selected_binding_device)
         except ValueError:
             current_index = 0
         self._selected_binding_device = available_devices[(current_index + direction) % len(available_devices)]
-        self._play_menu_feedback("confirm")
+        self._play_menu_feedback(_sx(56))
         self._build_controls_menu()
-        profile_index = self._menu_index_for_action(self.controls_menu, "select_binding_profile")
+        profile_index = self._menu_index_for_action(self.controls_menu, _sx(984))
         self.speaker.speak(self.controls_menu.items[profile_index].label, interrupt=True)
 
     def _build_keyboard_bindings_menu(self) -> None:
@@ -2326,12 +1406,12 @@ class SubwayBlindGame:
             label = action_label(action_key)
             bound_key = self.controls.keyboard_binding_for_action(action_key)
             binding = keyboard_binding_label(bound_key)
-            items.append(MenuItem(f"{label}: {binding}", f"bind_keyboard:{action_key}"))
-        items.append(MenuItem("Reset to Defaults", "reset_keyboard_bindings"))
-        items.append(MenuItem("Back", "back"))
+            items.append(MenuItem(_sx(564).format(label, binding), _sx(1623).format(action_key)))
+        items.append(MenuItem(_sx(1259), _sx(1260)))
+        items.append(MenuItem(TEXT[_sx(429)], _sx(429)))
         self.keyboard_bindings_menu.items = items
-        keyboard_layout_name = str(self.settings.get("keyboard_layout_name", "") or "").strip()
-        self.keyboard_bindings_menu.title = f"Keyboard Bindings ({keyboard_layout_name})" if keyboard_layout_name else "Keyboard Bindings"
+        keyboard_layout_name = str(self.settings.get(_sx(360), _sx(2)) or _sx(2)).strip()
+        self.keyboard_bindings_menu.title = _sx(985).format(keyboard_layout_name) if keyboard_layout_name else _sx(815)
 
     def _build_controller_bindings_menu(self) -> None:
         family = self.controls.current_controller_family()
@@ -2339,11 +1419,11 @@ class SubwayBlindGame:
         for action_key in CONTROLLER_ACTION_ORDER:
             label = action_label(action_key)
             binding = controller_binding_label(self.controls.controller_binding_for_action(action_key, family), family)
-            items.append(MenuItem(f"{label}: {binding}", f"bind_controller:{action_key}"))
-        items.append(MenuItem("Reset to Recommended", "reset_controller_bindings"))
-        items.append(MenuItem("Back", "back"))
+            items.append(MenuItem(_sx(564).format(label, binding), _sx(1624).format(action_key)))
+        items.append(MenuItem(_sx(1263), _sx(1264)))
+        items.append(MenuItem(TEXT[_sx(429)], _sx(429)))
         self.controller_bindings_menu.items = items
-        self.controller_bindings_menu.title = f"{family_label(family)} Bindings"
+        self.controller_bindings_menu.title = _sx(755).format(family_label(family))
 
     def _refresh_control_menus(self) -> None:
         self._build_controls_menu()
@@ -2360,7 +1440,7 @@ class SubwayBlindGame:
     def _refresh_learn_sound_description(self) -> None:
         entry = self._current_learn_sound_entry()
         if entry is None:
-            self._learn_sound_description = "Return to the main menu."
+            self._learn_sound_description = _sx(987)
             return
         self._learn_sound_description = entry.description
 
@@ -2371,8 +1451,8 @@ class SubwayBlindGame:
     def _start_headstart_audio(self) -> None:
         if self.player.headstart <= 0:
             return
-        self.audio.play("intro_shake", loop=True, channel=HEADSTART_SHAKE_CHANNEL, gain=0.84)
-        self.audio.play("intro_spray", loop=True, channel=HEADSTART_SPRAY_CHANNEL, gain=0.92)
+        self.audio.play(_sx(103), loop=True, channel=HEADSTART_SHAKE_CHANNEL, gain=0.84)
+        self.audio.play(_sx(104), loop=True, channel=HEADSTART_SPRAY_CHANNEL, gain=0.92)
 
     def _stop_headstart_audio(self) -> None:
         self.audio.stop(HEADSTART_SHAKE_CHANNEL)
@@ -2381,15 +1461,10 @@ class SubwayBlindGame:
     def _play_learn_sound_preview(self, entry: LearnSoundEntry) -> None:
         self._stop_learn_sound_preview()
         self._learn_sound_description = entry.description
-        self.audio.play(
-            entry.key,
-            loop=entry.loop,
-            channel=LEARN_SOUND_PREVIEW_CHANNEL,
-            gain=entry.gain,
-        )
+        self.audio.play(entry.key, loop=entry.loop, channel=LEARN_SOUND_PREVIEW_CHANNEL, gain=entry.gain)
         if entry.loop:
             self._learn_sound_preview_timer = LEARN_SOUND_LOOP_PREVIEW_DURATION
-        self.speaker.speak(f"{entry.label}. {entry.description}", interrupt=True)
+        self.speaker.speak(_sx(988).format(entry.label, entry.description), interrupt=True)
 
     def _update_learn_sound_preview(self, delta_time: float) -> None:
         if self._learn_sound_preview_timer <= 0:
@@ -2402,7 +1477,7 @@ class SubwayBlindGame:
         if self.active_menu is not None:
             self.active_menu.play_feedback(key)
             return
-        self.audio.play(key, channel="ui")
+        self.audio.play(key, channel=_sx(180))
 
     def _update_option_index(self, action: str) -> int:
         for index, item in enumerate(self.options_menu.items):
@@ -2417,198 +1492,110 @@ class SubwayBlindGame:
         return 0
 
     def _meters_enabled(self) -> bool:
-        return bool(self.settings.get("meter_announcements_enabled", False))
+        return bool(self.settings.get(_sx(321), False))
 
     def _coin_counters_enabled(self) -> bool:
-        return bool(self.settings.get("coin_counters_enabled", False))
+        return bool(self.settings.get(_sx(322), False))
 
     def _quest_changes_enabled(self) -> bool:
-        return bool(self.settings.get("quest_changes_enabled", False))
+        return bool(self.settings.get(_sx(323), False))
 
     def _pause_on_focus_loss_enabled(self) -> bool:
-        return bool(self.settings.get("pause_on_focus_loss_enabled", True))
+        return bool(self.settings.get(_sx(324), True))
 
     def _practice_speed_scaling_enabled(self) -> bool:
-        return bool(self.settings.get("practice_speed_scaling_enabled", False))
+        return bool(self.settings.get(_sx(325), False))
 
     def _practice_hazard_target_setting(self) -> int:
         try:
-            target_value = int(self.settings.get("practice_hazard_target", PRACTICE_TARGET_HAZARDS))
+            target_value = int(self.settings.get(_sx(326), PRACTICE_TARGET_HAZARDS))
         except (TypeError, ValueError):
             target_value = PRACTICE_TARGET_HAZARDS
         return max(PRACTICE_TARGET_HAZARDS_MIN, min(PRACTICE_TARGET_HAZARDS_MAX, target_value))
 
     def _main_menu_descriptions_enabled(self) -> bool:
-        return bool(self.settings.get("main_menu_descriptions_enabled", True))
+        return bool(self.settings.get(_sx(327), True))
 
     def _exit_confirmation_enabled(self) -> bool:
-        return bool(self.settings.get("confirm_exit_enabled", True))
+        return bool(self.settings.get(_sx(328), True))
 
     def _purchase_confirmation_enabled(self) -> bool:
-        return bool(self.settings.get("confirm_purchase_enabled", True))
+        return bool(self.settings.get(_sx(329), True))
 
     def _main_menu_items(self) -> list[MenuItem]:
-        return [
-            MenuItem(
-                "Start Game",
-                "start",
-                "Set your loadout, then launch a new run when you are ready to hit the tracks.",
-            ),
-            MenuItem(
-                "Practice Lane",
-                "practice_lane",
-                "Open Practice Setup, then run obstacle-only training with optional speed scaling and no economy pressure.",
-            ),
-            MenuItem(
-                "Events",
-                "events",
-                "Open the live event hub for Daily High Score, Coin Meter, the login calendar, and daily rewards.",
-            ),
-            MenuItem(
-                "Missions",
-                "missions_hub",
-                "Review mission sets, quests, and achievement progress from a single progression hub.",
-            ),
-            MenuItem(
-                "Me",
-                "me",
-                "Manage your active runner, hoverboard, upgrades, and collection bonuses.",
-            ),
-            MenuItem(
-                "Shop",
-                "shop",
-                "Spend banked coins on hoverboards, boosters, boxes, and your free daily gift.",
-            ),
-            MenuItem(
-                "Leaderboard",
-                "leaderboard",
-                "Connect to the online leaderboard, browse top players, and inspect published run history.",
-            ),
-            MenuItem(
-                "Wheel Spin",
-                "wheel_spin",
-                "Spin the weekly special-item wheel up to two times each week after signing in.",
-            ),
-            MenuItem(
-                "Report a Bug",
-                "issue_reports",
-                "Send a bug report through the online issue system and browse submitted reports by status.",
-            ),
-            MenuItem(
-                "What's New",
-                "whats_new",
-                "Hear the latest update notes, balance changes, and new features in this build.",
-            ),
-            MenuItem(
-                "Options",
-                "options",
-                "Adjust audio, speech, controls, and accessibility settings before your next run.",
-            ),
-            MenuItem(
-                "How to Play",
-                "howto",
-                "Browse movement, hazard, reward, and progression guidance one topic at a time.",
-            ),
-            MenuItem(
-                "Learn Game Sounds",
-                "learn_sounds",
-                "Preview essential gameplay sounds so you can recognize danger, rewards, and powerups instantly.",
-            ),
-            MenuItem(
-                "Check for Updates",
-                "check_updates",
-                "Search for a newer release and install it when an update is available.",
-            ),
-            MenuItem(
-                "Exit",
-                "quit",
-                "Close the game and return to desktop.",
-            ),
-        ]
+        return [MenuItem(_sx(1265), _sx(430), _sx(1266)), MenuItem(_sx(1267), _sx(1268), _sx(1269)), MenuItem(_sx(803), _sx(1270), _sx(1271)), MenuItem(_sx(805), _sx(1272), _sx(1273)), MenuItem(_sx(808), _sx(1274), _sx(1275)), MenuItem(_sx(665), _sx(1276), _sx(1277)), MenuItem(_sx(811), _sx(1278), _sx(1279)), MenuItem(_sx(703), _sx(99), _sx(1280)), MenuItem(_sx(813), _sx(1281), _sx(1282)), MenuItem(_sx(820), _sx(1283), _sx(1284)), MenuItem(_sx(479), _sx(1285), _sx(1286)), MenuItem(_sx(818), _sx(1287), _sx(1288)), MenuItem(_sx(817), _sx(1289), _sx(1290)), MenuItem(_sx(1291), _sx(1292), _sx(1293)), MenuItem(_sx(1294), _sx(768), _sx(1295))]
 
     def _selected_main_menu_description(self) -> str:
-        if self.active_menu != self.main_menu or not self._main_menu_descriptions_enabled() or not self.main_menu.items:
-            return ""
+        if self.active_menu != self.main_menu or not self._main_menu_descriptions_enabled() or (not self.main_menu.items):
+            return _sx(2)
         return self.main_menu.items[self.main_menu.index].description.strip()
 
     def _refresh_update_menu(self, result: UpdateCheckResult) -> None:
-        latest_version = result.latest_version or "Unknown"
+        latest_version = result.latest_version or _sx(989)
         if self.packaged_build:
-            self.update_menu.title = f"Update Required   {APP_VERSION} -> {latest_version}"
-            self._update_status_message = (
-                f"A newer version is available. Current version {APP_VERSION}. Latest version {latest_version}."
-            )
+            self.update_menu.title = _sx(990).format(APP_VERSION, latest_version)
+            self._update_status_message = _sx(991).format(APP_VERSION, latest_version)
         else:
-            self.update_menu.title = f"Update Available   {APP_VERSION} -> {latest_version}"
-            self._update_status_message = (
-                f"A newer release is available. This source checkout reports version {APP_VERSION}. "
-                f"Latest release {latest_version}."
-            )
-        self._update_release_notes = (
-            result.release.notes.strip() if result.release is not None and result.release.notes.strip() else "No release notes were provided."
-        )
+            self.update_menu.title = _sx(992).format(APP_VERSION, latest_version)
+            self._update_status_message = _sx(993).format(APP_VERSION, latest_version)
+        self._update_release_notes = result.release.notes.strip() if result.release is not None and result.release.notes.strip() else _sx(657)
         self._update_progress_percent = 0.0
-        self._update_progress_message = ""
-        self._update_progress_stage = "idle"
+        self._update_progress_message = _sx(2)
+        self._update_progress_stage = _sx(658)
         self._update_progress_announced_bucket = -1
         self._update_install_thread = None
         self._update_install_result = None
         self._update_restart_script_path = None
-        self._update_install_error = ""
+        self._update_install_error = _sx(2)
         self._update_ready_announced = False
         has_zip_package = self.packaged_build and bool(result.release and self.updater.has_installable_package(result.release))
-        self.update_menu.items[0].label = "Download and Install Update" if has_zip_package else "Open Release Page"
-        self.update_menu.items[0].action = "download_update" if has_zip_package else "open_release_page"
-        self.update_menu.items[1].label = "Open Release Page"
-        self.update_menu.items[1].action = "open_release_page"
-        self.update_menu.items[2].label = "Back" if not self.packaged_build else "Quit Game"
-        self.update_menu.items[2].action = "back" if not self.packaged_build else "quit"
+        self.update_menu.items[0].label = _sx(994) if has_zip_package else _sx(756)
+        self.update_menu.items[0].action = _sx(995) if has_zip_package else _sx(757)
+        self.update_menu.items[1].label = _sx(756)
+        self.update_menu.items[1].action = _sx(757)
+        self.update_menu.items[2].label = _sx(489) if not self.packaged_build else _sx(767)
+        self.update_menu.items[2].action = _sx(429) if not self.packaged_build else _sx(768)
 
     def _menu_navigation_hint(self) -> str:
-        up = keyboard_binding_label(self.controls.keyboard_binding_for_action("menu_up"))
-        down = keyboard_binding_label(self.controls.keyboard_binding_for_action("menu_down"))
-        confirm = keyboard_binding_label(self.controls.keyboard_binding_for_action("menu_confirm"))
-        back = keyboard_binding_label(self.controls.keyboard_binding_for_action("menu_back"))
-        if self.controls.last_input_source == "controller" and self.controls.active_controller() is not None:
+        up = keyboard_binding_label(self.controls.keyboard_binding_for_action(_sx(517)))
+        down = keyboard_binding_label(self.controls.keyboard_binding_for_action(_sx(520)))
+        confirm = keyboard_binding_label(self.controls.keyboard_binding_for_action(_sx(523)))
+        back = keyboard_binding_label(self.controls.keyboard_binding_for_action(_sx(526)))
+        if self.controls.last_input_source == _sx(565) and self.controls.active_controller() is not None:
             family = self.controls.current_controller_family()
-            up = controller_binding_label(self.controls.controller_binding_for_action("menu_up", family), family)
-            down = controller_binding_label(self.controls.controller_binding_for_action("menu_down", family), family)
-            confirm = controller_binding_label(self.controls.controller_binding_for_action("menu_confirm", family), family)
-            back = controller_binding_label(self.controls.controller_binding_for_action("menu_back", family), family)
-        return f"Use {up}/{down}, {confirm} to select, {back} to go back."
+            up = controller_binding_label(self.controls.controller_binding_for_action(_sx(517), family), family)
+            down = controller_binding_label(self.controls.controller_binding_for_action(_sx(520), family), family)
+            confirm = controller_binding_label(self.controls.controller_binding_for_action(_sx(523), family), family)
+            back = controller_binding_label(self.controls.controller_binding_for_action(_sx(526), family), family)
+        return _sx(758).format(up, down, confirm, back)
 
     def _option_adjustment_hint(self) -> str:
-        decrease = keyboard_binding_label(self.controls.keyboard_binding_for_action("option_decrease"))
-        increase = keyboard_binding_label(self.controls.keyboard_binding_for_action("option_increase"))
-        if self.controls.last_input_source == "controller" and self.controls.active_controller() is not None:
+        decrease = keyboard_binding_label(self.controls.keyboard_binding_for_action(_sx(528)))
+        increase = keyboard_binding_label(self.controls.keyboard_binding_for_action(_sx(531)))
+        if self.controls.last_input_source == _sx(565) and self.controls.active_controller() is not None:
             family = self.controls.current_controller_family()
-            decrease = controller_binding_label(self.controls.controller_binding_for_action("option_decrease", family), family)
-            increase = controller_binding_label(self.controls.controller_binding_for_action("option_increase", family), family)
-        return f"Adjust values with {decrease}/{increase}."
+            decrease = controller_binding_label(self.controls.controller_binding_for_action(_sx(528), family), family)
+            increase = controller_binding_label(self.controls.controller_binding_for_action(_sx(531), family), family)
+        return _sx(759).format(decrease, increase)
 
     def _gameplay_controls_summary(self) -> str:
-        move_left = keyboard_binding_label(self.controls.keyboard_binding_for_action("game_move_left"))
-        move_right = keyboard_binding_label(self.controls.keyboard_binding_for_action("game_move_right"))
-        jump = keyboard_binding_label(self.controls.keyboard_binding_for_action("game_jump"))
-        roll = keyboard_binding_label(self.controls.keyboard_binding_for_action("game_roll"))
-        hoverboard = keyboard_binding_label(self.controls.keyboard_binding_for_action("game_hoverboard"))
-        pause = keyboard_binding_label(self.controls.keyboard_binding_for_action("game_pause"))
-        speech = keyboard_binding_label(self.controls.keyboard_binding_for_action("game_toggle_speech"))
-        if self.controls.last_input_source == "controller" and self.controls.active_controller() is not None:
+        move_left = keyboard_binding_label(self.controls.keyboard_binding_for_action(_sx(534)))
+        move_right = keyboard_binding_label(self.controls.keyboard_binding_for_action(_sx(537)))
+        jump = keyboard_binding_label(self.controls.keyboard_binding_for_action(_sx(540)))
+        roll = keyboard_binding_label(self.controls.keyboard_binding_for_action(_sx(542)))
+        hoverboard = keyboard_binding_label(self.controls.keyboard_binding_for_action(_sx(544)))
+        pause = keyboard_binding_label(self.controls.keyboard_binding_for_action(_sx(547)))
+        speech = keyboard_binding_label(self.controls.keyboard_binding_for_action(_sx(550)))
+        if self.controls.last_input_source == _sx(565) and self.controls.active_controller() is not None:
             family = self.controls.current_controller_family()
-            move_left = controller_binding_label(self.controls.controller_binding_for_action("game_move_left", family), family)
-            move_right = controller_binding_label(self.controls.controller_binding_for_action("game_move_right", family), family)
-            jump = controller_binding_label(self.controls.controller_binding_for_action("game_jump", family), family)
-            roll = controller_binding_label(self.controls.controller_binding_for_action("game_roll", family), family)
-            hoverboard = controller_binding_label(self.controls.controller_binding_for_action("game_hoverboard", family), family)
-            pause = controller_binding_label(self.controls.controller_binding_for_action("game_pause", family), family)
-            speech = controller_binding_label(self.controls.controller_binding_for_action("game_toggle_speech", family), family)
-        return (
-            f"Use {move_left} and {move_right} to change lanes. "
-            f"Press {jump} to jump, {roll} to roll, {hoverboard} to activate a hoverboard, "
-            f"{pause} to pause, and {speech} to toggle speech. "
-            f"On keyboard, press R to hear coins and T to hear play time."
-        )
+            move_left = controller_binding_label(self.controls.controller_binding_for_action(_sx(534), family), family)
+            move_right = controller_binding_label(self.controls.controller_binding_for_action(_sx(537), family), family)
+            jump = controller_binding_label(self.controls.controller_binding_for_action(_sx(540), family), family)
+            roll = controller_binding_label(self.controls.controller_binding_for_action(_sx(542), family), family)
+            hoverboard = controller_binding_label(self.controls.controller_binding_for_action(_sx(544), family), family)
+            pause = controller_binding_label(self.controls.controller_binding_for_action(_sx(547), family), family)
+            speech = controller_binding_label(self.controls.controller_binding_for_action(_sx(550), family), family)
+        return _sx(760).format(move_left, move_right, jump, roll, hoverboard, pause, speech)
 
     def _open_mandatory_update_menu(self, result: UpdateCheckResult) -> None:
         self._latest_update_result = result
@@ -2620,8 +1607,8 @@ class SubwayBlindGame:
         try:
             width, height = self.screen.get_size()
             self.screen.fill((10, 10, 15))
-            title_surface = self.big.render("Subway Surfers Blind Edition", True, (240, 240, 240))
-            message_surface = self.font.render(str(message or "").strip() or "Checking for updates.", True, (205, 205, 205))
+            title_surface = self.big.render(_sx(1303), True, (240, 240, 240))
+            message_surface = self.font.render(str(message or _sx(2)).strip() or _sx(1169), True, (205, 205, 205))
             title_rect = title_surface.get_rect(center=(width // 2, max(72, height // 2 - 30)))
             message_rect = message_surface.get_rect(center=(width // 2, min(height - 48, height // 2 + 18)))
             self.screen.blit(title_surface, title_rect)
@@ -2636,29 +1623,28 @@ class SubwayBlindGame:
             release = self._latest_update_result.release if self._latest_update_result is not None else None
             opened = self.updater.open_release_page(release)
             if opened:
-                self.speaker.speak("Source builds cannot install updates automatically. Opening the release page.", interrupt=True)
+                self.speaker.speak(_sx(1625), interrupt=True)
             else:
-                self._play_menu_feedback("menuedge")
-                self.speaker.speak("Source builds cannot install updates automatically.", interrupt=True)
+                self._play_menu_feedback(_sx(52))
+                self.speaker.speak(_sx(1626), interrupt=True)
             return
         release = self._latest_update_result.release if self._latest_update_result is not None else None
         if release is None:
-            self._play_menu_feedback("menuedge")
-            self.speaker.speak("No release information is available.", interrupt=True)
+            self._play_menu_feedback(_sx(52))
+            self.speaker.speak(_sx(1304), interrupt=True)
             return
         if self._update_install_thread is not None and self._update_install_thread.is_alive():
             return
-
-        self._update_progress_stage = "download"
+        self._update_progress_stage = _sx(761)
         self._update_progress_percent = 0.0
-        self._update_progress_message = "Starting update download."
+        self._update_progress_message = _sx(762)
         self._update_progress_announced_bucket = -1
         self._update_install_result = None
         self._update_restart_script_path = None
-        self._update_install_error = ""
+        self._update_install_error = _sx(2)
         self._update_ready_announced = False
-        self.update_menu.items[0].label = "Installing Update..."
-        self.update_menu.items[0].action = "install_busy"
+        self.update_menu.items[0].label = _sx(763)
+        self.update_menu.items[0].action = _sx(764)
 
         def progress_callback(progress: UpdateInstallProgress) -> None:
             self._update_progress_stage = progress.stage
@@ -2671,19 +1657,18 @@ class SubwayBlindGame:
             self._update_restart_script_path = result.restart_script_path
             if not result.success:
                 self._update_install_error = result.message
-
-        self._update_install_thread = threading.Thread(target=worker, name="update-install", daemon=True)
+        self._update_install_thread = threading.Thread(target=worker, name=_sx(1305), daemon=True)
         self._update_install_thread.start()
 
     def _update_update_install_state(self) -> None:
         if self.active_menu != self.update_menu:
             return
-        if self._update_progress_stage == "download":
+        if self._update_progress_stage == _sx(761):
             bucket = int(self._update_progress_percent // 10)
             if bucket > self._update_progress_announced_bucket and bucket < 10:
                 self._update_progress_announced_bucket = bucket
                 if bucket > 0:
-                    self.speaker.speak(f"Download {bucket * 10} percent.", interrupt=False)
+                    self.speaker.speak(_sx(1786).format(bucket * 10), interrupt=False)
         if self._update_install_thread is None or self._update_install_thread.is_alive():
             return
         self._update_install_thread = None
@@ -2692,25 +1677,25 @@ class SubwayBlindGame:
             return
         self._update_status_message = result.message
         if not result.success:
-            self.update_menu.items[0].label = "Download and Install Update"
-            self.update_menu.items[0].action = "download_update"
-            self._update_progress_stage = "error"
-            self._play_menu_feedback("menuedge")
+            self.update_menu.items[0].label = _sx(994)
+            self.update_menu.items[0].action = _sx(995)
+            self._update_progress_stage = _sx(1007)
+            self._play_menu_feedback(_sx(52))
             self.speaker.speak(result.message, interrupt=True)
             self._update_install_result = None
             return
-        self.update_menu.items[0].label = "Restart Game"
-        self.update_menu.items[0].action = "restart_after_update"
-        self.update_menu.items[1].label = "Open Release Page"
-        self.update_menu.items[1].action = "open_release_page"
-        self.update_menu.items[2].label = "Quit Game"
-        self.update_menu.items[2].action = "quit"
-        self._update_progress_stage = "ready"
+        self.update_menu.items[0].label = _sx(765)
+        self.update_menu.items[0].action = _sx(766)
+        self.update_menu.items[1].label = _sx(756)
+        self.update_menu.items[1].action = _sx(757)
+        self.update_menu.items[2].label = _sx(767)
+        self.update_menu.items[2].action = _sx(768)
+        self._update_progress_stage = _sx(769)
         if not self._update_ready_announced:
             self._update_ready_announced = True
             self.speaker.speak(result.message, interrupt=True)
 
-    def _check_for_updates(self, announce_result: bool, automatic: bool = False) -> None:
+    def _check_for_updates(self, announce_result: bool, automatic: bool=False) -> None:
         result = self.updater.check_for_updates(APP_VERSION)
         self._latest_update_result = result
         if result.update_available:
@@ -2721,21 +1706,16 @@ class SubwayBlindGame:
                 self.speaker.speak(self._update_status_message, interrupt=True)
                 return
             if announce_result:
-                self.speaker.speak(
-                    f"{self._update_status_message} Open the release page to download the new build.",
-                    interrupt=True,
-                )
+                self.speaker.speak(_sx(1627).format(self._update_status_message), interrupt=True)
             return
         if result.release is not None:
-            self._update_status_message = (
-                f"Current version {APP_VERSION}. Latest release {result.release.version}. {result.message}"
-            )
+            self._update_status_message = _sx(1008).format(APP_VERSION, result.release.version, result.message)
         else:
             self._update_status_message = result.message
         if announce_result:
             self.speaker.speak(self._update_status_message, interrupt=True)
             return
-        if automatic and result.status == "error":
+        if automatic and result.status == _sx(1007):
             return
 
     def _menu_uses_gameplay_music(self, menu: Menu | None) -> bool:
@@ -2747,17 +1727,17 @@ class SubwayBlindGame:
         self.audio.set_music_ducking(False)
         if self.active_menu is None:
             if self.state.running:
-                self.audio.music_start("gameplay")
+                self.audio.music_start(_sx(72))
             else:
                 self.audio.music_stop()
             return
         if self.state.running and self._menu_uses_gameplay_music(self.active_menu):
-            self.audio.music_start("gameplay")
+            self.audio.music_start(_sx(72))
             return
-        self.audio.music_start("menu")
+        self.audio.music_start(_sx(71))
 
     def _difficulty_key(self) -> str:
-        return str(self.settings.get("difficulty", "normal")).strip().lower()
+        return str(self.settings.get(_sx(318), _sx(200))).strip().lower()
 
     def _request_exit(self) -> None:
         if self._exit_requested:
@@ -2769,16 +1749,11 @@ class SubwayBlindGame:
 
     @staticmethod
     def _death_reason_for_variant(variant: str) -> str:
-        return {
-            "train": "Hit train",
-            "low": "Hit low obstacle",
-            "high": "Hit high obstacle",
-            "bush": "Hit bush",
-        }.get(variant, "Run ended after crash")
+        return {_sx(643): _sx(1628), _sx(644): _sx(1629), _sx(97): _sx(1630), _sx(645): _sx(1631)}.get(variant, _sx(1009))
 
-    def _open_game_over_dialog(self, death_reason: Optional[str] = None) -> None:
-        summary_reason = death_reason or self._last_death_reason or "Run ended after crash"
-        self._game_over_publish_state = "idle"
+    def _open_game_over_dialog(self, death_reason: Optional[str]=None) -> None:
+        summary_reason = death_reason or self._last_death_reason or _sx(1009)
+        self._game_over_publish_state = _sx(658)
         self._update_game_over_summary(summary_reason)
         self._refresh_game_over_menu()
         if self._should_offer_publish_prompt():
@@ -2789,22 +1764,11 @@ class SubwayBlindGame:
             self.game_over_menu.index = 0
             self._pending_menu_announcement = (self.game_over_menu, 0.45, False)
         self._sync_music_context()
-        self.speaker.speak("Game Over.", interrupt=True)
+        self.speaker.speak(_sx(1010), interrupt=True)
 
     def _update_game_over_summary(self, reason: str) -> None:
-        compact_powerup_usage = self._compact_powerup_usage(self._active_run_stats.get("powerup_usage"))
-        self._game_over_summary = {
-            "score": int(self.state.score),
-            "coins": int(self.state.coins),
-            "play_time_seconds": int(self.state.time),
-            "death_reason": str(reason or "Run ended."),
-            "game_version": APP_VERSION,
-            "difficulty": self._difficulty_key(),
-            "distance_meters": int(self.state.distance),
-            "clean_escapes": int(self._active_run_stats.get("clean_escapes", 0) or 0),
-            "revives_used": int(self.state.revives_used),
-            "powerup_usage": compact_powerup_usage,
-        }
+        compact_powerup_usage = self._compact_powerup_usage(self._active_run_stats.get(_sx(967)))
+        self._game_over_summary = {_sx(968): int(self.state.score), _sx(363): int(self.state.coins), _sx(969): int(self.state.time), _sx(970): str(reason or _sx(661)), _sx(971): APP_VERSION, _sx(318): self._difficulty_key(), _sx(972): int(self.state.distance), _sx(966): int(self._active_run_stats.get(_sx(966), 0) or 0), _sx(973): int(self.state.revives_used), _sx(967): compact_powerup_usage}
 
     def _should_offer_publish_prompt(self) -> bool:
         if self._practice_mode_active:
@@ -2812,9 +1776,9 @@ class SubwayBlindGame:
         if not self._leaderboard_has_publish_identity():
             return False
         summary = self._game_over_summary
-        return int(summary.get("score", 0) or 0) > 0 or int(summary.get("coins", 0) or 0) > 0
+        return int(summary.get(_sx(968), 0) or 0) > 0 or int(summary.get(_sx(363), 0) or 0) > 0
 
-    def _open_publish_confirmation(self, return_menu: Menu, start_index: int = 0) -> None:
+    def _open_publish_confirmation(self, return_menu: Menu, start_index: int=0) -> None:
         self._publish_confirm_return_menu = return_menu
         self._publish_confirm_return_index = max(0, int(start_index))
         self.active_menu = self.publish_confirm_menu
@@ -2822,12 +1786,7 @@ class SubwayBlindGame:
         self.publish_confirm_menu.index = 0
         self._pending_menu_announcement = (self.publish_confirm_menu, 0.0, True)
 
-    def _run_or_confirm_purchase(
-        self,
-        purchase_handler: Callable[[], None],
-        return_menu: Menu | None = None,
-        return_index: int | None = None,
-    ) -> None:
+    def _run_or_confirm_purchase(self, purchase_handler: Callable[[], None], return_menu: Menu | None=None, return_index: int | None=None) -> None:
         if not self._purchase_confirmation_enabled():
             purchase_handler()
             return
@@ -2854,11 +1813,11 @@ class SubwayBlindGame:
             self._set_active_menu(return_menu, start_index=return_index)
 
     def _mission_goals(self):
-        return mission_goals_for_set(int(self.settings.get("mission_set", 1)))
+        return mission_goals_for_set(int(self.settings.get(_sx(339), 1)))
 
     def _mission_status_text(self) -> str:
         completed = len(completed_mission_metrics(self.settings))
-        return f"Missions {completed}/3"
+        return _sx(770).format(completed)
 
     def _current_word(self) -> str:
         return active_word_for_settings(self.settings)
@@ -2872,71 +1831,55 @@ class SubwayBlindGame:
 
     def _choose_support_spawn_kind(self) -> str:
         profile = self._active_event_profile
-        kinds = ["power", "box", "key"]
-        weights = [0.58, 0.18 + float(profile.get("box_bonus", 0.0) or 0.0), 0.08]
-        active_word = any(obstacle.kind == "word" and obstacle.z > 0 for obstacle in self.obstacles)
-        active_token = any(obstacle.kind == "season_token" and obstacle.z > 0 for obstacle in self.obstacles)
-        active_multiplier = self.player.mult2x > 0 or any(
-            obstacle.kind == "multiplier" and obstacle.z > 0 for obstacle in self.obstacles
-        )
-        active_super_box = any(obstacle.kind == "super_box" and obstacle.z > 0 for obstacle in self.obstacles)
-        active_pogo = self.player.pogo_active > 0 or any(obstacle.kind == "pogo" and obstacle.z > 0 for obstacle in self.obstacles)
+        kinds = [_sx(1012), _sx(1013), _sx(569)]
+        weights = [0.58, 0.18 + float(profile.get(_sx(616), 0.0) or 0.0), 0.08]
+        active_word = any((obstacle.kind == _sx(1138) and obstacle.z > 0 for obstacle in self.obstacles))
+        active_token = any((obstacle.kind == _sx(1139) and obstacle.z > 0 for obstacle in self.obstacles))
+        active_multiplier = self.player.mult2x > 0 or any((obstacle.kind == _sx(1140) and obstacle.z > 0 for obstacle in self.obstacles))
+        active_super_box = any((obstacle.kind == _sx(598) and obstacle.z > 0 for obstacle in self.obstacles))
+        active_pogo = self.player.pogo_active > 0 or any((obstacle.kind == _sx(1141) and obstacle.z > 0 for obstacle in self.obstacles))
         if not active_multiplier:
-            kinds.append("multiplier")
+            kinds.append(_sx(1140))
             weights.append(0.09)
         if not active_super_box:
-            kinds.append("super_box")
-            weights.append(0.06 + float(profile.get("super_box_bonus", 0.0) or 0.0))
+            kinds.append(_sx(598))
+            weights.append(0.06 + float(profile.get(_sx(614), 0.0) or 0.0))
         if not active_pogo:
-            kinds.append("pogo")
+            kinds.append(_sx(1141))
             weights.append(0.09)
-        if self._remaining_word_letters() and not active_word:
-            kinds.append("word")
-            weights.append(0.08 + float(profile.get("word_bonus", 0.0) or 0.0))
-        if next_season_reward_threshold(self.settings) is not None and not active_token:
-            kinds.append("season_token")
+        if self._remaining_word_letters() and (not active_word):
+            kinds.append(_sx(1138))
+            weights.append(0.08 + float(profile.get(_sx(615), 0.0) or 0.0))
+        if next_season_reward_threshold(self.settings) is not None and (not active_token):
+            kinds.append(_sx(1139))
             weights.append(0.05)
         return random.choices(kinds, weights=weights, k=1)[0]
 
     def _complete_mission_set(self) -> None:
-        self.settings["mission_set"] = int(self.settings.get("mission_set", 1)) + 1
-        self.settings["mission_metrics"] = {
-            "coins": 0,
-            "jumps": 0,
-            "rolls": 0,
-            "dodges": 0,
-            "powerups": 0,
-            "boxes": 0,
-        }
-        if int(self.settings.get("mission_multiplier_bonus", 0)) < 29:
-            self.settings["mission_multiplier_bonus"] = int(self.settings.get("mission_multiplier_bonus", 0)) + 1
+        self.settings[_sx(339)] = int(self.settings.get(_sx(339), 1)) + 1
+        self.settings[_sx(341)] = {_sx(363): 0, _sx(364): 0, _sx(365): 0, _sx(366): 0, _sx(367): 0, _sx(368): 0}
+        if int(self.settings.get(_sx(340), 0)) < 29:
+            self.settings[_sx(340)] = int(self.settings.get(_sx(340), 0)) + 1
             if self.state.running:
                 self.state.multiplier += 1
-            self.audio.play("mission_reward", channel="ui")
-            self.audio.play("unlock", channel="ui2")
-            self.speaker.speak(
-                f"Mission set complete. Permanent multiplier is now x{1 + int(self.settings['mission_multiplier_bonus'])}.",
-                interrupt=True,
-            )
+            self.audio.play(_sx(100), channel=_sx(180))
+            self.audio.play(_sx(108), channel=_sx(1250))
+            self.speaker.speak(_sx(1307).format(1 + int(self.settings[_sx(340)])), interrupt=True)
             return
-        self.audio.play("mission_reward", channel="ui")
-        self.speaker.speak("Mission set complete. Super Mystery Box.", interrupt=True)
-        self._open_super_mystery_box("Mission Set")
+        self.audio.play(_sx(100), channel=_sx(180))
+        self.speaker.speak(_sx(1014), interrupt=True)
+        self._open_super_mystery_box(_sx(806))
 
-    def _record_mission_event(self, metric: str, amount: int = 1) -> None:
+    def _record_mission_event(self, metric: str, amount: int=1) -> None:
         ensure_progression_state(self.settings)
         if self.state.running and amount > 0:
             self._record_run_metric(metric, amount)
         if self._practice_mode_active:
             return
-        achievement_metric = {
-            "jumps": "total_jumps",
-            "rolls": "total_rolls",
-            "dodges": "total_dodges",
-        }.get(metric)
+        achievement_metric = {_sx(364): _sx(370), _sx(365): _sx(371), _sx(366): _sx(372)}.get(metric)
         if achievement_metric is not None:
             self._record_achievement_metric(achievement_metric, amount)
-        metrics = self.settings.get("mission_metrics", {})
+        metrics = self.settings.get(_sx(341), {})
         if metric not in metrics or amount <= 0:
             return
         goals = self._mission_goals()
@@ -2947,8 +1890,8 @@ class SubwayBlindGame:
         if self._quest_changes_enabled():
             for goal in goals:
                 if goal.metric in newly_completed:
-                    self.audio.play("mission_reward", channel="ui")
-                    self.speaker.speak(f"Mission complete: {goal.label}.", interrupt=False)
+                    self.audio.play(_sx(100), channel=_sx(180))
+                    self.speaker.speak(_sx(1788).format(goal.label), interrupt=False)
         if len(completed_after) == len(goals) and len(completed_before) != len(goals):
             self._complete_mission_set()
 
@@ -2956,147 +1899,135 @@ class SubwayBlindGame:
         today = date.today()
         reset_daily_quest_progress(self.settings, today)
         word_hunt_reset = reset_daily_word_hunt_progress(self.settings, today)
-        word_hunt_completed_today = str(self.settings.get("word_hunt_completed_on", "") or "") == today.isoformat()
+        word_hunt_completed_today = str(self.settings.get(_sx(345), _sx(2)) or _sx(2)) == today.isoformat()
         reset_daily_event_progress(self.settings, today)
-        self.audio.play("gui_tap", channel="ui")
+        self.audio.play(_sx(107), channel=_sx(180))
         self._refresh_quest_menu_labels()
         self._refresh_events_menu_labels()
         self._persist_settings()
-        if word_hunt_completed_today and not word_hunt_reset:
-            self.speaker.speak(
-                "Today's progress was reset. Word Hunt stayed complete because today's reward was already claimed.",
-                interrupt=True,
-            )
+        if word_hunt_completed_today and (not word_hunt_reset):
+            self.speaker.speak(_sx(1308), interrupt=True)
             return
-        self.speaker.speak(
-            "Today's progress was reset. Claimed rewards stayed claimed.",
-            interrupt=True,
-        )
+        self.speaker.speak(_sx(1015), interrupt=True)
 
     def _open_super_mystery_box(self, source: str) -> None:
-        self._record_achievement_metric("total_boxes_opened", 1)
-        if self._special_active("jackpot_fuse"):
+        self._record_achievement_metric(_sx(373), 1)
+        if self._special_active(_sx(1016)):
             self._box_high_tier_meter += 1
             jackpot_chance = min(0.35, 0.06 * self._box_high_tier_meter)
-            if self._season_imprint_matches("fortune_line"):
+            if self._season_imprint_matches(_sx(1309)):
                 jackpot_chance = min(0.45, jackpot_chance + 0.06)
             if random.random() < jackpot_chance:
                 self._box_high_tier_meter = 0
-                reward = random.choice(["jackpot", "keys", "hoverboards"])
+                reward = random.choice([_sx(639), _sx(334), _sx(335)])
             else:
                 reward = pick_super_mystery_box_reward()
         else:
             reward = pick_super_mystery_box_reward()
-        self.audio.play("mystery_box_open", channel="ui")
-        self.audio.play("mystery_combo", channel="ui2")
-        if reward == "coins":
+        self.audio.play(_sx(98), channel=_sx(180))
+        self.audio.play(_sx(110), channel=_sx(1250))
+        if reward == _sx(363):
             gain = random.randint(450, 1100)
-            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + gain
-            self.audio.play("gui_cash", channel="ui3")
-            self.speaker.speak(f"{source}: Super Mystery Box. {gain} coins saved.", interrupt=True)
+            self.settings[_sx(333)] = int(self.settings.get(_sx(333), 0)) + gain
+            self.audio.play(_sx(105), channel=_sx(1231))
+            self.speaker.speak(_sx(1018).format(source, gain), interrupt=True)
             return
-        if reward == "hoverboards":
+        if reward == _sx(335):
             gain = random.randint(1, 2)
-            self.settings["hoverboards"] = int(self.settings.get("hoverboards", 0)) + gain
-            self.audio.play("unlock", channel="ui3")
-            self.speaker.speak(f"{source}: Super Mystery Box. {gain} hoverboard{'s' if gain != 1 else ''}.", interrupt=True)
+            self.settings[_sx(335)] = int(self.settings.get(_sx(335), 0)) + gain
+            self.audio.play(_sx(108), channel=_sx(1231))
+            self.speaker.speak(_sx(1310).format(source, gain, _sx(294) if gain != 1 else _sx(2)), interrupt=True)
             return
-        if reward == "jetpack":
-            self.audio.play("unlock", channel="ui3")
+        if reward == _sx(1017):
+            self.audio.play(_sx(108), channel=_sx(1231))
             if self.state.running:
-                self._apply_power_reward("jetpack", from_headstart=False)
-                self.speaker.speak(f"{source}: Super Mystery Box. Jetpack.", interrupt=True)
+                self._apply_power_reward(_sx(1017), from_headstart=False)
+                self.speaker.speak(_sx(1634).format(source), interrupt=True)
                 return
             gain = random.randint(450, 1100)
-            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + gain
-            self.audio.play("gui_cash", channel="ui3")
-            self.speaker.speak(f"{source}: Super Mystery Box. {gain} coins saved.", interrupt=True)
+            self.settings[_sx(333)] = int(self.settings.get(_sx(333), 0)) + gain
+            self.audio.play(_sx(105), channel=_sx(1231))
+            self.speaker.speak(_sx(1018).format(source, gain), interrupt=True)
             return
-        if reward == "keys":
+        if reward == _sx(334):
             gain = random.randint(1, 2)
-            self.settings["keys"] = int(self.settings.get("keys", 0)) + gain
-            self.audio.play("unlock", channel="ui3")
-            self.speaker.speak(f"{source}: Super Mystery Box. {gain} key{'s' if gain != 1 else ''}.", interrupt=True)
+            self.settings[_sx(334)] = int(self.settings.get(_sx(334), 0)) + gain
+            self.audio.play(_sx(108), channel=_sx(1231))
+            self.speaker.speak(_sx(1311).format(source, gain, _sx(294) if gain != 1 else _sx(2)), interrupt=True)
             return
-        if reward == "headstarts":
-            self.settings["headstarts"] = int(self.settings.get("headstarts", 0)) + 1
-            self.audio.play("unlock", channel="ui3")
-            self.speaker.speak(f"{source}: Super Mystery Box. Headstart.", interrupt=True)
+        if reward == _sx(336):
+            self.settings[_sx(336)] = int(self.settings.get(_sx(336), 0)) + 1
+            self.audio.play(_sx(108), channel=_sx(1231))
+            self.speaker.speak(_sx(1312).format(source), interrupt=True)
             return
-        if reward == "score_boosters":
-            self.settings["score_boosters"] = int(self.settings.get("score_boosters", 0)) + 1
-            self.audio.play("unlock", channel="ui3")
-            self.speaker.speak(f"{source}: Super Mystery Box. Score Booster.", interrupt=True)
+        if reward == _sx(337):
+            self.settings[_sx(337)] = int(self.settings.get(_sx(337), 0)) + 1
+            self.audio.play(_sx(108), channel=_sx(1231))
+            self.speaker.speak(_sx(1313).format(source), interrupt=True)
             return
-        if reward == "jackpot":
+        if reward == _sx(639):
             gain = random.randint(1500, 2600)
-            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + gain
-            self.audio.play("gui_cash", channel="ui3")
-            self.audio.play("unlock", channel="ui4")
-            self.speaker.speak(f"{source}: Super Mystery Box jackpot. {gain} coins saved.", interrupt=True)
+            self.settings[_sx(333)] = int(self.settings.get(_sx(333), 0)) + gain
+            self.audio.play(_sx(105), channel=_sx(1231))
+            self.audio.play(_sx(108), channel=_sx(1637))
+            self.speaker.speak(_sx(1314).format(source, gain), interrupt=True)
             return
-        if int(self.settings.get("mission_multiplier_bonus", 0)) < 29:
-            self.settings["mission_multiplier_bonus"] = int(self.settings.get("mission_multiplier_bonus", 0)) + 1
+        if int(self.settings.get(_sx(340), 0)) < 29:
+            self.settings[_sx(340)] = int(self.settings.get(_sx(340), 0)) + 1
             if self.state.running:
                 self.state.multiplier += 1
-            self.audio.play("unlock", channel="ui3")
-            self.speaker.speak(
-                f"{source}: Super Mystery Box. Permanent multiplier x{1 + int(self.settings['mission_multiplier_bonus'])}.",
-                interrupt=True,
-            )
+            self.audio.play(_sx(108), channel=_sx(1231))
+            self.speaker.speak(_sx(1315).format(source, 1 + int(self.settings[_sx(340)])), interrupt=True)
             return
         gain = random.randint(900, 1500)
-        self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + gain
-        self.audio.play("gui_cash", channel="ui3")
-        self.speaker.speak(f"{source}: Super Mystery Box. {gain} coins saved.", interrupt=True)
+        self.settings[_sx(333)] = int(self.settings.get(_sx(333), 0)) + gain
+        self.audio.play(_sx(105), channel=_sx(1231))
+        self.speaker.speak(_sx(1018).format(source, gain), interrupt=True)
 
     def _complete_word_hunt(self) -> None:
         streak = update_word_hunt_streak(self.settings)
-        self._record_achievement_max("best_word_hunt_streak", streak)
+        self._record_achievement_max(_sx(375), streak)
         reward_kind, amount = word_hunt_reward_for_streak(streak)
-        self.audio.play("mission_reward", channel="ui")
-        if reward_kind == "coins":
-            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + amount
-            self.audio.play("gui_cash", channel="ui2")
-            self.speaker.speak(
-                f"Word Hunt complete. Streak {streak}. {amount} coins saved.",
-                interrupt=True,
-            )
+        self.audio.play(_sx(100), channel=_sx(180))
+        if reward_kind == _sx(363):
+            self.settings[_sx(333)] = int(self.settings.get(_sx(333), 0)) + amount
+            self.audio.play(_sx(105), channel=_sx(1250))
+            self.speaker.speak(_sx(1318).format(streak, amount), interrupt=True)
             return
-        self.speaker.speak(f"Word Hunt complete. Streak {streak}. Super Mystery Box.", interrupt=True)
-        self._open_super_mystery_box("Word Hunt")
+        self.speaker.speak(_sx(1019).format(streak), interrupt=True)
+        self._open_super_mystery_box(_sx(1020))
 
     def _claim_season_reward(self) -> None:
         reward = claim_season_reward(self.settings)
         if reward is None:
             return
-        self.audio.play("mission_reward", channel="ui")
-        self.audio.play("unlock", channel="ui2")
-        if reward == "coins":
+        self.audio.play(_sx(100), channel=_sx(180))
+        self.audio.play(_sx(108), channel=_sx(1250))
+        if reward == _sx(363):
             gain = 500
-            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + gain
-            self.audio.play("gui_cash", channel="ui3")
-            self.speaker.speak(f"Season Hunt reward. {gain} coins saved.", interrupt=True)
+            self.settings[_sx(333)] = int(self.settings.get(_sx(333), 0)) + gain
+            self.audio.play(_sx(105), channel=_sx(1231))
+            self.speaker.speak(_sx(1321).format(gain), interrupt=True)
             return
-        if reward == "key":
-            self.settings["keys"] = int(self.settings.get("keys", 0)) + 1
-            self.speaker.speak("Season Hunt reward. Key.", interrupt=True)
+        if reward == _sx(569):
+            self.settings[_sx(334)] = int(self.settings.get(_sx(334), 0)) + 1
+            self.speaker.speak(_sx(1322), interrupt=True)
             return
-        if reward == "headstart":
-            self.settings["headstarts"] = int(self.settings.get("headstarts", 0)) + 1
-            self.speaker.speak("Season Hunt reward. Headstart.", interrupt=True)
+        if reward == _sx(595):
+            self.settings[_sx(336)] = int(self.settings.get(_sx(336), 0)) + 1
+            self.speaker.speak(_sx(1323), interrupt=True)
             return
-        self.speaker.speak("Season Hunt reward. Super Mystery Box.", interrupt=True)
-        self._open_super_mystery_box("Season Hunt")
+        self.speaker.speak(_sx(1021), interrupt=True)
+        self._open_super_mystery_box(_sx(1022))
 
     def _spend_bank_coins(self, cost: int) -> bool:
-        current = int(self.settings.get("bank_coins", 0))
+        current = int(self.settings.get(_sx(333), 0))
         if current < cost:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("Not enough coins.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1324), interrupt=True)
             return False
-        self.settings["bank_coins"] = current - cost
-        self.audio.play("gui_cash", channel="ui")
+        self.settings[_sx(333)] = current - cost
+        self.audio.play(_sx(105), channel=_sx(180))
         return True
 
     def _persist_settings(self) -> None:
@@ -3104,23 +2035,19 @@ class SubwayBlindGame:
         config_module.save_settings(self.settings)
 
     def _sync_leaderboard_settings_from_client(self) -> None:
-        self._leaderboard_username = str(self.leaderboard_client.principal_username or self._leaderboard_username or "").strip()
-        self.settings["leaderboard_username"] = self._leaderboard_username
-        self.settings["leaderboard_session_token"] = str(self.leaderboard_client.auth_token or "").strip()
+        self._leaderboard_username = str(self.leaderboard_client.principal_username or self._leaderboard_username or _sx(2)).strip()
+        self.settings[_sx(330)] = self._leaderboard_username
+        self.settings[_sx(331)] = str(self.leaderboard_client.auth_token or _sx(2)).strip()
 
     def _restore_persisted_leaderboard_session(self) -> None:
-        persisted_username = str(self.settings.get("leaderboard_username", "") or "").strip()
-        persisted_token = str(self.settings.get("leaderboard_session_token", "") or "").strip()
+        persisted_username = str(self.settings.get(_sx(330), _sx(2)) or _sx(2)).strip()
+        persisted_token = str(self.settings.get(_sx(331), _sx(2)) or _sx(2)).strip()
         self._leaderboard_username = persisted_username
         self.leaderboard_client.principal_username = persisted_username
         self.leaderboard_client.auth_token = persisted_token
 
     def _claimed_leaderboard_reward_ids(self) -> list[str]:
-        return [
-            str(reward_id).strip()
-            for reward_id in list(self.settings.get("leaderboard_applied_reward_ids") or [])
-            if str(reward_id).strip()
-        ]
+        return [str(reward_id).strip() for reward_id in list(self.settings.get(_sx(332)) or []) if str(reward_id).strip()]
 
     def _remember_leaderboard_reward_ids(self, reward_ids: list[str]) -> None:
         remembered = self._claimed_leaderboard_reward_ids()
@@ -3129,77 +2056,77 @@ class SubwayBlindGame:
             if not normalized or normalized in remembered:
                 continue
             remembered.append(normalized)
-        self.settings["leaderboard_applied_reward_ids"] = remembered[-256:]
+        self.settings[_sx(332)] = remembered[-256:]
 
     def _format_leaderboard_season_remaining(self) -> str:
         season = self._leaderboard_season or {}
-        remaining = max(0, int(season.get("seconds_remaining", 0) or 0))
+        remaining = max(0, int(season.get(_sx(1790), 0) or 0))
         days = remaining // 86400
-        hours = (remaining % 86400) // 3600
-        minutes = (remaining % 3600) // 60
-        return f"{days} day{'s' if days != 1 else ''} {hours} hour{'s' if hours != 1 else ''} {minutes} minute{'s' if minutes != 1 else ''}"
+        hours = remaining % 86400 // 3600
+        minutes = remaining % 3600 // 60
+        return _sx(771).format(days, _sx(294) if days != 1 else _sx(2), hours, _sx(294) if hours != 1 else _sx(2), minutes, _sx(294) if minutes != 1 else _sx(2))
 
     def _leaderboard_season_status_label(self) -> str:
         if not self._leaderboard_season:
-            return "Season Ends In: Loading..."
-        return f"Season Ends In: {self._format_leaderboard_season_remaining()}"
+            return _sx(1026)
+        return _sx(772).format(self._format_leaderboard_season_remaining())
 
     def _leaderboard_reward_status_label(self) -> str:
         season = self._leaderboard_season or {}
-        reward_label = str(season.get("reward_label") or "Reward").strip()
-        reward_preview = str(season.get("reward_preview") or "Loading current season reward...").strip()
-        return f"Season Reward: {reward_label}. {reward_preview}"
+        reward_label = str(season.get(_sx(1856)) or _sx(1791)).strip()
+        reward_preview = str(season.get(_sx(1857)) or _sx(1792)).strip()
+        return _sx(773).format(reward_label, reward_preview)
 
     def _leaderboard_season_identity_label(self) -> str:
         season = self._leaderboard_season or {}
-        season_name = str(season.get("season_name") or "").strip()
-        season_key = str(season.get("season_key") or "").strip()
+        season_name = str(season.get(_sx(1858)) or _sx(2)).strip()
+        season_key = str(season.get(_sx(1859)) or _sx(2)).strip()
         if season_name and season_key:
-            return f"Season: {season_name} ({season_key})"
+            return _sx(1030).format(season_name, season_key)
         if season_name:
-            return f"Season: {season_name}"
+            return _sx(776).format(season_name)
         if season_key:
-            return f"Season: {season_key}"
-        return "Season: Loading current week"
+            return _sx(776).format(season_key)
+        return _sx(774)
 
     def _apply_leaderboard_account_sync(self, payload: dict[str, object], *, announce_rewards: bool) -> int:
         applied_reward_ids: list[str] = []
-        username = str(payload.get("username") or self._leaderboard_username or "").strip()
+        username = str(payload.get(_sx(1502)) or self._leaderboard_username or _sx(2)).strip()
         if username and username != self._leaderboard_username:
             self._leaderboard_username = username
-            self.settings["leaderboard_username"] = username
+            self.settings[_sx(330)] = username
             self._refresh_options_menu_labels()
-        season = payload.get("season")
+        season = payload.get(_sx(659))
         if isinstance(season, dict):
             self._leaderboard_season = dict(season)
         self._apply_special_sync_payload(payload)
         known_ids = set(self._claimed_leaderboard_reward_ids())
-        for reward_entry in list(payload.get("pending_rewards") or []):
+        for reward_entry in list(payload.get(_sx(1641)) or []):
             if not isinstance(reward_entry, dict):
                 continue
-            reward_id = str(reward_entry.get("id") or "").strip()
+            reward_id = str(reward_entry.get(_sx(1870)) or _sx(2)).strip()
             if not reward_id or reward_id in known_ids:
                 continue
-            reward_kind = str(reward_entry.get("reward_kind") or "").strip().lower()
-            reward_amount = max(1, int(reward_entry.get("reward_amount", 1) or 1))
-            source = f"Season reward for rank {int(reward_entry.get('rank', 0) or 0)}"
-            if self._apply_meta_reward({"kind": reward_kind, "amount": reward_amount}, source):
+            reward_kind = str(reward_entry.get(_sx(1889)) or _sx(2)).strip().lower()
+            reward_amount = max(1, int(reward_entry.get(_sx(1860), 1) or 1))
+            source = _sx(1031).format(int(reward_entry.get(_sx(1871), 0) or 0))
+            if self._apply_meta_reward({_sx(592): reward_kind, _sx(593): reward_amount}, source):
                 applied_reward_ids.append(reward_id)
                 known_ids.add(reward_id)
         if applied_reward_ids:
             self._remember_leaderboard_reward_ids(applied_reward_ids)
             self._persist_settings()
             if announce_rewards and len(applied_reward_ids) > 1:
-                self.speaker.speak(f"{len(applied_reward_ids)} seasonal rewards were delivered.", interrupt=True)
+                self.speaker.speak(_sx(1642).format(len(applied_reward_ids)), interrupt=True)
         elif username:
             self._persist_settings()
         return len(applied_reward_ids)
 
     def _apply_special_sync_payload(self, payload: dict[str, object]) -> None:
-        items_payload = payload.get("special_items")
-        loadout_payload = payload.get("special_item_loadout")
-        wheel_payload = payload.get("wheel")
-        season_imprint_bonus = str(payload.get("season_imprint_bonus") or "").strip().lower()
+        items_payload = payload.get(_sx(1032))
+        loadout_payload = payload.get(_sx(1033))
+        wheel_payload = payload.get(_sx(1034))
+        season_imprint_bonus = str(payload.get(_sx(1877)) or _sx(2)).strip().lower()
         normalized_items: dict[str, int] = {}
         if isinstance(items_payload, dict):
             for item_key in SPECIAL_ITEM_ORDER:
@@ -3219,7 +2146,7 @@ class SubwayBlindGame:
         if season_imprint_bonus in SEASON_IMPRINT_TEXT:
             self._season_imprint_bonus_key = season_imprint_bonus
         elif not self._season_imprint_bonus_key:
-            self._season_imprint_bonus_key = ""
+            self._season_imprint_bonus_key = _sx(2)
         self._refresh_wheel_menu_labels()
         self._refresh_loadout_menu_labels()
 
@@ -3227,7 +2154,7 @@ class SubwayBlindGame:
         self._server_special_items = {}
         self._server_special_item_loadout = {key: False for key in SPECIAL_ITEM_ORDER}
         self._server_wheel_status = {}
-        self._season_imprint_bonus_key = ""
+        self._season_imprint_bonus_key = _sx(2)
         self._active_special_run_items.clear()
         self._special_effect_timers.clear()
         self._special_run_used_flags.clear()
@@ -3247,18 +2174,9 @@ class SubwayBlindGame:
         def worker() -> dict[str, object]:
             just_connected = self.leaderboard_client.connect()
             sync_payload = self.leaderboard_client.sync_account(self._claimed_leaderboard_reward_ids())
-            sync_payload["just_connected"] = just_connected
+            sync_payload[_sx(1327)] = just_connected
             return sync_payload
-
-        self._start_leaderboard_operation(
-            "leaderboard_startup_sync",
-            "Leaderboard",
-            "Checking seasonal rewards...",
-            worker,
-            return_menu=self.active_menu,
-            show_status=False,
-            reject_message=False,
-        )
+        self._start_leaderboard_operation(_sx(1035), _sx(811), _sx(1036), worker, return_menu=self.active_menu, show_status=False, reject_message=False)
 
     def _sync_character_progress(self) -> None:
         ensure_character_progress_state(self.settings)
@@ -3268,12 +2186,7 @@ class SubwayBlindGame:
         ensure_event_state(self.settings)
         self._collection_bonuses = collection_runtime_bonuses(self.settings)
         character_bonuses = character_runtime_bonuses(self.settings)
-        self._active_character_bonuses = CharacterRuntimeBonuses(
-            banked_coin_bonus_ratio=character_bonuses.banked_coin_bonus_ratio + self._collection_bonuses.banked_coin_bonus_ratio,
-            hoverboard_duration_bonus=character_bonuses.hoverboard_duration_bonus + self._collection_bonuses.hoverboard_duration_bonus,
-            power_duration_multiplier=character_bonuses.power_duration_multiplier * self._collection_bonuses.power_duration_multiplier,
-            starting_multiplier_bonus=character_bonuses.starting_multiplier_bonus + self._collection_bonuses.starting_multiplier_bonus,
-        )
+        self._active_character_bonuses = CharacterRuntimeBonuses(banked_coin_bonus_ratio=character_bonuses.banked_coin_bonus_ratio + self._collection_bonuses.banked_coin_bonus_ratio, hoverboard_duration_bonus=character_bonuses.hoverboard_duration_bonus + self._collection_bonuses.hoverboard_duration_bonus, power_duration_multiplier=character_bonuses.power_duration_multiplier * self._collection_bonuses.power_duration_multiplier, starting_multiplier_bonus=character_bonuses.starting_multiplier_bonus + self._collection_bonuses.starting_multiplier_bonus)
         self._active_event_profile = event_runtime_profile(self.settings)
 
     def _powerup_duration(self, key: str) -> float:
@@ -3283,12 +2196,12 @@ class SubwayBlindGame:
         return item_key in self._active_special_run_items
 
     def _season_imprint_active(self) -> bool:
-        return self._special_active("season_imprint") and bool(self._season_imprint_bonus_key)
+        return self._special_active(_sx(1328)) and bool(self._season_imprint_bonus_key)
 
     def _season_imprint_matches(self, bonus_key: str) -> bool:
         matched = self._season_imprint_active() and self._season_imprint_bonus_key == bonus_key
         if matched:
-            self._mark_special_item_consumed("season_imprint")
+            self._mark_special_item_consumed(_sx(1328))
         return matched
 
     def _special_timer(self, timer_key: str) -> float:
@@ -3301,12 +2214,12 @@ class SubwayBlindGame:
         self._set_special_timer(timer_key, max(self._special_timer(timer_key), float(duration)))
 
     def _special_duration_scale(self) -> float:
-        if self._season_imprint_matches("safe_stride"):
+        if self._season_imprint_matches(_sx(1037)):
             return 1.2
         return 1.0
 
     def _mark_special_item_consumed(self, item_key: str) -> None:
-        normalized_key = str(item_key or "").strip().lower()
+        normalized_key = str(item_key or _sx(2)).strip().lower()
         if normalized_key not in SPECIAL_ITEM_ORDER:
             return
         if normalized_key not in self._active_special_run_items:
@@ -3325,54 +2238,34 @@ class SubwayBlindGame:
             return
         if self._leaderboard_active_operation is not None:
             return
-        pending_items = [
-            str(item_key).strip()
-            for item_key in self._pending_consumed_special_items
-            if str(item_key).strip()
-        ]
+        pending_items = [str(item_key).strip() for item_key in self._pending_consumed_special_items if str(item_key).strip()]
         if not pending_items:
             return
         pending_items = list(dict.fromkeys(pending_items))[:64]
 
         def worker() -> dict[str, object]:
             self.leaderboard_client.connect()
-            payload = self.leaderboard_client.sync_account(
-                self._claimed_leaderboard_reward_ids(),
-                consumed_special_item_keys=pending_items,
-            )
-            payload["consumed_special_item_keys"] = list(pending_items)
+            payload = self.leaderboard_client.sync_account(self._claimed_leaderboard_reward_ids(), consumed_special_item_keys=pending_items)
+            payload[_sx(1329)] = list(pending_items)
             return payload
-
-        self._start_leaderboard_operation(
-            "special_item_consume_sync",
-            "Wheel Loadout",
-            "Syncing special item usage...",
-            worker,
-            return_menu=self.active_menu,
-            show_status=False,
-            reject_message=False,
-        )
+        self._start_leaderboard_operation(_sx(1038), _sx(1039), _sx(1040), worker, return_menu=self.active_menu, show_status=False, reject_message=False)
 
     def _flush_consumed_special_items(self, consumed_keys: list[str]) -> None:
         consumed_set = {str(item_key).strip().lower() for item_key in consumed_keys if str(item_key).strip()}
         if not consumed_set:
             return
-        self._pending_consumed_special_items = [
-            item_key
-            for item_key in self._pending_consumed_special_items
-            if str(item_key).strip().lower() not in consumed_set
-        ]
+        self._pending_consumed_special_items = [item_key for item_key in self._pending_consumed_special_items if str(item_key).strip().lower() not in consumed_set]
 
     def _unlock_character(self, key: str) -> None:
         definition = character_definition(key)
         if character_unlocked(self.settings, definition.key):
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak(f"{definition.name} is already unlocked.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1230).format(definition.name), interrupt=True)
             return
         if not self._spend_bank_coins(definition.unlock_cost):
             return
         previous_completed = completed_collection_keys(self.settings)
-        self.settings["character_progress"][definition.key]["unlocked"] = True
+        self.settings[_sx(240)][definition.key][_sx(239)] = True
         self._sync_character_progress()
         self._refresh_shop_menu_labels()
         self._refresh_character_menu_labels()
@@ -3380,22 +2273,22 @@ class SubwayBlindGame:
         self._refresh_collection_menu_labels()
         self._refresh_me_menu_labels()
         self._persist_settings()
-        self.audio.play("unlock", channel="ui3")
-        self.speaker.speak(f"{definition.name} unlocked.", interrupt=True)
+        self.audio.play(_sx(108), channel=_sx(1231))
+        self.speaker.speak(_sx(1041).format(definition.name), interrupt=True)
         self.speaker.speak(self._shop_coins_label(), interrupt=False)
         self._announce_collection_unlocks(previous_completed)
 
     def _select_character(self, key: str) -> None:
         definition = character_definition(key)
         if not character_unlocked(self.settings, definition.key):
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak(f"{definition.name} is still locked.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1331).format(definition.name), interrupt=True)
             return
         if selected_character_definition(self.settings).key == definition.key:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak(f"{definition.name} is already active.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1332).format(definition.name), interrupt=True)
             return
-        self.settings["selected_character"] = definition.key
+        self.settings[_sx(241)] = definition.key
         self._sync_character_progress()
         self._refresh_shop_menu_labels()
         self._refresh_character_menu_labels()
@@ -3403,46 +2296,43 @@ class SubwayBlindGame:
         self._refresh_events_menu_labels()
         self._refresh_me_menu_labels()
         self._persist_settings()
-        self.audio.play("confirm", channel="ui")
-        self.speaker.speak(f"{definition.name} selected.", interrupt=True)
+        self.audio.play(_sx(56), channel=_sx(180))
+        self.speaker.speak(_sx(1042).format(definition.name), interrupt=True)
 
     def _upgrade_character(self, key: str) -> None:
         definition = character_definition(key)
         if not character_unlocked(self.settings, definition.key):
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("Unlock the character before upgrading.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1334), interrupt=True)
             return
         upgrade_cost = next_character_upgrade_cost(self.settings, definition.key)
         if upgrade_cost is None:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak(f"{definition.name} is already at max level.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1335).format(definition.name), interrupt=True)
             return
         if not self._spend_bank_coins(upgrade_cost):
             return
-        self.settings["character_progress"][definition.key]["level"] = character_level(self.settings, definition.key) + 1
+        self.settings[_sx(240)][definition.key][_sx(289)] = character_level(self.settings, definition.key) + 1
         self._sync_character_progress()
         self._refresh_shop_menu_labels()
         self._refresh_character_menu_labels()
         self._refresh_character_detail_menu_labels(definition.key)
         self._persist_settings()
         upgraded_level = character_level(self.settings, definition.key)
-        self.audio.play("unlock", channel="ui3")
-        self.speaker.speak(
-            f"{definition.name} upgraded to level {upgraded_level}. {character_perk_summary(definition, upgraded_level)}.",
-            interrupt=True,
-        )
+        self.audio.play(_sx(108), channel=_sx(1231))
+        self.speaker.speak(_sx(1043).format(definition.name, upgraded_level, character_perk_summary(definition, upgraded_level)), interrupt=True)
         self.speaker.speak(self._shop_coins_label(), interrupt=False)
 
     def _purchase_item_upgrade(self, key: str) -> None:
         definition = item_upgrade_definition(key)
         upgrade_cost = next_item_upgrade_cost(self.settings, definition.key)
         if upgrade_cost is None:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak(f"{definition.name} is already at max level.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1335).format(definition.name), interrupt=True)
             return
         if not self._spend_bank_coins(upgrade_cost):
             return
-        self.settings["item_upgrades"][definition.key] = item_upgrade_level(self.settings, definition.key) + 1
+        self.settings[_sx(338)][definition.key] = item_upgrade_level(self.settings, definition.key) + 1
         self._refresh_shop_menu_labels()
         self._refresh_item_upgrade_menu_labels()
         self._refresh_item_upgrade_detail_menu_labels(definition.key)
@@ -3450,185 +2340,178 @@ class SubwayBlindGame:
         self._persist_settings()
         upgraded_level = item_upgrade_level(self.settings, definition.key)
         upgraded_duration = item_upgrade_duration(self.settings, definition.key)
-        self.audio.play("unlock", channel="ui3")
-        self.speaker.speak(
-            f"{definition.name} upgraded to level {upgraded_level}. Pickup duration {self._format_duration_seconds(upgraded_duration)}.",
-            interrupt=True,
-        )
+        self.audio.play(_sx(108), channel=_sx(1231))
+        self.speaker.speak(_sx(1044).format(definition.name, upgraded_level, self._format_duration_seconds(upgraded_duration)), interrupt=True)
         self.speaker.speak(self._shop_coins_label(), interrupt=False)
 
     def _unlock_board(self, key: str) -> None:
         definition = board_definition(key)
         if board_unlocked(self.settings, definition.key):
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak(f"{definition.name} is already unlocked.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1230).format(definition.name), interrupt=True)
             return
         if not self._spend_bank_coins(definition.unlock_cost):
             return
         previous_completed = completed_collection_keys(self.settings)
-        self.settings["board_progress"][definition.key]["unlocked"] = True
+        self.settings[_sx(202)][definition.key][_sx(239)] = True
         self._sync_character_progress()
         self._refresh_board_menu_labels()
         self._refresh_board_detail_menu_labels(definition.key)
         self._refresh_collection_menu_labels()
         self._refresh_me_menu_labels()
         self._persist_settings()
-        self.audio.play("unlock", channel="ui3")
-        self.speaker.speak(f"{definition.name} unlocked.", interrupt=True)
+        self.audio.play(_sx(108), channel=_sx(1231))
+        self.speaker.speak(_sx(1041).format(definition.name), interrupt=True)
         self.speaker.speak(self._shop_coins_label(), interrupt=False)
         self._announce_collection_unlocks(previous_completed)
 
     def _select_board(self, key: str) -> None:
         definition = board_definition(key)
         if not board_unlocked(self.settings, definition.key):
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak(f"{definition.name} is still locked.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1331).format(definition.name), interrupt=True)
             return
         if selected_board_definition(self.settings).key == definition.key:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak(f"{definition.name} is already active.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1332).format(definition.name), interrupt=True)
             return
-        self.settings["selected_board"] = definition.key
+        self.settings[_sx(203)] = definition.key
         self._sync_character_progress()
         self._refresh_board_menu_labels()
         self._refresh_board_detail_menu_labels(definition.key)
         self._refresh_me_menu_labels()
         self._refresh_loadout_menu_labels()
         self._persist_settings()
-        self.audio.play("confirm", channel="ui")
-        self.speaker.speak(f"{definition.name} selected.", interrupt=True)
+        self.audio.play(_sx(56), channel=_sx(180))
+        self.speaker.speak(_sx(1042).format(definition.name), interrupt=True)
 
     def _apply_meta_reward(self, reward: dict[str, object] | None, source: str) -> bool:
         if reward is None:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak(f"{source} is not ready yet.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1338).format(source), interrupt=True)
             return False
-        kind = str(reward.get("kind") or "").strip().lower()
-        amount = max(1, int(reward.get("amount", 1) or 1))
-        if kind == "coins":
-            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + amount
-            self.audio.play("gui_cash", channel="ui3")
-            self.speaker.speak(f"{source}. {amount} coins saved.", interrupt=True)
+        kind = str(reward.get(_sx(592)) or _sx(2)).strip().lower()
+        amount = max(1, int(reward.get(_sx(593), 1) or 1))
+        if kind == _sx(363):
+            self.settings[_sx(333)] = int(self.settings.get(_sx(333), 0)) + amount
+            self.audio.play(_sx(105), channel=_sx(1231))
+            self.speaker.speak(_sx(1339).format(source, amount), interrupt=True)
             return True
-        if kind == "key":
-            self.settings["keys"] = int(self.settings.get("keys", 0)) + amount
-            self.audio.play("unlock", channel="ui3")
-            self.speaker.speak(f"{source}. {amount} key{'s' if amount != 1 else ''}.", interrupt=True)
+        if kind == _sx(569):
+            self.settings[_sx(334)] = int(self.settings.get(_sx(334), 0)) + amount
+            self.audio.play(_sx(108), channel=_sx(1231))
+            self.speaker.speak(_sx(1340).format(source, amount, _sx(294) if amount != 1 else _sx(2)), interrupt=True)
             return True
-        if kind == "headstart":
-            self.settings["headstarts"] = int(self.settings.get("headstarts", 0)) + amount
-            self.audio.play("unlock", channel="ui3")
-            self.speaker.speak(f"{source}. {amount} headstart{'s' if amount != 1 else ''}.", interrupt=True)
+        if kind == _sx(595):
+            self.settings[_sx(336)] = int(self.settings.get(_sx(336), 0)) + amount
+            self.audio.play(_sx(108), channel=_sx(1231))
+            self.speaker.speak(_sx(1341).format(source, amount, _sx(294) if amount != 1 else _sx(2)), interrupt=True)
             return True
-        if kind == "score_booster":
-            self.settings["score_boosters"] = int(self.settings.get("score_boosters", 0)) + amount
-            self.audio.play("unlock", channel="ui3")
-            self.speaker.speak(f"{source}. {amount} score booster{'s' if amount != 1 else ''}.", interrupt=True)
+        if kind == _sx(596):
+            self.settings[_sx(337)] = int(self.settings.get(_sx(337), 0)) + amount
+            self.audio.play(_sx(108), channel=_sx(1231))
+            self.speaker.speak(_sx(1342).format(source, amount, _sx(294) if amount != 1 else _sx(2)), interrupt=True)
             return True
-        if kind == "hoverboard":
-            self.settings["hoverboards"] = int(self.settings.get("hoverboards", 0)) + amount
-            self.audio.play("unlock", channel="ui3")
-            self.speaker.speak(f"{source}. {amount} hoverboard{'s' if amount != 1 else ''}.", interrupt=True)
+        if kind == _sx(594):
+            self.settings[_sx(335)] = int(self.settings.get(_sx(335), 0)) + amount
+            self.audio.play(_sx(108), channel=_sx(1231))
+            self.speaker.speak(_sx(1343).format(source, amount, _sx(294) if amount != 1 else _sx(2)), interrupt=True)
             return True
-        if kind == "event_coins":
-            self.settings["event_state"]["event_coins"] = int(self.settings["event_state"].get("event_coins", 0)) + amount
-            self.audio.play("mission_reward", channel="ui3")
-            self.speaker.speak(f"{source}. {amount} event coins.", interrupt=True)
+        if kind == _sx(597):
+            self.settings[_sx(352)][_sx(597)] = int(self.settings[_sx(352)].get(_sx(597), 0)) + amount
+            self.audio.play(_sx(100), channel=_sx(1231))
+            self.speaker.speak(_sx(1344).format(source, amount), interrupt=True)
             return True
-        if kind == "super_box":
-            self.speaker.speak(f"{source}. Super Mystery Box.", interrupt=True)
+        if kind == _sx(598):
+            self.speaker.speak(_sx(1345).format(source), interrupt=True)
             self._open_super_mystery_box(source)
             return True
-        self.audio.play("menuedge", channel="ui")
-        self.speaker.speak(f"{source} reward is unavailable.", interrupt=True)
+        self.audio.play(_sx(52), channel=_sx(180))
+        self.speaker.speak(_sx(1045).format(source), interrupt=True)
         return False
 
     def _purchase_shop_item(self, item: str) -> None:
-        if item == "hoverboard":
-            if not self._spend_bank_coins(SHOP_PRICES["hoverboard"]):
+        if item == _sx(594):
+            if not self._spend_bank_coins(SHOP_PRICES[_sx(594)]):
                 return
-            self.settings["hoverboards"] = int(self.settings.get("hoverboards", 0)) + 1
-            self.audio.play("unlock", channel="ui3")
-            self.speaker.speak("Hoverboard purchased.", interrupt=True)
-        elif item == "mystery_box":
-            if not self._spend_bank_coins(SHOP_PRICES["mystery_box"]):
+            self.settings[_sx(335)] = int(self.settings.get(_sx(335), 0)) + 1
+            self.audio.play(_sx(108), channel=_sx(1231))
+            self.speaker.speak(_sx(1347), interrupt=True)
+        elif item == _sx(21):
+            if not self._spend_bank_coins(SHOP_PRICES[_sx(21)]):
                 return
-            if self._active_event_profile.get("jackpot_bonus") or self._special_active("jackpot_fuse"):
+            if self._active_event_profile.get(_sx(617)) or self._special_active(_sx(1016)):
                 self._box_high_tier_meter += 1
                 jackpot_weight = 12
-                if self._special_active("jackpot_fuse"):
+                if self._special_active(_sx(1016)):
                     jackpot_weight += min(20, self._box_high_tier_meter * 3)
-                    if self._season_imprint_matches("fortune_line"):
+                    if self._season_imprint_matches(_sx(1309)):
                         jackpot_weight += 8
-                reward = random.choices(
-                    ["coins", "hover", "key", "headstart", "score_booster", "jackpot", "nothing"],
-                    weights=[45, 12, 12, 10, 8, jackpot_weight, 1],
-                    k=1,
-                )[0]
-                if reward == "jackpot":
+                reward = random.choices([_sx(363), _sx(636), _sx(569), _sx(595), _sx(596), _sx(639), _sx(638)], weights=[45, 12, 12, 10, 8, jackpot_weight, 1], k=1)[0]
+                if reward == _sx(639):
                     self._box_high_tier_meter = 0
-                    if self._special_active("jackpot_fuse"):
-                        self._mark_special_item_consumed("jackpot_fuse")
+                    if self._special_active(_sx(1016)):
+                        self._mark_special_item_consumed(_sx(1016))
             else:
                 reward = pick_shop_mystery_box_reward()
             self._grant_shop_box_reward(reward)
-        elif item == "headstart":
-            if not self._spend_bank_coins(SHOP_PRICES["headstart"]):
+        elif item == _sx(595):
+            if not self._spend_bank_coins(SHOP_PRICES[_sx(595)]):
                 return
-            self.settings["headstarts"] = int(self.settings.get("headstarts", 0)) + 1
-            self.audio.play("unlock", channel="ui3")
-            self.speaker.speak("Headstart purchased.", interrupt=True)
-        elif item == "score_booster":
-            if not self._spend_bank_coins(SHOP_PRICES["score_booster"]):
+            self.settings[_sx(336)] = int(self.settings.get(_sx(336), 0)) + 1
+            self.audio.play(_sx(108), channel=_sx(1231))
+            self.speaker.speak(_sx(1794), interrupt=True)
+        elif item == _sx(596):
+            if not self._spend_bank_coins(SHOP_PRICES[_sx(596)]):
                 return
-            self.settings["score_boosters"] = int(self.settings.get("score_boosters", 0)) + 1
-            self.audio.play("unlock", channel="ui3")
-            self.speaker.speak("Score booster purchased.", interrupt=True)
+            self.settings[_sx(337)] = int(self.settings.get(_sx(337), 0)) + 1
+            self.audio.play(_sx(108), channel=_sx(1231))
+            self.speaker.speak(_sx(1861), interrupt=True)
         self._refresh_shop_menu_labels()
         self._persist_settings()
         self.speaker.speak(self._shop_coins_label(), interrupt=False)
 
     def _grant_shop_box_reward(self, reward: str) -> None:
-        self.speaker.speak("Opening Mystery Box.", interrupt=True)
-        self.audio.play("mystery_box_open", channel="player_box")
-        if reward == "coins":
-            gain = shop_box_reward_amount("coins")
-            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + gain
-            self.audio.play("gui_cash", channel="ui3")
-            self.speaker.speak(f"Mystery box: {gain} coins.", interrupt=False)
+        self.speaker.speak(_sx(1046), interrupt=True)
+        self.audio.play(_sx(98), channel=_sx(36))
+        if reward == _sx(363):
+            gain = shop_box_reward_amount(_sx(363))
+            self.settings[_sx(333)] = int(self.settings.get(_sx(333), 0)) + gain
+            self.audio.play(_sx(105), channel=_sx(1231))
+            self.speaker.speak(_sx(1348).format(gain), interrupt=False)
             return
-        if reward == "hover":
-            gain = shop_box_reward_amount("hover")
-            self.settings["hoverboards"] = int(self.settings.get("hoverboards", 0)) + gain
-            self.audio.play("unlock", channel="ui3")
-            self.speaker.speak(f"Mystery box: {gain} hoverboard{'s' if gain != 1 else ''}.", interrupt=False)
+        if reward == _sx(636):
+            gain = shop_box_reward_amount(_sx(636))
+            self.settings[_sx(335)] = int(self.settings.get(_sx(335), 0)) + gain
+            self.audio.play(_sx(108), channel=_sx(1231))
+            self.speaker.speak(_sx(1349).format(gain, _sx(294) if gain != 1 else _sx(2)), interrupt=False)
             return
-        if reward == "key":
-            gain = shop_box_reward_amount("key")
-            self.settings["keys"] = int(self.settings.get("keys", 0)) + gain
-            self.audio.play("unlock", channel="ui3")
-            self.speaker.speak(f"Mystery box: {gain} key{'s' if gain != 1 else ''}.", interrupt=False)
+        if reward == _sx(569):
+            gain = shop_box_reward_amount(_sx(569))
+            self.settings[_sx(334)] = int(self.settings.get(_sx(334), 0)) + gain
+            self.audio.play(_sx(108), channel=_sx(1231))
+            self.speaker.speak(_sx(1350).format(gain, _sx(294) if gain != 1 else _sx(2)), interrupt=False)
             return
-        if reward == "headstart":
-            gain = shop_box_reward_amount("headstart")
-            self.settings["headstarts"] = int(self.settings.get("headstarts", 0)) + gain
-            self.audio.play("mystery_combo", channel="ui3")
-            self.speaker.speak(f"Mystery box: {gain} headstart{'s' if gain != 1 else ''}.", interrupt=False)
+        if reward == _sx(595):
+            gain = shop_box_reward_amount(_sx(595))
+            self.settings[_sx(336)] = int(self.settings.get(_sx(336), 0)) + gain
+            self.audio.play(_sx(110), channel=_sx(1231))
+            self.speaker.speak(_sx(1351).format(gain, _sx(294) if gain != 1 else _sx(2)), interrupt=False)
             return
-        if reward == "score_booster":
-            gain = shop_box_reward_amount("score_booster")
-            self.settings["score_boosters"] = int(self.settings.get("score_boosters", 0)) + gain
-            self.audio.play("mystery_combo", channel="ui3")
-            self.speaker.speak(f"Mystery box: {gain} score booster{'s' if gain != 1 else ''}.", interrupt=False)
+        if reward == _sx(596):
+            gain = shop_box_reward_amount(_sx(596))
+            self.settings[_sx(337)] = int(self.settings.get(_sx(337), 0)) + gain
+            self.audio.play(_sx(110), channel=_sx(1231))
+            self.speaker.speak(_sx(1352).format(gain, _sx(294) if gain != 1 else _sx(2)), interrupt=False)
             return
-        if reward == "jackpot":
-            gain = shop_box_reward_amount("jackpot")
-            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + gain
-            self.audio.play("gui_cash", channel="ui3")
-            self.audio.play("unlock", channel="ui4")
-            self.speaker.speak(f"Mystery box jackpot: {gain} coins.", interrupt=False)
+        if reward == _sx(639):
+            gain = shop_box_reward_amount(_sx(639))
+            self.settings[_sx(333)] = int(self.settings.get(_sx(333), 0)) + gain
+            self.audio.play(_sx(105), channel=_sx(1231))
+            self.audio.play(_sx(108), channel=_sx(1637))
+            self.speaker.speak(_sx(1353).format(gain), interrupt=False)
             return
-        self.speaker.speak("Mystery box: empty.", interrupt=False)
+        self.speaker.speak(_sx(1047), interrupt=False)
 
     def _commit_run_rewards(self) -> None:
         if self._run_rewards_committed or not self.state.running:
@@ -3639,38 +2522,38 @@ class SubwayBlindGame:
         saved_coins = int(self.state.coins)
         character_bonus = int(saved_coins * self._active_character_bonuses.banked_coin_bonus_ratio)
         vault_seal_bonus = 0
-        if self._special_active("vault_seal") and saved_coins > 0:
-            ratio = 0.1 if self._season_imprint_matches("safe_stride") else 0.07
+        if self._special_active(_sx(1354)) and saved_coins > 0:
+            ratio = 0.1 if self._season_imprint_matches(_sx(1037)) else 0.07
             vault_seal_bonus = max(1, int(saved_coins * ratio))
-            self._mark_special_item_consumed("vault_seal")
+            self._mark_special_item_consumed(_sx(1354))
         total_saved_coins = saved_coins + character_bonus + vault_seal_bonus
-        self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + total_saved_coins
+        self.settings[_sx(333)] = int(self.settings.get(_sx(333), 0)) + total_saved_coins
         if self._pending_overclock_keys > 0:
-            self.settings["keys"] = int(self.settings.get("keys", 0)) + int(self._pending_overclock_keys)
-        self._record_achievement_max("best_distance", int(self.state.distance))
+            self.settings[_sx(334)] = int(self.settings.get(_sx(334), 0)) + int(self._pending_overclock_keys)
+        self._record_achievement_max(_sx(374), int(self.state.distance))
         if total_saved_coins > 0:
-            self.audio.play("coin_gui", channel="ui")
-            self.audio.play("gui_cash", channel="ui2")
+            self.audio.play(_sx(90), channel=_sx(180))
+            self.audio.play(_sx(105), channel=_sx(1250))
         if character_bonus > 0:
             active_character = selected_character_definition(self.settings)
-            self.speaker.speak(f"{active_character.name} bonus saved {character_bonus} extra coins.", interrupt=False)
+            self.speaker.speak(_sx(1355).format(active_character.name, character_bonus), interrupt=False)
         if vault_seal_bonus > 0:
-            self.speaker.speak(f"Vault Seal protected {vault_seal_bonus} coins.", interrupt=False)
+            self.speaker.speak(_sx(1356).format(vault_seal_bonus), interrupt=False)
         if self._pending_overclock_keys > 0:
-            self.speaker.speak(f"Overclock Key bonus: +{int(self._pending_overclock_keys)} key.", interrupt=False)
+            self.speaker.speak(_sx(1357).format(int(self._pending_overclock_keys)), interrupt=False)
         record_daily_score(self.settings, int(self.state.score))
         record_coin_meter_coins(self.settings, saved_coins)
-        hoverboards_used = int(self._compact_powerup_usage(self._active_run_stats.get("powerup_usage")).get("hoverboard", 0) or 0)
-        for quest in record_quest_metric(self.settings, "distance_meters", int(self.state.distance)):
-            self.audio.play("mission_reward", channel="ui3")
-            self.speaker.speak(f"Quest ready: {quest.label}.", interrupt=False)
-        for quest in record_quest_metric(self.settings, "runs_completed", 1):
-            self.audio.play("mission_reward", channel="ui3")
-            self.speaker.speak(f"Quest ready: {quest.label}.", interrupt=False)
+        hoverboards_used = int(self._compact_powerup_usage(self._active_run_stats.get(_sx(967))).get(_sx(594), 0) or 0)
+        for quest in record_quest_metric(self.settings, _sx(972), int(self.state.distance)):
+            self.audio.play(_sx(100), channel=_sx(1231))
+            self.speaker.speak(_sx(1358).format(quest.label), interrupt=False)
+        for quest in record_quest_metric(self.settings, _sx(1048), 1):
+            self.audio.play(_sx(100), channel=_sx(1231))
+            self.speaker.speak(_sx(1358).format(quest.label), interrupt=False)
         if hoverboards_used > 0:
-            for quest in record_quest_metric(self.settings, "hoverboards_used", hoverboards_used):
-                self.audio.play("mission_reward", channel="ui3")
-                self.speaker.speak(f"Quest ready: {quest.label}.", interrupt=False)
+            for quest in record_quest_metric(self.settings, _sx(1359), hoverboards_used):
+                self.audio.play(_sx(100), channel=_sx(1231))
+                self.speaker.speak(_sx(1358).format(quest.label), interrupt=False)
         self._refresh_events_menu_labels()
         self._refresh_quest_menu_labels()
         self._refresh_missions_hub_menu_labels()
@@ -3689,7 +2572,7 @@ class SubwayBlindGame:
         except Exception:
             pass
         event_types = [pygame.KEYDOWN, pygame.KEYUP, pygame.ACTIVEEVENT]
-        for event_name in ("WINDOWFOCUSGAINED", "WINDOWFOCUSLOST", "WINDOWTAKEFOCUS", "WINDOWMINIMIZED", "WINDOWRESTORED"):
+        for event_name in (_sx(1049), _sx(1050), _sx(1051), _sx(1052), _sx(1053)):
             event_type = getattr(pygame, event_name, None)
             if event_type is not None:
                 event_types.append(event_type)
@@ -3699,7 +2582,7 @@ class SubwayBlindGame:
             except Exception:
                 continue
 
-    def _set_active_menu(self, menu: Optional[Menu], start_index: int | None = None, play_sound: bool = True) -> None:
+    def _set_active_menu(self, menu: Optional[Menu], start_index: int | None=None, play_sound: bool=True) -> None:
         self._clear_menu_repeat()
         self._stop_learn_sound_preview()
         if self.active_menu is not None:
@@ -3725,8 +2608,8 @@ class SubwayBlindGame:
         if self.active_menu in {self.options_menu, self.sapi_menu, self.announcements_menu} and key in (pygame.K_LEFT, pygame.K_RIGHT):
             return True
         if self.active_menu == self.controls_menu and key in (pygame.K_LEFT, pygame.K_RIGHT):
-            selected_action = self.controls_menu.items[self.controls_menu.index].action if self.controls_menu.items else ""
-            return selected_action == "select_binding_profile"
+            selected_action = self.controls_menu.items[self.controls_menu.index].action if self.controls_menu.items else _sx(2)
+            return selected_action == _sx(984)
         return False
 
     def _prime_menu_repeat(self, key: int) -> None:
@@ -3776,54 +2659,36 @@ class SubwayBlindGame:
         self._release_menu_repeat(key)
 
     def _announce_controller_connected(self, name: str, family: str) -> None:
-        self._selected_binding_device = "controller"
+        self._selected_binding_device = _sx(565)
         self._refresh_control_menus()
-        self.speaker.speak(
-            f"{family_label(family)} connected. Open Controls in Options to review bindings.",
-            interrupt=True,
-        )
+        self.speaker.speak(_sx(1054).format(family_label(family)), interrupt=True)
 
     def _announce_controller_disconnected(self, name: str, family: str) -> None:
-        self._selected_binding_device = "keyboard"
+        self._selected_binding_device = _sx(563)
         self._refresh_control_menus()
-        self.speaker.speak(f"{family_label(family)} disconnected. Keyboard controls remain available.", interrupt=True)
+        self.speaker.speak(_sx(1055).format(family_label(family)), interrupt=True)
 
-    def _cancel_binding_capture(self, announce: bool = True) -> None:
+    def _cancel_binding_capture(self, announce: bool=True) -> None:
         if self._binding_capture is None:
             return
         self._keyboard_binding_hold = None
         self._binding_capture = None
         if announce:
-            self.speaker.speak("Control reassignment cancelled.", interrupt=True)
+            self.speaker.speak(_sx(1362), interrupt=True)
 
     def _begin_binding_capture(self, device: str, action_key: str) -> None:
         self._binding_capture = BindingCaptureRequest(device=device, action_key=action_key)
         self._keyboard_binding_hold = None
         prompt = action_label(action_key)
-        if device == "keyboard":
-            self.speaker.speak(
-                f"Press the key or key combination for {prompt}, then hold for 3 seconds. Escape cancels.",
-                interrupt=True,
-            )
+        if device == _sx(563):
+            self.speaker.speak(_sx(1363).format(prompt), interrupt=True)
             return
         controller_name = family_label(self.controls.current_controller_family())
-        self.speaker.speak(
-            f"Press a button or stick direction on the {controller_name} for {prompt}. Press Escape to cancel.",
-            interrupt=True,
-        )
+        self.speaker.speak(_sx(1056).format(controller_name, prompt), interrupt=True)
 
     @staticmethod
     def _is_modifier_key(key: int) -> bool:
-        return key in {
-            pygame.K_LSHIFT,
-            pygame.K_RSHIFT,
-            pygame.K_LCTRL,
-            pygame.K_RCTRL,
-            pygame.K_LALT,
-            pygame.K_RALT,
-            pygame.K_LMETA,
-            pygame.K_RMETA,
-        }
+        return key in {pygame.K_LSHIFT, pygame.K_RSHIFT, pygame.K_LCTRL, pygame.K_RCTRL, pygame.K_LALT, pygame.K_RALT, pygame.K_LMETA, pygame.K_RMETA}
 
     def _modifier_mask_from_keys(self, keys: set[int]) -> int:
         mask = 0
@@ -3837,29 +2702,26 @@ class SubwayBlindGame:
             mask |= pygame.KMOD_META
         return mask
 
-    def _keyboard_binding_value_from_pressed_keys(
-        self,
-        key_event: pygame.event.Event,
-    ) -> tuple[int | dict[str, object] | None, frozenset[int], str]:
+    def _keyboard_binding_value_from_pressed_keys(self, key_event: pygame.event.Event) -> tuple[int | dict[str, object] | None, frozenset[int], str]:
         non_modifier_keys = [key for key in self._pressed_keys if not self._is_modifier_key(key)]
         if len(non_modifier_keys) != 1:
-            return None, frozenset(), ""
+            return (None, frozenset(), _sx(2))
         primary_key = int(non_modifier_keys[0])
         modifier_mask = self._modifier_mask_from_keys(self._pressed_keys)
-        raw_char = str(getattr(key_event, "unicode", "") or "")
-        char_label = raw_char if len(raw_char) == 1 and raw_char.isprintable() and not raw_char.isspace() else ""
+        raw_char = str(getattr(key_event, _sx(1661), _sx(2)) or _sx(2))
+        char_label = raw_char if len(raw_char) == 1 and raw_char.isprintable() and (not raw_char.isspace()) else _sx(2)
         label = char_label or keyboard_key_label(primary_key)
         if modifier_mask & pygame.KMOD_CTRL:
-            label = f"Ctrl + {label}"
+            label = _sx(1057).format(label)
         if modifier_mask & pygame.KMOD_ALT:
-            label = f"Alt + {label}"
+            label = _sx(1058).format(label)
         if modifier_mask & pygame.KMOD_SHIFT:
-            label = f"Shift + {label}"
+            label = _sx(1059).format(label)
         if modifier_mask & pygame.KMOD_META:
-            label = f"Meta + {label}"
-        if modifier_mask == 0 and not char_label:
-            return primary_key, frozenset(self._pressed_keys), label
-        return {"key": primary_key, "modifiers": int(modifier_mask), "label": label}, frozenset(self._pressed_keys), label
+            label = _sx(1060).format(label)
+        if modifier_mask == 0 and (not char_label):
+            return (primary_key, frozenset(self._pressed_keys), label)
+        return ({_sx(569): primary_key, _sx(570): int(modifier_mask), _sx(571): label}, frozenset(self._pressed_keys), label)
 
     def _start_keyboard_binding_hold_capture(self, key_event: pygame.event.Event) -> None:
         if self._binding_capture is None:
@@ -3867,23 +2729,17 @@ class SubwayBlindGame:
         binding_value, required_keys, label = self._keyboard_binding_value_from_pressed_keys(key_event)
         if binding_value is None:
             if len([key for key in self._pressed_keys if not self._is_modifier_key(key)]) > 1:
-                self._play_menu_feedback("menuedge")
-                self.speaker.speak("Only one non-modifier key can be assigned in one binding.", interrupt=True)
+                self._play_menu_feedback(_sx(52))
+                self.speaker.speak(_sx(1662), interrupt=True)
             return
-        self._keyboard_binding_hold = KeyboardBindingHoldState(
-            action_key=self._binding_capture.action_key,
-            binding_value=binding_value,
-            required_keys=required_keys,
-            remaining_seconds=BINDING_CAPTURE_HOLD_SECONDS,
-            next_ding_mark=2,
-        )
-        self.audio.play("binding_countdown", channel="ui", pitch=BINDING_CAPTURE_DING_PITCHES[3])
-        self.speaker.speak(f"Hold {label} for 3 seconds.", interrupt=True)
+        self._keyboard_binding_hold = KeyboardBindingHoldState(action_key=self._binding_capture.action_key, binding_value=binding_value, required_keys=required_keys, remaining_seconds=BINDING_CAPTURE_HOLD_SECONDS, next_ding_mark=2)
+        self.audio.play(_sx(57), channel=_sx(180), pitch=BINDING_CAPTURE_DING_PITCHES[3])
+        self.speaker.speak(_sx(1061).format(label), interrupt=True)
 
     def _fail_keyboard_binding_hold(self) -> None:
         self._keyboard_binding_hold = None
-        self.audio.play("binding_fail", channel="ui")
-        self.speaker.speak("Binding failed. Keep the selected keys pressed for the full 3 seconds.", interrupt=True)
+        self.audio.play(_sx(59), channel=_sx(180))
+        self.speaker.speak(_sx(1062), interrupt=True)
 
     def _complete_keyboard_binding_capture(self) -> None:
         if self._binding_capture is None or self._keyboard_binding_hold is None:
@@ -3894,8 +2750,8 @@ class SubwayBlindGame:
         self._keyboard_binding_hold = None
         self._binding_capture = None
         self._build_keyboard_bindings_menu()
-        self.audio.play("binding_done", channel="ui")
-        self.speaker.speak(f"{action_label(action_key)} set to {binding_label}.", interrupt=True)
+        self.audio.play(_sx(58), channel=_sx(180))
+        self.speaker.speak(_sx(1063).format(action_label(action_key), binding_label), interrupt=True)
 
     def _update_keyboard_binding_hold(self, delta_time: float) -> None:
         hold_state = self._keyboard_binding_hold
@@ -3907,7 +2763,7 @@ class SubwayBlindGame:
         hold_state.remaining_seconds = max(0.0, hold_state.remaining_seconds - float(delta_time))
         while hold_state.next_ding_mark >= 1 and hold_state.remaining_seconds <= float(hold_state.next_ding_mark):
             pitch = BINDING_CAPTURE_DING_PITCHES.get(hold_state.next_ding_mark, 1.0)
-            self.audio.play("binding_countdown", channel="ui", pitch=pitch)
+            self.audio.play(_sx(57), channel=_sx(180), pitch=pitch)
             hold_state.next_ding_mark -= 1
         if hold_state.remaining_seconds > 0:
             return
@@ -3922,12 +2778,12 @@ class SubwayBlindGame:
         self._binding_capture = None
         self._build_controller_bindings_menu()
         binding_label = controller_binding_label(self.controls.controller_binding_for_action(action_key, family), family)
-        self.speaker.speak(f"{action_label(action_key)} set to {binding_label}.", interrupt=True)
+        self.speaker.speak(_sx(1063).format(action_label(action_key), binding_label), interrupt=True)
 
     def _handle_keyboard_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.KEYDOWN:
             self._pressed_keys.add(int(event.key))
-            if self._binding_capture is not None and self._binding_capture.device == "keyboard":
+            if self._binding_capture is not None and self._binding_capture.device == _sx(563):
                 if event.key == pygame.K_ESCAPE:
                     self._cancel_binding_capture()
                     return
@@ -3937,34 +2793,26 @@ class SubwayBlindGame:
                 if frozenset(self._pressed_keys) != self._keyboard_binding_hold.required_keys:
                     self._fail_keyboard_binding_hold()
                 return
-            translated_key = self.controls.translate_keyboard_key(
-                event.key,
-                self._input_context(),
-                int(getattr(event, "mod", pygame.key.get_mods())),
-            )
+            translated_key = self.controls.translate_keyboard_key(event.key, self._input_context(), int(getattr(event, _sx(1795), pygame.key.get_mods())))
             if translated_key is None:
                 return
             self._process_translated_keydown(translated_key)
             return
         if event.type == pygame.KEYUP:
             self._pressed_keys.discard(int(event.key))
-            if self._binding_capture is not None and self._binding_capture.device == "keyboard":
+            if self._binding_capture is not None and self._binding_capture.device == _sx(563):
                 if self._keyboard_binding_hold is not None:
                     self._fail_keyboard_binding_hold()
                 return
-            translated_key = self.controls.translate_keyboard_key(
-                event.key,
-                self._input_context(),
-                int(getattr(event, "mod", pygame.key.get_mods())),
-            )
+            translated_key = self.controls.translate_keyboard_key(event.key, self._input_context(), int(getattr(event, _sx(1795), pygame.key.get_mods())))
             if translated_key is None:
                 return
             self._process_translated_keyup(translated_key)
 
     def _handle_window_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.VIDEORESIZE:
-            width = max(MIN_WINDOW_WIDTH, int(getattr(event, "w", MIN_WINDOW_WIDTH)))
-            height = max(MIN_WINDOW_HEIGHT, int(getattr(event, "h", MIN_WINDOW_HEIGHT)))
+            width = max(MIN_WINDOW_WIDTH, int(getattr(event, _sx(382), MIN_WINDOW_WIDTH)))
+            height = max(MIN_WINDOW_HEIGHT, int(getattr(event, _sx(1796), MIN_WINDOW_HEIGHT)))
             self.screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
             return
         if event.type == pygame.WINDOWSIZECHANGED:
@@ -3976,21 +2824,17 @@ class SubwayBlindGame:
             self._pause_gameplay_for_focus_loss()
 
     def _is_window_focus_loss_event(self, event: pygame.event.Event) -> bool:
-        focus_lost_event = getattr(pygame, "WINDOWFOCUSLOST", None)
-        minimized_event = getattr(pygame, "WINDOWMINIMIZED", None)
+        focus_lost_event = getattr(pygame, _sx(1050), None)
+        minimized_event = getattr(pygame, _sx(1052), None)
         if focus_lost_event is not None and event.type == focus_lost_event:
             return True
         if minimized_event is not None and event.type == minimized_event:
             return True
         if event.type != pygame.ACTIVEEVENT:
             return False
-        gain = int(getattr(event, "gain", 1))
-        state = int(getattr(event, "state", 0))
-        focus_mask = (
-            int(getattr(pygame, "APPINPUTFOCUS", 0))
-            | int(getattr(pygame, "APPMOUSEFOCUS", 0))
-            | int(getattr(pygame, "APPACTIVE", 0))
-        )
+        gain = int(getattr(event, _sx(1374), 1))
+        state = int(getattr(event, _sx(1375), 0))
+        focus_mask = int(getattr(pygame, _sx(1797), 0)) | int(getattr(pygame, _sx(1798), 0)) | int(getattr(pygame, _sx(1663), 0))
         return gain == 0 and bool(state & focus_mask)
 
     def _pause_active_run(self) -> bool:
@@ -3998,7 +2842,7 @@ class SubwayBlindGame:
             return False
         self.state.paused = True
         self._set_active_menu(self.pause_menu)
-        self.audio.play("menuclose", channel="ui")
+        self.audio.play(_sx(55), channel=_sx(180))
         return True
 
     def _pause_gameplay_for_focus_loss(self) -> None:
@@ -4008,12 +2852,12 @@ class SubwayBlindGame:
 
     def _handle_controller_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.CONTROLLERDEVICEADDED:
-            connected = self.controls.register_added_controller(getattr(event, "device_index", None))
+            connected = self.controls.register_added_controller(getattr(event, _sx(1664), None))
             if connected is not None:
                 self._announce_controller_connected(connected.name, connected.family)
             return
         if event.type == pygame.CONTROLLERDEVICEREMOVED:
-            disconnected = self.controls.handle_device_removed(getattr(event, "instance_id", None))
+            disconnected = self.controls.handle_device_removed(getattr(event, _sx(1665), None))
             if disconnected is not None:
                 self._announce_controller_disconnected(disconnected.name, disconnected.family)
             return
@@ -4021,7 +2865,7 @@ class SubwayBlindGame:
             self.controls.refresh_connected_controllers()
             self._refresh_control_menus()
             return
-        if self._binding_capture is not None and self._binding_capture.device == "controller":
+        if self._binding_capture is not None and self._binding_capture.device == _sx(565):
             binding = self.controls.capture_controller_binding(event)
             if binding is not None:
                 self._complete_controller_binding_capture(binding)
@@ -4038,12 +2882,12 @@ class SubwayBlindGame:
         if self._practice_mode_active:
             return
         adjusted_amount = int(amount)
-        if self._season_imprint_matches("coin_drift"):
+        if self._season_imprint_matches(_sx(1064)):
             adjusted_amount += max(1, int(round(adjusted_amount * 0.1)))
         self.state.coins += adjusted_amount
-        self._record_achievement_metric("total_coins_collected", adjusted_amount)
+        self._record_achievement_metric(_sx(369), adjusted_amount)
         if self._run_rewards_committed:
-            self.settings["bank_coins"] = int(self.settings.get("bank_coins", 0)) + adjusted_amount
+            self.settings[_sx(333)] = int(self.settings.get(_sx(333), 0)) + adjusted_amount
 
     def run(self) -> None:
         running = True
@@ -4053,26 +2897,12 @@ class SubwayBlindGame:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self._request_exit()
-                elif event.type in (
-                    pygame.VIDEORESIZE,
-                    pygame.WINDOWSIZECHANGED,
-                    getattr(pygame, "WINDOWFOCUSLOST", -1),
-                    getattr(pygame, "WINDOWMINIMIZED", -1),
-                    pygame.ACTIVEEVENT,
-                ):
+                elif event.type in (pygame.VIDEORESIZE, pygame.WINDOWSIZECHANGED, getattr(pygame, _sx(1050), -1), getattr(pygame, _sx(1052), -1), pygame.ACTIVEEVENT):
                     self._handle_window_event(event)
                 elif event.type in (pygame.KEYDOWN, pygame.KEYUP):
                     self._handle_keyboard_event(event)
-                elif event.type in (
-                    pygame.CONTROLLERDEVICEADDED,
-                    pygame.CONTROLLERDEVICEREMOVED,
-                    pygame.CONTROLLERDEVICEREMAPPED,
-                    pygame.CONTROLLERBUTTONDOWN,
-                    pygame.CONTROLLERBUTTONUP,
-                    pygame.CONTROLLERAXISMOTION,
-                ):
+                elif event.type in (pygame.CONTROLLERDEVICEADDED, pygame.CONTROLLERDEVICEREMOVED, pygame.CONTROLLERDEVICEREMAPPED, pygame.CONTROLLERBUTTONDOWN, pygame.CONTROLLERBUTTONUP, pygame.CONTROLLERAXISMOTION):
                     self._handle_controller_event(event)
-
             if not self._exit_requested and self.active_menu is not None:
                 self._update_menu_repeat(delta_time)
                 self._update_learn_sound_preview(delta_time)
@@ -4081,21 +2911,17 @@ class SubwayBlindGame:
                 self._update_pending_wheel_spin_reward(delta_time)
             if not self._exit_requested:
                 self._update_leaderboard_operation_state()
-
             if not self._exit_requested and self.active_menu is None:
                 if not self.state.paused:
                     self._update_game(delta_time)
             self.audio.update(delta_time)
-
             if self.active_menu is None:
                 self._draw_game()
             else:
                 self._draw_menu(self.active_menu)
-
             pygame.display.flip()
             if self._exit_requested and self.audio.music_is_idle():
                 running = False
-
         config_module.save_settings(self.settings)
 
     def _update_pending_menu_announcement(self, delta_time: float) -> None:
@@ -4123,18 +2949,15 @@ class SubwayBlindGame:
         reward_data = dict(self._pending_wheel_spin_reward)
         self._pending_wheel_spin_reward = None
         self._pending_wheel_spin_reward_delay = 0.0
-        sync_payload = reward_data.get("sync_payload")
+        sync_payload = reward_data.get(_sx(1065))
         if isinstance(sync_payload, dict):
             self._apply_special_sync_payload(sync_payload)
             self._refresh_wheel_menu_labels()
-        amount = max(1, int(reward_data.get("amount", 1) or 1))
-        item_label = str(reward_data.get("item_label") or "Special Item").strip() or "Special Item"
-        self.audio.play("mystery_box_open", channel="ui")
-        self.audio.play("unlock", channel="ui2")
-        self.speaker.speak(
-            f"Wheel reward: {amount} {item_label}{'' if amount == 1 else 's'}.",
-            interrupt=True,
-        )
+        amount = max(1, int(reward_data.get(_sx(593), 1) or 1))
+        item_label = str(reward_data.get(_sx(1439)) or _sx(871)).strip() or _sx(871)
+        self.audio.play(_sx(98), channel=_sx(180))
+        self.audio.play(_sx(108), channel=_sx(1250))
+        self.speaker.speak(_sx(1066).format(amount, item_label, _sx(2) if amount == 1 else _sx(294)), interrupt=True)
 
     def _handle_active_menu_key(self, key: int) -> bool:
         if self.active_menu is None:
@@ -4143,7 +2966,7 @@ class SubwayBlindGame:
             if key == pygame.K_ESCAPE:
                 self._cancel_binding_capture()
             else:
-                self._play_menu_feedback("menuedge")
+                self._play_menu_feedback(_sx(52))
             return True
         if self.active_menu == self.options_menu:
             if key in (pygame.K_LEFT, pygame.K_RIGHT):
@@ -4151,14 +2974,7 @@ class SubwayBlindGame:
                 return True
             if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 selected_action = self.options_menu.items[self.options_menu.index].action
-                if selected_action in {
-                    "back",
-                    "opt_controls",
-                    "opt_sapi_menu",
-                    "opt_gameplay_announcements",
-                    "opt_leaderboard_account",
-                    "opt_leaderboard_logout",
-                }:
+                if selected_action in {_sx(429), _sx(1384), _sx(1194), _sx(1383), _sx(1195), _sx(1382)}:
                     return self._handle_menu_action(selected_action)
                 return True
         if self.active_menu == self.sapi_menu:
@@ -4167,7 +2983,7 @@ class SubwayBlindGame:
                 return True
             if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 selected_action = self.sapi_menu.items[self.sapi_menu.index].action
-                if selected_action == "back":
+                if selected_action == _sx(429):
                     return self._handle_menu_action(selected_action)
                 return True
         if self.active_menu == self.announcements_menu:
@@ -4176,22 +2992,22 @@ class SubwayBlindGame:
                 return True
             if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 selected_action = self.announcements_menu.items[self.announcements_menu.index].action
-                if selected_action == "back":
+                if selected_action == _sx(429):
                     return self._handle_menu_action(selected_action)
                 return True
         if self.active_menu == self.controls_menu:
             if key in (pygame.K_LEFT, pygame.K_RIGHT):
                 selected_action = self.controls_menu.items[self.controls_menu.index].action
-                if selected_action == "select_binding_profile":
+                if selected_action == _sx(984):
                     self._cycle_selected_binding_device(-1 if key == pygame.K_LEFT else 1)
                 else:
-                    self._play_menu_feedback("menuedge")
+                    self._play_menu_feedback(_sx(52))
                 return True
         if self.active_menu == self.learn_sounds_menu:
             if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 selected_action = self.learn_sounds_menu.items[self.learn_sounds_menu.index].action
-                if selected_action == "back":
-                    return self._handle_menu_action("back")
+                if selected_action == _sx(429):
+                    return self._handle_menu_action(_sx(429))
                 entry = self._learn_sound_entries_by_action.get(selected_action)
                 if entry is not None:
                     self._play_learn_sound_preview(entry)
@@ -4209,9 +3025,9 @@ class SubwayBlindGame:
         return True
 
     def _handle_menu_action(self, action: str) -> bool:
-        if action == "close":
+        if action == _sx(1067):
             if self.active_menu == self.revive_menu:
-                self._finish_run_loss("Run ended after crash")
+                self._finish_run_loss(_sx(1009))
                 return True
             if self.active_menu == self.game_over_menu:
                 self.active_menu.index = 0
@@ -4222,34 +3038,24 @@ class SubwayBlindGame:
             if self.active_menu == self.main_menu:
                 if not self._exit_confirmation_enabled():
                     return False
-                self._set_active_menu(
-                    self.exit_confirm_menu,
-                    start_index=self._menu_index_for_action(self.exit_confirm_menu, "cancel_exit"),
-                )
+                self._set_active_menu(self.exit_confirm_menu, start_index=self._menu_index_for_action(self.exit_confirm_menu, _sx(1432)))
                 return True
             if self.active_menu == self.controls_menu:
                 self._refresh_options_menu_labels()
-                self._set_active_menu(self.options_menu, start_index=self._update_option_index("opt_controls"))
+                self._set_active_menu(self.options_menu, start_index=self._update_option_index(_sx(1384)))
                 return True
             if self.active_menu == self.options_menu:
                 return_menu = self._options_return_menu or self.main_menu
-                start_index = (
-                    self._menu_index_for_action(self.pause_menu, "pause_options")
-                    if return_menu == self.pause_menu
-                    else None
-                )
+                start_index = self._menu_index_for_action(self.pause_menu, _sx(1421)) if return_menu == self.pause_menu else None
                 self._set_active_menu(return_menu, start_index=start_index)
                 return True
             if self.active_menu == self.sapi_menu:
                 self._refresh_options_menu_labels()
-                self._set_active_menu(self.options_menu, start_index=self._update_option_index("opt_sapi_menu"))
+                self._set_active_menu(self.options_menu, start_index=self._update_option_index(_sx(1194)))
                 return True
             if self.active_menu == self.announcements_menu:
                 self._refresh_options_menu_labels()
-                self._set_active_menu(
-                    self.options_menu,
-                    start_index=self._update_option_index("opt_gameplay_announcements"),
-                )
+                self._set_active_menu(self.options_menu, start_index=self._update_option_index(_sx(1383)))
                 return True
             if self.active_menu in {self.keyboard_bindings_menu, self.controller_bindings_menu}:
                 self._build_controls_menu()
@@ -4258,18 +3064,15 @@ class SubwayBlindGame:
             if self.active_menu == self.pause_menu:
                 self.state.paused = False
                 self._set_active_menu(None)
-                self.audio.play("menuclose", channel="ui")
-                self.speaker.speak("Resume", interrupt=True)
+                self.audio.play(_sx(55), channel=_sx(180))
+                self.speaker.speak(_sx(1577), interrupt=True)
                 return True
             if self.active_menu == self.pause_confirm_menu:
-                self._set_active_menu(self.pause_menu, start_index=self._menu_index_for_action(self.pause_menu, "to_main"))
+                self._set_active_menu(self.pause_menu, start_index=self._menu_index_for_action(self.pause_menu, _sx(1422)))
                 return True
             if self.active_menu == self.leaderboard_logout_confirm_menu:
                 self._refresh_options_menu_labels()
-                self._set_active_menu(
-                    self.options_menu,
-                    start_index=self._update_option_index("opt_leaderboard_logout"),
-                )
+                self._set_active_menu(self.options_menu, start_index=self._update_option_index(_sx(1382)))
                 return True
             if self.active_menu == self.publish_confirm_menu:
                 self._set_active_menu(self.game_over_menu)
@@ -4278,30 +3081,30 @@ class SubwayBlindGame:
                 self._resolve_pending_purchase(accepted=False)
                 return True
             if self.active_menu == self.exit_confirm_menu:
-                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "quit"))
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, _sx(768)))
                 return True
             if self.active_menu == self.help_topic_menu:
                 self._set_active_menu(self.howto_menu)
                 return True
             if self.active_menu == self.events_menu:
-                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "events"))
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, _sx(1270)))
                 return True
             if self.active_menu == self.wheel_menu:
-                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "wheel_spin"))
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, _sx(99)))
                 return True
             if self.active_menu == self.event_shop_menu:
                 self._refresh_events_menu_labels()
-                self._set_active_menu(self.events_menu, start_index=self._menu_index_for_action(self.events_menu, "open_event_shop"))
+                self._set_active_menu(self.events_menu, start_index=self._menu_index_for_action(self.events_menu, _sx(1215)))
                 return True
             if self.active_menu == self.missions_hub_menu:
-                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "missions_hub"))
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, _sx(1272)))
                 return True
             if self.active_menu in {self.mission_set_menu, self.quests_menu, self.achievements_menu}:
                 self._refresh_missions_hub_menu_labels()
                 self._set_active_menu(self.missions_hub_menu)
                 return True
             if self.active_menu == self.me_menu:
-                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "me"))
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, _sx(1274)))
                 return True
             if self.active_menu == self.server_status_menu:
                 self._cancel_leaderboard_operation()
@@ -4311,7 +3114,7 @@ class SubwayBlindGame:
                     self._set_active_menu(self.main_menu)
                 return True
             if self.active_menu == self.leaderboard_menu:
-                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "leaderboard"))
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, _sx(1278)))
                 return True
             if self.active_menu == self.leaderboard_profile_menu:
                 self._set_active_menu(self.leaderboard_menu)
@@ -4320,11 +3123,11 @@ class SubwayBlindGame:
                 self._set_active_menu(self.leaderboard_profile_menu)
                 return True
             if self.active_menu == self.issue_menu:
-                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "issue_reports"))
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, _sx(1281)))
                 return True
             if self.active_menu == self.issue_compose_menu:
                 self._refresh_issue_menu()
-                self._set_active_menu(self.issue_menu, start_index=self._menu_index_for_action(self.issue_menu, "issue_submit"))
+                self._set_active_menu(self.issue_menu, start_index=self._menu_index_for_action(self.issue_menu, _sx(1073)))
                 return True
             if self.active_menu == self.issue_detail_menu:
                 self._set_active_menu(self.issue_menu)
@@ -4337,10 +3140,10 @@ class SubwayBlindGame:
                 return_menu = self._meta_return_menu or self.shop_menu
                 if return_menu == self.shop_menu:
                     self._refresh_shop_menu_labels()
-                    self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_item_upgrades"))
+                    self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, _sx(1245)))
                     return True
                 self._refresh_me_menu_labels()
-                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_item_upgrades"))
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, _sx(1245)))
                 return True
             if self.active_menu == self.character_detail_menu:
                 self._refresh_character_menu_labels()
@@ -4350,10 +3153,10 @@ class SubwayBlindGame:
                 return_menu = self._meta_return_menu or self.shop_menu
                 if return_menu == self.shop_menu:
                     self._refresh_shop_menu_labels()
-                    self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_character_upgrades"))
+                    self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, _sx(1401)))
                     return True
                 self._refresh_me_menu_labels()
-                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_characters"))
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, _sx(1243)))
                 return True
             if self.active_menu == self.board_detail_menu:
                 self._refresh_board_menu_labels()
@@ -4361,434 +3164,343 @@ class SubwayBlindGame:
                 return True
             if self.active_menu == self.board_menu:
                 self._refresh_me_menu_labels()
-                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_boards"))
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, _sx(1244)))
                 return True
             if self.active_menu == self.collection_menu:
                 self._refresh_me_menu_labels()
-                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_collections"))
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, _sx(1246)))
                 return True
             if self.active_menu == self.whats_new_menu:
                 self._set_active_menu(self.main_menu)
                 return True
             self._set_active_menu(self.main_menu)
             return True
-
         if self.active_menu == self.main_menu:
-            if action == "start":
+            if action == _sx(430):
                 self._pending_practice_setup = False
                 self.selected_headstarts = 0
                 self.selected_score_boosters = 0
                 self._refresh_loadout_menu_labels()
                 self._set_active_menu(self.loadout_menu)
                 return True
-            if action == "practice_lane":
+            if action == _sx(1268):
                 self._pending_practice_setup = True
                 self.selected_headstarts = 0
                 self.selected_score_boosters = 0
                 self._refresh_loadout_menu_labels()
                 self._set_active_menu(self.loadout_menu)
                 return True
-            if action == "events":
+            if action == _sx(1270):
                 self._refresh_events_menu_labels()
                 self._set_active_menu(self.events_menu)
                 return True
-            if action == "missions_hub":
+            if action == _sx(1272):
                 self._refresh_missions_hub_menu_labels()
                 self._set_active_menu(self.missions_hub_menu)
                 return True
-            if action == "me":
+            if action == _sx(1274):
                 self._refresh_me_menu_labels()
                 self._set_active_menu(self.me_menu)
                 self.speaker.speak(self._shop_coins_label(), interrupt=False)
                 return True
-            if action == "whats_new":
+            if action == _sx(1283):
                 self._open_info_dialog(load_whats_new_content(), self.whats_new_menu)
                 return True
-            if action == "shop":
+            if action == _sx(1276):
                 self._refresh_shop_menu_labels()
                 self._set_active_menu(self.shop_menu)
                 self.speaker.speak(self._shop_coins_label(), interrupt=False)
                 return True
-            if action == "leaderboard":
+            if action == _sx(1278):
                 self._open_leaderboard()
                 return True
-            if action == "wheel_spin":
+            if action == _sx(99):
                 self._open_wheel_menu()
                 return True
-            if action == "issue_reports":
+            if action == _sx(1281):
                 self._open_issue_reports()
                 return True
-            if action == "options":
+            if action == _sx(1285):
                 self._options_return_menu = self.main_menu
                 self._refresh_options_menu_labels()
                 self._set_active_menu(self.options_menu)
                 return True
-            if action == "howto":
+            if action == _sx(1287):
                 self._showing_upgrade_help = False
                 self._refresh_howto_menu_labels()
                 self._set_active_menu(self.howto_menu)
                 return True
-            if action == "learn_sounds":
+            if action == _sx(1289):
                 self._set_active_menu(self.learn_sounds_menu)
                 return True
-            if action == "check_updates":
+            if action == _sx(1292):
                 self._check_for_updates(announce_result=True)
                 return True
-            if action == "quit":
+            if action == _sx(768):
                 if not self._exit_confirmation_enabled():
                     return False
-                self._set_active_menu(
-                    self.exit_confirm_menu,
-                    start_index=self._menu_index_for_action(self.exit_confirm_menu, "cancel_exit"),
-                )
+                self._set_active_menu(self.exit_confirm_menu, start_index=self._menu_index_for_action(self.exit_confirm_menu, _sx(1432)))
                 return True
-
         if self.active_menu == self.loadout_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._pending_practice_setup = False
                 self._refresh_loadout_menu_labels()
                 self._set_active_menu(self.main_menu)
                 return True
-            if action == "loadout_board_info":
+            if action == _sx(1177):
                 self.speaker.speak(self._loadout_board_label(), interrupt=True)
                 return True
-            if action == "toggle_headstart":
-                owned = int(self.settings.get("headstarts", 0))
+            if action == _sx(1178):
+                owned = int(self.settings.get(_sx(336), 0))
                 if owned <= 0:
-                    self.audio.play("menuedge", channel="ui")
-                    self.speaker.speak("No headstarts available.", interrupt=True)
+                    self.audio.play(_sx(52), channel=_sx(180))
+                    self.speaker.speak(_sx(1799), interrupt=True)
                     return True
                 self.selected_headstarts = (self.selected_headstarts + 1) % (clamp_headstart_uses(owned) + 1)
-                self.audio.play("confirm", channel="ui")
+                self.audio.play(_sx(56), channel=_sx(180))
                 self._refresh_loadout_menu_labels()
-                self.speaker.speak(
-                    self.loadout_menu.items[self._menu_index_for_action(self.loadout_menu, "toggle_headstart")].label,
-                    interrupt=True,
-                )
+                self.speaker.speak(self.loadout_menu.items[self._menu_index_for_action(self.loadout_menu, _sx(1178))].label, interrupt=True)
                 return True
-            if action == "toggle_score_booster":
-                owned = int(self.settings.get("score_boosters", 0))
+            if action == _sx(1179):
+                owned = int(self.settings.get(_sx(337), 0))
                 if owned <= 0:
-                    self.audio.play("menuedge", channel="ui")
-                    self.speaker.speak("No score boosters available.", interrupt=True)
+                    self.audio.play(_sx(52), channel=_sx(180))
+                    self.speaker.speak(_sx(1800), interrupt=True)
                     return True
                 self.selected_score_boosters = (self.selected_score_boosters + 1) % (min(3, owned) + 1)
-                self.audio.play("confirm", channel="ui")
+                self.audio.play(_sx(56), channel=_sx(180))
                 self._refresh_loadout_menu_labels()
-                self.speaker.speak(
-                    self.loadout_menu.items[self._menu_index_for_action(self.loadout_menu, "toggle_score_booster")].label,
-                    interrupt=True,
-                )
+                self.speaker.speak(self.loadout_menu.items[self._menu_index_for_action(self.loadout_menu, _sx(1179))].label, interrupt=True)
                 return True
-            if action.startswith("toggle_special_item:"):
-                item_key = action.split(":", 1)[1]
+            if action.startswith(_sx(1377)):
+                item_key = action.split(_sx(560), 1)[1]
                 self._toggle_special_item_loadout(item_key)
                 return True
-            if action == "edit_practice_hazard_target":
+            if action == _sx(1110):
                 self._edit_practice_hazard_target()
                 return True
-            if action == "toggle_practice_speed_scaling":
-                self.settings["practice_speed_scaling_enabled"] = not self._practice_speed_scaling_enabled()
-                self.audio.play("confirm", channel="ui")
+            if action == _sx(1378):
+                self.settings[_sx(325)] = not self._practice_speed_scaling_enabled()
+                self.audio.play(_sx(56), channel=_sx(180))
                 self._refresh_loadout_menu_labels()
-                self.speaker.speak(
-                    self.loadout_menu.items[
-                        self._menu_index_for_action(self.loadout_menu, "toggle_practice_speed_scaling")
-                    ].label,
-                    interrupt=True,
-                )
+                self.speaker.speak(self.loadout_menu.items[self._menu_index_for_action(self.loadout_menu, _sx(1378))].label, interrupt=True)
                 return True
-            if action == "begin_run":
+            if action == _sx(1379):
                 self.start_run(practice_mode=self._pending_practice_setup)
                 return True
-
         if self.active_menu == self.events_menu:
-            if action == "event_info":
+            if action == _sx(1213):
                 if self.events_menu.items:
                     item = self.events_menu.items[min(self.events_menu.index, len(self.events_menu.items) - 1)]
                     self.speaker.speak(item.label, interrupt=True)
                 return True
-            if action == "open_event_shop":
+            if action == _sx(1215):
                 self._refresh_event_shop_menu_labels()
                 self._set_active_menu(self.event_shop_menu)
                 return True
-            if action == "claim_daily_high_score":
-                if self._apply_meta_reward(claim_daily_high_score_reward(self.settings), "Daily High Score reward"):
-                    self.audio.play("mission_reward", channel="ui")
+            if action == _sx(1216):
+                if self._apply_meta_reward(claim_daily_high_score_reward(self.settings), _sx(1666)):
+                    self.audio.play(_sx(100), channel=_sx(180))
                     self._refresh_events_menu_labels()
                     self._persist_settings()
                 return True
-            if action == "claim_coin_meter":
-                if self._apply_meta_reward(claim_coin_meter_reward(self.settings), "Coin Meter chest"):
-                    self.audio.play("mission_reward", channel="ui")
+            if action == _sx(1217):
+                if self._apply_meta_reward(claim_coin_meter_reward(self.settings), _sx(1667)):
+                    self.audio.play(_sx(100), channel=_sx(180))
                     self._refresh_events_menu_labels()
                     self._persist_settings()
                 return True
-            if action == "claim_daily_gift":
+            if action == _sx(1219):
                 reward = claim_daily_gift(self.settings)
                 if reward is not None:
-                    self.audio.play("mystery_box_open", channel="ui")
-                if self._apply_meta_reward(reward, "Free Daily Gift"):
+                    self.audio.play(_sx(98), channel=_sx(180))
+                if self._apply_meta_reward(reward, _sx(1668)):
                     self._refresh_events_menu_labels()
                     self._refresh_shop_menu_labels()
                     self._persist_settings()
                 return True
-            if action == "claim_login_reward":
-                if self._apply_meta_reward(claim_login_calendar_reward(self.settings), "Daily Login reward"):
-                    self.audio.play("mission_reward", channel="ui")
+            if action == _sx(1220):
+                if self._apply_meta_reward(claim_login_calendar_reward(self.settings), _sx(1669)):
+                    self.audio.play(_sx(100), channel=_sx(180))
                     self._refresh_events_menu_labels()
                     self._persist_settings()
                 return True
-            if action == "back":
-                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "events"))
+            if action == _sx(429):
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, _sx(1270)))
                 return True
             return True
-
         if self.active_menu == self.wheel_menu:
-            if action == "wheel_info":
+            if action == _sx(1175):
                 if self.wheel_menu.items:
                     item = self.wheel_menu.items[min(self.wheel_menu.index, len(self.wheel_menu.items) - 1)]
                     self.speaker.speak(item.label, interrupt=True)
                 return True
-            if action == "wheel_spin_now":
+            if action == _sx(1176):
                 self._request_weekly_wheel_spin()
                 return True
-            if action.startswith("wheel_item_info:"):
-                item_key = action.split(":", 1)[1]
-                effect = SPECIAL_ITEM_EFFECT_TEXT.get(item_key, "Special server-side run effect.")
-                self.speaker.speak(f"{self._special_item_label(item_key)}. {effect}", interrupt=True)
+            if action.startswith(_sx(1380)):
+                item_key = action.split(_sx(560), 1)[1]
+                effect = SPECIAL_ITEM_EFFECT_TEXT.get(item_key, _sx(1670))
+                self.speaker.speak(_sx(988).format(self._special_item_label(item_key), effect), interrupt=True)
                 return True
-            if action == "back":
-                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "wheel_spin"))
+            if action == _sx(429):
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, _sx(99)))
                 return True
             return True
-
         if self.active_menu == self.event_shop_menu:
-            if action == "event_shop_buy_character":
-                self._run_or_confirm_purchase(
-                    self._buy_event_shop_character,
-                    return_menu=self.event_shop_menu,
-                    return_index=self._menu_index_for_action(self.event_shop_menu, "event_shop_buy_character"),
-                )
+            if action == _sx(1221):
+                self._run_or_confirm_purchase(self._buy_event_shop_character, return_menu=self.event_shop_menu, return_index=self._menu_index_for_action(self.event_shop_menu, _sx(1221)))
                 return True
-            if action == "event_shop_buy_board":
-                self._run_or_confirm_purchase(
-                    self._buy_event_shop_board,
-                    return_menu=self.event_shop_menu,
-                    return_index=self._menu_index_for_action(self.event_shop_menu, "event_shop_buy_board"),
-                )
+            if action == _sx(1222):
+                self._run_or_confirm_purchase(self._buy_event_shop_board, return_menu=self.event_shop_menu, return_index=self._menu_index_for_action(self.event_shop_menu, _sx(1222)))
                 return True
-            if action == "event_shop_buy_key":
-                self._run_or_confirm_purchase(
-                    lambda: self._buy_event_shop_reward(
-                        EVENT_SHOP_KEY_COST,
-                        {"kind": "key", "amount": 1},
-                        "Event Shop",
-                    ),
-                    return_menu=self.event_shop_menu,
-                    return_index=self._menu_index_for_action(self.event_shop_menu, "event_shop_buy_key"),
-                )
+            if action == _sx(1223):
+                self._run_or_confirm_purchase(lambda: self._buy_event_shop_reward(EVENT_SHOP_KEY_COST, {_sx(592): _sx(569), _sx(593): 1}, _sx(804)), return_menu=self.event_shop_menu, return_index=self._menu_index_for_action(self.event_shop_menu, _sx(1223)))
                 return True
-            if action == "event_shop_buy_hoverboards":
-                self._run_or_confirm_purchase(
-                    lambda: self._buy_event_shop_reward(
-                        EVENT_SHOP_HOVERBOARD_PACK_COST,
-                        {"kind": "hoverboard", "amount": 2},
-                        "Event Shop",
-                    ),
-                    return_menu=self.event_shop_menu,
-                    return_index=self._menu_index_for_action(self.event_shop_menu, "event_shop_buy_hoverboards"),
-                )
+            if action == _sx(1224):
+                self._run_or_confirm_purchase(lambda: self._buy_event_shop_reward(EVENT_SHOP_HOVERBOARD_PACK_COST, {_sx(592): _sx(594), _sx(593): 2}, _sx(804)), return_menu=self.event_shop_menu, return_index=self._menu_index_for_action(self.event_shop_menu, _sx(1224)))
                 return True
-            if action == "event_shop_buy_headstart":
-                self._run_or_confirm_purchase(
-                    lambda: self._buy_event_shop_reward(
-                        EVENT_SHOP_HEADSTART_COST,
-                        {"kind": "headstart", "amount": 1},
-                        "Event Shop",
-                    ),
-                    return_menu=self.event_shop_menu,
-                    return_index=self._menu_index_for_action(self.event_shop_menu, "event_shop_buy_headstart"),
-                )
+            if action == _sx(1225):
+                self._run_or_confirm_purchase(lambda: self._buy_event_shop_reward(EVENT_SHOP_HEADSTART_COST, {_sx(592): _sx(595), _sx(593): 1}, _sx(804)), return_menu=self.event_shop_menu, return_index=self._menu_index_for_action(self.event_shop_menu, _sx(1225)))
                 return True
-            if action == "event_shop_buy_score_booster":
-                self._run_or_confirm_purchase(
-                    lambda: self._buy_event_shop_reward(
-                        EVENT_SHOP_SCORE_BOOSTER_COST,
-                        {"kind": "score_booster", "amount": 1},
-                        "Event Shop",
-                    ),
-                    return_menu=self.event_shop_menu,
-                    return_index=self._menu_index_for_action(self.event_shop_menu, "event_shop_buy_score_booster"),
-                )
+            if action == _sx(1226):
+                self._run_or_confirm_purchase(lambda: self._buy_event_shop_reward(EVENT_SHOP_SCORE_BOOSTER_COST, {_sx(592): _sx(596), _sx(593): 1}, _sx(804)), return_menu=self.event_shop_menu, return_index=self._menu_index_for_action(self.event_shop_menu, _sx(1226)))
                 return True
-            if action == "event_shop_buy_super_box":
-                self._run_or_confirm_purchase(
-                    lambda: self._buy_event_shop_reward(
-                        EVENT_SHOP_SUPER_BOX_COST,
-                        {"kind": "super_box", "amount": 1},
-                        "Event Shop",
-                    ),
-                    return_menu=self.event_shop_menu,
-                    return_index=self._menu_index_for_action(self.event_shop_menu, "event_shop_buy_super_box"),
-                )
+            if action == _sx(1227):
+                self._run_or_confirm_purchase(lambda: self._buy_event_shop_reward(EVENT_SHOP_SUPER_BOX_COST, {_sx(592): _sx(598), _sx(593): 1}, _sx(804)), return_menu=self.event_shop_menu, return_index=self._menu_index_for_action(self.event_shop_menu, _sx(1227)))
                 return True
-            if action == "back":
+            if action == _sx(429):
                 self._refresh_events_menu_labels()
-                self._set_active_menu(self.events_menu, start_index=self._menu_index_for_action(self.events_menu, "open_event_shop"))
+                self._set_active_menu(self.events_menu, start_index=self._menu_index_for_action(self.events_menu, _sx(1215)))
                 return True
             return True
-
         if self.active_menu == self.missions_hub_menu:
-            if action == "open_quests":
+            if action == _sx(1234):
                 self._refresh_quest_menu_labels()
                 self._set_active_menu(self.quests_menu)
                 return True
-            if action == "open_mission_set":
+            if action == _sx(1235):
                 self._refresh_mission_set_menu_labels()
                 self._set_active_menu(self.mission_set_menu)
                 return True
-            if action == "open_achievements":
+            if action == _sx(1236):
                 self._refresh_achievements_menu_labels()
                 self._set_active_menu(self.achievements_menu)
                 return True
-            if action == "back":
-                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "missions_hub"))
+            if action == _sx(429):
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, _sx(1272)))
                 return True
             return True
-
         if self.active_menu == self.mission_set_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._refresh_missions_hub_menu_labels()
-                self._set_active_menu(self.missions_hub_menu, start_index=self._menu_index_for_action(self.missions_hub_menu, "open_mission_set"))
+                self._set_active_menu(self.missions_hub_menu, start_index=self._menu_index_for_action(self.missions_hub_menu, _sx(1235)))
                 return True
             return True
-
         if self.active_menu == self.quests_menu:
-            if action == "claim_quest_meter":
-                if self._apply_meta_reward(claim_meter_reward(self.settings), "Sneaker Meter reward"):
-                    self.audio.play("mission_reward", channel="ui")
+            if action == _sx(1240):
+                if self._apply_meta_reward(claim_meter_reward(self.settings), _sx(1671)):
+                    self.audio.play(_sx(100), channel=_sx(180))
                     self._refresh_quest_menu_labels()
                     self._persist_settings()
                 return True
-            if action.startswith("claim_quest:"):
-                quest_key = action.split(":", 1)[1]
+            if action.startswith(_sx(1381)):
+                quest_key = action.split(_sx(560), 1)[1]
                 quest = claim_quest(self.settings, quest_key)
                 if quest is None:
-                    self.audio.play("menuedge", channel="ui")
-                    self.speaker.speak("That quest is not ready yet.", interrupt=True)
+                    self.audio.play(_sx(52), channel=_sx(180))
+                    self.speaker.speak(_sx(1801), interrupt=True)
                     return True
-                self.audio.play("mission_reward", channel="ui")
-                self.audio.play("unlock", channel="ui2")
-                self.speaker.speak(f"{quest.label}. {quest.sneaker_reward} sneakers added.", interrupt=True)
+                self.audio.play(_sx(100), channel=_sx(180))
+                self.audio.play(_sx(108), channel=_sx(1250))
+                self.speaker.speak(_sx(1672).format(quest.label, quest.sneaker_reward), interrupt=True)
                 self._refresh_quest_menu_labels()
                 self._refresh_missions_hub_menu_labels()
                 self._persist_settings()
                 return True
-            if action == "reset_daily_progress":
+            if action == _sx(1242):
                 self._reset_daily_progress()
                 return True
-            if action == "back":
+            if action == _sx(429):
                 self._refresh_missions_hub_menu_labels()
-                self._set_active_menu(self.missions_hub_menu, start_index=self._menu_index_for_action(self.missions_hub_menu, "open_quests"))
+                self._set_active_menu(self.missions_hub_menu, start_index=self._menu_index_for_action(self.missions_hub_menu, _sx(1234)))
                 return True
             return True
-
         if self.active_menu == self.me_menu:
-            if action == "open_characters":
+            if action == _sx(1243):
                 self._meta_return_menu = self.me_menu
                 self._refresh_character_menu_labels()
                 self._set_active_menu(self.character_menu)
                 return True
-            if action == "open_boards":
+            if action == _sx(1244):
                 self._meta_return_menu = self.me_menu
                 self._refresh_board_menu_labels()
                 self._set_active_menu(self.board_menu)
                 return True
-            if action == "open_item_upgrades":
+            if action == _sx(1245):
                 self._meta_return_menu = self.me_menu
                 self._refresh_item_upgrade_menu_labels()
                 self._set_active_menu(self.item_upgrade_menu)
                 return True
-            if action == "open_collections":
+            if action == _sx(1246):
                 self._refresh_collection_menu_labels()
                 self._set_active_menu(self.collection_menu)
                 return True
-            if action == "back":
-                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "me"))
+            if action == _sx(429):
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, _sx(1274)))
                 return True
             return True
-
         if self.active_menu == self.options_menu:
-            if action == "opt_leaderboard_account":
+            if action == _sx(1195):
                 self._prompt_and_authenticate_leaderboard_account()
                 return True
-            if action == "opt_leaderboard_logout":
-                self._set_active_menu(
-                    self.leaderboard_logout_confirm_menu,
-                    start_index=self._menu_index_for_action(
-                        self.leaderboard_logout_confirm_menu,
-                        "cancel_leaderboard_logout",
-                    ),
-                )
+            if action == _sx(1382):
+                self._set_active_menu(self.leaderboard_logout_confirm_menu, start_index=self._menu_index_for_action(self.leaderboard_logout_confirm_menu, _sx(1426)))
                 return True
-            if action == "opt_sapi_menu":
+            if action == _sx(1194):
                 self._refresh_sapi_menu_labels()
                 self._set_active_menu(self.sapi_menu)
                 return True
-            if action == "opt_gameplay_announcements":
+            if action == _sx(1383):
                 self._refresh_announcements_menu_labels()
                 self._set_active_menu(self.announcements_menu)
                 return True
-            if action == "opt_controls":
-                self._selected_binding_device = "controller" if self.controls.active_controller() is not None else "keyboard"
+            if action == _sx(1384):
+                self._selected_binding_device = _sx(565) if self.controls.active_controller() is not None else _sx(563)
                 self._refresh_control_menus()
                 self._set_active_menu(self.controls_menu)
                 return True
-            if action == "back":
-                self.audio.play("menuclose", channel="ui")
+            if action == _sx(429):
+                self.audio.play(_sx(55), channel=_sx(180))
                 return_menu = self._options_return_menu or self.main_menu
-                start_index = (
-                    self._menu_index_for_action(self.pause_menu, "pause_options")
-                    if return_menu == self.pause_menu
-                    else None
-                )
+                start_index = self._menu_index_for_action(self.pause_menu, _sx(1421)) if return_menu == self.pause_menu else None
                 self._set_active_menu(return_menu, start_index=start_index)
                 return True
             return True
-
         if self.active_menu == self.sapi_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._refresh_options_menu_labels()
-                self._set_active_menu(self.options_menu, start_index=self._update_option_index("opt_sapi_menu"))
+                self._set_active_menu(self.options_menu, start_index=self._update_option_index(_sx(1194)))
                 return True
             return True
-
         if self.active_menu == self.announcements_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._refresh_options_menu_labels()
-                self._set_active_menu(
-                    self.options_menu,
-                    start_index=self._update_option_index("opt_gameplay_announcements"),
-                )
+                self._set_active_menu(self.options_menu, start_index=self._update_option_index(_sx(1383)))
                 return True
             return True
-
         if self.active_menu == self.controls_menu:
-            if action == "announce_active_input":
-                self.speaker.speak(
-                    f"Current input is {self.controls.current_input_label()}. {self.controls.current_controller_label()}.",
-                    interrupt=True,
-                )
+            if action == _sx(1253):
+                self.speaker.speak(_sx(1673).format(self.controls.current_input_label(), self.controls.current_controller_label()), interrupt=True)
                 return True
-            if action == "select_binding_profile":
+            if action == _sx(984):
                 self.speaker.speak(self.controls_menu.items[self.controls_menu.index].label, interrupt=True)
                 return True
-            if action == "open_selected_bindings":
-                if self._selected_binding_device == "controller":
+            if action == _sx(1256):
+                if self._selected_binding_device == _sx(565):
                     if self.controls.active_controller() is None:
-                        self._play_menu_feedback("menuedge")
-                        self.speaker.speak("No controller connected.", interrupt=True)
+                        self._play_menu_feedback(_sx(52))
+                        self.speaker.speak(_sx(1805), interrupt=True)
                         return True
                     self._build_controller_bindings_menu()
                     self._set_active_menu(self.controller_bindings_menu)
@@ -4796,92 +3508,88 @@ class SubwayBlindGame:
                 self._build_keyboard_bindings_menu()
                 self._set_active_menu(self.keyboard_bindings_menu)
                 return True
-            if action == "reset_selected_bindings":
-                if self._selected_binding_device == "controller":
+            if action == _sx(1258):
+                if self._selected_binding_device == _sx(565):
                     if self.controls.active_controller() is None:
-                        self._play_menu_feedback("menuedge")
-                        self.speaker.speak("No controller connected.", interrupt=True)
+                        self._play_menu_feedback(_sx(52))
+                        self.speaker.speak(_sx(1805), interrupt=True)
                         return True
                     family = self.controls.current_controller_family()
                     self.controls.reset_controller_bindings(family)
                     self._build_controls_menu()
-                    self._play_menu_feedback("confirm")
-                    self.speaker.speak(f"{family_label(family)} bindings reset to recommended defaults.", interrupt=True)
+                    self._play_menu_feedback(_sx(56))
+                    self.speaker.speak(_sx(1675).format(family_label(family)), interrupt=True)
                     return True
                 self.controls.reset_keyboard_bindings()
                 self._build_controls_menu()
-                self._play_menu_feedback("confirm")
-                self.speaker.speak("Keyboard bindings reset to defaults.", interrupt=True)
+                self._play_menu_feedback(_sx(56))
+                self.speaker.speak(_sx(1674), interrupt=True)
                 return True
-            if action == "back":
+            if action == _sx(429):
                 self._refresh_options_menu_labels()
-                self._set_active_menu(self.options_menu, start_index=self._update_option_index("opt_controls"))
+                self._set_active_menu(self.options_menu, start_index=self._update_option_index(_sx(1384)))
                 return True
-
         if self.active_menu == self.keyboard_bindings_menu:
-            if action == "reset_keyboard_bindings":
+            if action == _sx(1260):
                 self.controls.reset_keyboard_bindings()
                 self._build_keyboard_bindings_menu()
-                self._play_menu_feedback("confirm")
-                self.speaker.speak("Keyboard bindings reset to defaults.", interrupt=True)
+                self._play_menu_feedback(_sx(56))
+                self.speaker.speak(_sx(1674), interrupt=True)
                 return True
-            if action.startswith("bind_keyboard:"):
-                self._begin_binding_capture("keyboard", action.split(":", 1)[1])
+            if action.startswith(_sx(1385)):
+                self._begin_binding_capture(_sx(563), action.split(_sx(560), 1)[1])
                 return True
-            if action == "back":
+            if action == _sx(429):
                 self._build_controls_menu()
                 self._set_active_menu(self.controls_menu, start_index=2)
                 return True
-
         if self.active_menu == self.controller_bindings_menu:
-            if action == "reset_controller_bindings":
+            if action == _sx(1264):
                 family = self.controls.current_controller_family()
                 self.controls.reset_controller_bindings(family)
                 self._build_controller_bindings_menu()
-                self._play_menu_feedback("confirm")
-                self.speaker.speak(f"{family_label(family)} bindings reset to recommended defaults.", interrupt=True)
+                self._play_menu_feedback(_sx(56))
+                self.speaker.speak(_sx(1675).format(family_label(family)), interrupt=True)
                 return True
-            if action.startswith("bind_controller:"):
+            if action.startswith(_sx(1386)):
                 if self.controls.active_controller() is None:
-                    self._play_menu_feedback("menuedge")
-                    self.speaker.speak("No controller connected.", interrupt=True)
+                    self._play_menu_feedback(_sx(52))
+                    self.speaker.speak(_sx(1805), interrupt=True)
                     return True
-                self._begin_binding_capture("controller", action.split(":", 1)[1])
+                self._begin_binding_capture(_sx(565), action.split(_sx(560), 1)[1])
                 return True
-            if action == "back":
+            if action == _sx(429):
                 self._build_controls_menu()
                 self._set_active_menu(self.controls_menu, start_index=2)
                 return True
-
         if self.active_menu == self.update_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._set_active_menu(self.main_menu)
                 return True
-            if action == "download_update":
+            if action == _sx(995):
                 self._begin_update_install()
                 return True
-            if action == "install_busy":
+            if action == _sx(764):
                 return True
-            if action == "restart_after_update":
+            if action == _sx(766):
                 if self._update_restart_script_path and self.updater.launch_restart_script(self._update_restart_script_path):
-                    self.speaker.speak("Restarting to apply the update.", interrupt=True)
+                    self.speaker.speak(_sx(1806), interrupt=True)
                     return False
-                self.speaker.speak("Update files are ready. Restart the game to finish applying them.", interrupt=True)
+                self.speaker.speak(_sx(1676), interrupt=True)
                 return False
-            if action == "open_release_page":
+            if action == _sx(757):
                 release = self._latest_update_result.release if self._latest_update_result is not None else None
                 opened = self.updater.open_release_page(release)
                 if opened:
-                    self.speaker.speak("Opening the release page.", interrupt=True)
+                    self.speaker.speak(_sx(1807), interrupt=True)
                     return True
-                self._play_menu_feedback("menuedge")
-                self.speaker.speak("Unable to open the release page.", interrupt=True)
+                self._play_menu_feedback(_sx(52))
+                self.speaker.speak(_sx(1677), interrupt=True)
                 return True
-            if action == "quit":
+            if action == _sx(768):
                 return False
-
         if self.active_menu == self.server_status_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._cancel_leaderboard_operation()
                 if self._leaderboard_return_menu is not None:
                     self._set_active_menu(self._leaderboard_return_menu)
@@ -4890,173 +3598,142 @@ class SubwayBlindGame:
                 return True
             self.speaker.speak(self.server_status_menu.items[0].label, interrupt=True)
             return True
-
         if self.active_menu == self.leaderboard_menu:
-            if action == "back":
-                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "leaderboard"))
+            if action == _sx(429):
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, _sx(1278)))
                 return True
-            if action == "leaderboard_cycle_period":
+            if action == _sx(1387):
                 self._cycle_leaderboard_period()
                 return True
-            if action == "leaderboard_cycle_difficulty":
+            if action == _sx(1388):
                 self._cycle_leaderboard_difficulty()
                 return True
-            if action == "leaderboard_refresh":
+            if action == _sx(1083):
                 self._open_leaderboard(force_refresh=True)
                 return True
-            if action.startswith("leaderboard_player:"):
-                self._open_leaderboard_profile(action.split(":", 1)[1])
+            if action.startswith(_sx(1389)):
+                self._open_leaderboard_profile(action.split(_sx(560), 1)[1])
                 return True
-            if action == "leaderboard_info":
+            if action == _sx(1390):
                 self.speaker.speak(self.leaderboard_menu.items[self.leaderboard_menu.index].label, interrupt=True)
                 return True
-
         if self.active_menu == self.leaderboard_profile_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._set_active_menu(self.leaderboard_menu)
                 return True
-            if action.startswith("leaderboard_run:"):
-                self._open_leaderboard_run_detail(action.split(":", 1)[1])
+            if action.startswith(_sx(1391)):
+                self._open_leaderboard_run_detail(action.split(_sx(560), 1)[1])
                 return True
             self.speaker.speak(self.leaderboard_profile_menu.items[self.leaderboard_profile_menu.index].label, interrupt=True)
             return True
-
         if self.active_menu == self.leaderboard_run_detail_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._set_active_menu(self.leaderboard_profile_menu)
                 return True
             self.speaker.speak(self.leaderboard_run_detail_menu.items[self.leaderboard_run_detail_menu.index].label, interrupt=True)
             return True
-
         if self.active_menu == self.issue_menu:
-            if action == "back":
-                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "issue_reports"))
+            if action == _sx(429):
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, _sx(1281)))
                 return True
-            if action == "issue_submit":
+            if action == _sx(1073):
                 self._begin_issue_submission()
                 return True
-            if action == "issue_cycle_status":
+            if action == _sx(1392):
                 self._cycle_issue_status_filter()
                 return True
-            if action == "issue_prev_page":
+            if action == _sx(1101):
                 self._change_issue_page(-1)
                 return True
-            if action == "issue_next_page":
+            if action == _sx(1102):
                 self._change_issue_page(1)
                 return True
-            if action == "issue_refresh":
+            if action == _sx(1100):
                 self._open_issue_reports(force_refresh=True)
                 return True
-            if action.startswith("issue_report:"):
-                self._open_issue_report_detail(action.split(":", 1)[1])
+            if action.startswith(_sx(1393)):
+                self._open_issue_report_detail(action.split(_sx(560), 1)[1])
                 return True
             self.speaker.speak(self.issue_menu.items[self.issue_menu.index].label, interrupt=True)
             return True
-
         if self.active_menu == self.issue_compose_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._refresh_issue_menu()
-                self._set_active_menu(self.issue_menu, start_index=self._menu_index_for_action(self.issue_menu, "issue_submit"))
+                self._set_active_menu(self.issue_menu, start_index=self._menu_index_for_action(self.issue_menu, _sx(1073)))
                 return True
-            if action == "issue_edit_title":
-                self._edit_issue_draft_field("title")
+            if action == _sx(1108):
+                self._edit_issue_draft_field(_sx(1106))
                 return True
-            if action == "issue_edit_message":
-                self._edit_issue_draft_field("message")
+            if action == _sx(1109):
+                self._edit_issue_draft_field(_sx(1495))
                 return True
-            if action == "issue_submit_confirm":
+            if action == _sx(1394):
                 self._submit_issue_draft()
                 return True
             self.speaker.speak(self.issue_compose_menu.items[self.issue_compose_menu.index].label, interrupt=True)
             return True
-
         if self.active_menu == self.issue_detail_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._set_active_menu(self.issue_menu)
                 return True
-            if action == "copy_info_line":
-                return self._copy_menu_text(
-                    self.issue_detail_menu.items[self.issue_detail_menu.index].label,
-                    "Selected line copied to clipboard.",
-                )
-            if action == "copy_info_all":
-                return self._copy_menu_text(
-                    self._selected_info_copy_all_text(self.issue_detail_menu),
-                    self._selected_info_copy_all_message(self.issue_detail_menu),
-                )
+            if action == _sx(1395):
+                return self._copy_menu_text(self.issue_detail_menu.items[self.issue_detail_menu.index].label, _sx(1678))
+            if action == _sx(1396):
+                return self._copy_menu_text(self._selected_info_copy_all_text(self.issue_detail_menu), self._selected_info_copy_all_message(self.issue_detail_menu))
             self.speaker.speak(self.issue_detail_menu.items[self.issue_detail_menu.index].label, interrupt=True)
             return True
-
         if self.active_menu == self.shop_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._set_active_menu(self.main_menu)
                 return True
-            if action == "buy_hoverboard":
-                self._run_or_confirm_purchase(
-                    lambda: self._purchase_shop_item("hoverboard"),
-                    return_menu=self.shop_menu,
-                    return_index=self._menu_index_for_action(self.shop_menu, "buy_hoverboard"),
-                )
+            if action == _sx(1397):
+                self._run_or_confirm_purchase(lambda: self._purchase_shop_item(_sx(594)), return_menu=self.shop_menu, return_index=self._menu_index_for_action(self.shop_menu, _sx(1397)))
                 return True
-            if action == "buy_box":
-                self._run_or_confirm_purchase(
-                    lambda: self._purchase_shop_item("mystery_box"),
-                    return_menu=self.shop_menu,
-                    return_index=self._menu_index_for_action(self.shop_menu, "buy_box"),
-                )
+            if action == _sx(1398):
+                self._run_or_confirm_purchase(lambda: self._purchase_shop_item(_sx(21)), return_menu=self.shop_menu, return_index=self._menu_index_for_action(self.shop_menu, _sx(1398)))
                 return True
-            if action == "buy_headstart":
-                self._run_or_confirm_purchase(
-                    lambda: self._purchase_shop_item("headstart"),
-                    return_menu=self.shop_menu,
-                    return_index=self._menu_index_for_action(self.shop_menu, "buy_headstart"),
-                )
+            if action == _sx(1399):
+                self._run_or_confirm_purchase(lambda: self._purchase_shop_item(_sx(595)), return_menu=self.shop_menu, return_index=self._menu_index_for_action(self.shop_menu, _sx(1399)))
                 return True
-            if action == "buy_score_booster":
-                self._run_or_confirm_purchase(
-                    lambda: self._purchase_shop_item("score_booster"),
-                    return_menu=self.shop_menu,
-                    return_index=self._menu_index_for_action(self.shop_menu, "buy_score_booster"),
-                )
+            if action == _sx(1400):
+                self._run_or_confirm_purchase(lambda: self._purchase_shop_item(_sx(596)), return_menu=self.shop_menu, return_index=self._menu_index_for_action(self.shop_menu, _sx(1400)))
                 return True
-            if action == "claim_daily_gift":
+            if action == _sx(1219):
                 reward = claim_daily_gift(self.settings)
                 if reward is not None:
-                    self.audio.play("mystery_box_open", channel="ui")
-                if self._apply_meta_reward(reward, "Free Daily Gift"):
+                    self.audio.play(_sx(98), channel=_sx(180))
+                if self._apply_meta_reward(reward, _sx(1668)):
                     self._refresh_shop_menu_labels()
                     self._refresh_events_menu_labels()
                     self._persist_settings()
                 return True
-            if action == "open_item_upgrades":
+            if action == _sx(1245):
                 self._meta_return_menu = self.shop_menu
                 self._refresh_item_upgrade_menu_labels()
                 self._set_active_menu(self.item_upgrade_menu)
                 self.speaker.speak(self._shop_coins_label(), interrupt=False)
                 return True
-            if action == "open_character_upgrades":
+            if action == _sx(1401):
                 self._meta_return_menu = self.shop_menu
                 self._refresh_character_menu_labels()
                 self._set_active_menu(self.character_menu)
                 self.speaker.speak(self._shop_coins_label(), interrupt=False)
                 return True
-
         if self.active_menu == self.item_upgrade_menu:
-            if action == "back":
+            if action == _sx(429):
                 if self._meta_return_menu in {None, self.shop_menu}:
                     self._refresh_shop_menu_labels()
-                    self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_item_upgrades"))
+                    self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, _sx(1245)))
                     return True
                 self._refresh_me_menu_labels()
-                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_item_upgrades"))
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, _sx(1245)))
                 return True
-            if action.startswith("item_upgrade_open:"):
-                self._refresh_item_upgrade_detail_menu_labels(action.split(":", 1)[1])
+            if action.startswith(_sx(1402)):
+                self._refresh_item_upgrade_detail_menu_labels(action.split(_sx(560), 1)[1])
                 self._set_active_menu(self.item_upgrade_detail_menu)
                 return True
-
         if self.active_menu == self.item_upgrade_detail_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._refresh_item_upgrade_menu_labels()
                 upgrade_keys = [definition.key for definition in item_upgrade_definitions()]
                 try:
@@ -5065,43 +3742,37 @@ class SubwayBlindGame:
                     start_index = 0
                 self._set_active_menu(self.item_upgrade_menu, start_index=start_index)
                 return True
-            if action.startswith("item_upgrade_status_info:"):
-                definition = item_upgrade_definition(action.split(":", 1)[1])
-                self.speaker.speak(f"{definition.name}. {self._item_upgrade_status_label(definition.key)}.", interrupt=True)
+            if action.startswith(_sx(1403)):
+                definition = item_upgrade_definition(action.split(_sx(560), 1)[1])
+                self.speaker.speak(_sx(1679).format(definition.name, self._item_upgrade_status_label(definition.key)), interrupt=True)
                 return True
-            if action.startswith("item_upgrade_effect_info:"):
-                definition = item_upgrade_definition(action.split(":", 1)[1])
-                self.speaker.speak(f"{definition.name}. {self._item_upgrade_effect_label(definition.key)}.", interrupt=True)
+            if action.startswith(_sx(1404)):
+                definition = item_upgrade_definition(action.split(_sx(560), 1)[1])
+                self.speaker.speak(_sx(1679).format(definition.name, self._item_upgrade_effect_label(definition.key)), interrupt=True)
                 return True
-            if action.startswith("item_upgrade_purchase:"):
-                key = action.split(":", 1)[1]
-                self._run_or_confirm_purchase(
-                    lambda key=key: self._purchase_item_upgrade(key),
-                    return_menu=self.item_upgrade_detail_menu,
-                    return_index=self.item_upgrade_detail_menu.index,
-                )
+            if action.startswith(_sx(1196)):
+                key = action.split(_sx(560), 1)[1]
+                self._run_or_confirm_purchase(lambda key=key: self._purchase_item_upgrade(key), return_menu=self.item_upgrade_detail_menu, return_index=self.item_upgrade_detail_menu.index)
                 return True
-            if action.startswith("item_upgrade_max_info:"):
-                definition = item_upgrade_definition(action.split(":", 1)[1])
-                self.speaker.speak(f"{definition.name} is already at max level.", interrupt=True)
+            if action.startswith(_sx(1197)):
+                definition = item_upgrade_definition(action.split(_sx(560), 1)[1])
+                self.speaker.speak(_sx(1335).format(definition.name), interrupt=True)
                 return True
-
         if self.active_menu == self.character_menu:
-            if action == "back":
+            if action == _sx(429):
                 if self._meta_return_menu in {None, self.shop_menu}:
                     self._refresh_shop_menu_labels()
-                    self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, "open_character_upgrades"))
+                    self._set_active_menu(self.shop_menu, start_index=self._menu_index_for_action(self.shop_menu, _sx(1401)))
                     return True
                 self._refresh_me_menu_labels()
-                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_characters"))
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, _sx(1243)))
                 return True
-            if action.startswith("character_open:"):
-                self._refresh_character_detail_menu_labels(action.split(":", 1)[1])
+            if action.startswith(_sx(1405)):
+                self._refresh_character_detail_menu_labels(action.split(_sx(560), 1)[1])
                 self._set_active_menu(self.character_detail_menu)
                 return True
-
         if self.active_menu == self.character_detail_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._refresh_character_menu_labels()
                 character_keys = [definition.key for definition in character_definitions()]
                 try:
@@ -5110,52 +3781,36 @@ class SubwayBlindGame:
                     start_index = 0
                 self._set_active_menu(self.character_menu, start_index=start_index)
                 return True
-            if action.startswith("character_status_info:"):
-                definition = character_definition(action.split(":", 1)[1])
-                self.speaker.speak(
-                    f"{definition.name}. {self._character_status_label(definition.key)}.",
-                    interrupt=True,
-                )
+            if action.startswith(_sx(1406)):
+                definition = character_definition(action.split(_sx(560), 1)[1])
+                self.speaker.speak(_sx(1679).format(definition.name, self._character_status_label(definition.key)), interrupt=True)
                 return True
-            if action.startswith("character_perk_info:"):
-                definition = character_definition(action.split(":", 1)[1])
-                self.speaker.speak(
-                    f"{definition.name}. {definition.description} Current perk: {character_perk_summary(definition, character_level(self.settings, definition.key))}.",
-                    interrupt=True,
-                )
+            if action.startswith(_sx(1407)):
+                definition = character_definition(action.split(_sx(560), 1)[1])
+                self.speaker.speak(_sx(1680).format(definition.name, definition.description, character_perk_summary(definition, character_level(self.settings, definition.key))), interrupt=True)
                 return True
-            if action.startswith("character_unlock:"):
-                key = action.split(":", 1)[1]
-                self._run_or_confirm_purchase(
-                    lambda key=key: self._unlock_character(key),
-                    return_menu=self.character_detail_menu,
-                    return_index=self.character_detail_menu.index,
-                )
+            if action.startswith(_sx(1200)):
+                key = action.split(_sx(560), 1)[1]
+                self._run_or_confirm_purchase(lambda key=key: self._unlock_character(key), return_menu=self.character_detail_menu, return_index=self.character_detail_menu.index)
                 return True
-            if action.startswith("character_select:"):
-                self._select_character(action.split(":", 1)[1])
+            if action.startswith(_sx(1408)):
+                self._select_character(action.split(_sx(560), 1)[1])
                 return True
-            if action.startswith("character_upgrade:"):
-                key = action.split(":", 1)[1]
-                self._run_or_confirm_purchase(
-                    lambda key=key: self._upgrade_character(key),
-                    return_menu=self.character_detail_menu,
-                    return_index=self.character_detail_menu.index,
-                )
+            if action.startswith(_sx(1409)):
+                key = action.split(_sx(560), 1)[1]
+                self._run_or_confirm_purchase(lambda key=key: self._upgrade_character(key), return_menu=self.character_detail_menu, return_index=self.character_detail_menu.index)
                 return True
-
         if self.active_menu == self.board_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._refresh_me_menu_labels()
-                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_boards"))
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, _sx(1244)))
                 return True
-            if action.startswith("board_open:"):
-                self._refresh_board_detail_menu_labels(action.split(":", 1)[1])
+            if action.startswith(_sx(1410)):
+                self._refresh_board_detail_menu_labels(action.split(_sx(560), 1)[1])
                 self._set_active_menu(self.board_detail_menu)
                 return True
-
         if self.active_menu == self.board_detail_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._refresh_board_menu_labels()
                 board_keys = [definition.key for definition in board_definitions()]
                 try:
@@ -5164,201 +3819,164 @@ class SubwayBlindGame:
                     start_index = 0
                 self._set_active_menu(self.board_menu, start_index=start_index)
                 return True
-            if action.startswith("board_status_info:"):
-                definition = board_definition(action.split(":", 1)[1])
-                self.speaker.speak(f"{definition.name}. {self._board_status_label(definition.key)}.", interrupt=True)
+            if action.startswith(_sx(1411)):
+                definition = board_definition(action.split(_sx(560), 1)[1])
+                self.speaker.speak(_sx(1679).format(definition.name, self._board_status_label(definition.key)), interrupt=True)
                 return True
-            if action.startswith("board_power_info:"):
-                definition = board_definition(action.split(":", 1)[1])
-                self.speaker.speak(f"{definition.name}. {self._board_power_label(definition.key)}.", interrupt=True)
+            if action.startswith(_sx(1412)):
+                definition = board_definition(action.split(_sx(560), 1)[1])
+                self.speaker.speak(_sx(1679).format(definition.name, self._board_power_label(definition.key)), interrupt=True)
                 return True
-            if action.startswith("board_unlock:"):
-                key = action.split(":", 1)[1]
-                self._run_or_confirm_purchase(
-                    lambda key=key: self._unlock_board(key),
-                    return_menu=self.board_detail_menu,
-                    return_index=self.board_detail_menu.index,
-                )
+            if action.startswith(_sx(1208)):
+                key = action.split(_sx(560), 1)[1]
+                self._run_or_confirm_purchase(lambda key=key: self._unlock_board(key), return_menu=self.board_detail_menu, return_index=self.board_detail_menu.index)
                 return True
-            if action.startswith("board_select:"):
-                self._select_board(action.split(":", 1)[1])
+            if action.startswith(_sx(1413)):
+                self._select_board(action.split(_sx(560), 1)[1])
                 return True
-            if action.startswith("board_active_info:"):
-                definition = board_definition(action.split(":", 1)[1])
-                self.speaker.speak(f"{definition.name} is already the active board.", interrupt=True)
+            if action.startswith(_sx(1414)):
+                definition = board_definition(action.split(_sx(560), 1)[1])
+                self.speaker.speak(_sx(1681).format(definition.name), interrupt=True)
                 return True
-
         if self.active_menu == self.collection_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._refresh_me_menu_labels()
-                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, "open_collections"))
+                self._set_active_menu(self.me_menu, start_index=self._menu_index_for_action(self.me_menu, _sx(1246)))
                 return True
-            if action.startswith("collection_info:"):
-                key = action.split(":", 1)[1]
-                definition = next(item for item in collection_definitions() if item.key == key)
+            if action.startswith(_sx(1415)):
+                key = action.split(_sx(560), 1)[1]
+                definition = next((item for item in collection_definitions() if item.key == key))
                 owned, total = collection_progress(self.settings, definition)
-                status = "complete" if key in completed_collection_keys(self.settings) else "in progress"
-                self.speaker.speak(
-                    f"{definition.name}. {definition.description} {owned} of {total}. Bonus: {collection_bonus_summary(definition)}. Status: {status}.",
-                    interrupt=True,
-                )
+                status = _sx(1682) if key in completed_collection_keys(self.settings) else _sx(1683)
+                self.speaker.speak(_sx(1684).format(definition.name, definition.description, owned, total, collection_bonus_summary(definition), status), interrupt=True)
                 return True
-            if action.startswith("character_active_info:"):
-                definition = character_definition(action.split(":", 1)[1])
-                self.speaker.speak(f"{definition.name} is already your active character.", interrupt=True)
+            if action.startswith(_sx(1416)):
+                definition = character_definition(action.split(_sx(560), 1)[1])
+                self.speaker.speak(_sx(1685).format(definition.name), interrupt=True)
                 return True
-            if action.startswith("character_unlock_hint:"):
-                definition = character_definition(action.split(":", 1)[1])
-                self.speaker.speak(f"Unlock {definition.name} before upgrading.", interrupt=True)
+            if action.startswith(_sx(1203)):
+                definition = character_definition(action.split(_sx(560), 1)[1])
+                self.speaker.speak(_sx(1686).format(definition.name), interrupt=True)
                 return True
-            if action.startswith("character_max_info:"):
-                definition = character_definition(action.split(":", 1)[1])
-                self.speaker.speak(f"{definition.name} is already at max level.", interrupt=True)
+            if action.startswith(_sx(1417)):
+                definition = character_definition(action.split(_sx(560), 1)[1])
+                self.speaker.speak(_sx(1335).format(definition.name), interrupt=True)
                 return True
-
         if self.active_menu == self.achievements_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._refresh_missions_hub_menu_labels()
-                self._set_active_menu(self.missions_hub_menu, start_index=self._menu_index_for_action(self.missions_hub_menu, "open_achievements"))
+                self._set_active_menu(self.missions_hub_menu, start_index=self._menu_index_for_action(self.missions_hub_menu, _sx(1236)))
                 return True
-            if action.startswith("achievement:"):
-                achievement_key = action.split(":", 1)[1]
+            if action.startswith(_sx(1418)):
+                achievement_key = action.split(_sx(560), 1)[1]
                 for achievement in achievement_definitions():
                     if achievement.key == achievement_key:
                         self.speaker.speak(achievement.description, interrupt=True)
                         break
                 return True
-
         if self.active_menu == self.learn_sounds_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._set_active_menu(self.main_menu)
                 return True
-
         if self.active_menu == self.howto_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._showing_upgrade_help = False
                 self._refresh_howto_menu_labels()
                 self._set_active_menu(self.main_menu)
                 return True
-            if action.startswith("howto:"):
-                self._open_help_topic(action.split(":", 1)[1])
+            if action.startswith(_sx(1419)):
+                self._open_help_topic(action.split(_sx(560), 1)[1])
                 return True
-
         if self.active_menu == self.help_topic_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._set_active_menu(self.howto_menu)
                 return True
-            if action == "copy_info_line":
-                return self._copy_menu_text(
-                    self.help_topic_menu.items[self.help_topic_menu.index].label,
-                    "Selected line copied to clipboard.",
-                )
-            if action == "copy_info_all":
-                return self._copy_menu_text(
-                    self._selected_info_copy_all_text(self.help_topic_menu),
-                    self._selected_info_copy_all_message(self.help_topic_menu),
-                )
+            if action == _sx(1395):
+                return self._copy_menu_text(self.help_topic_menu.items[self.help_topic_menu.index].label, _sx(1678))
+            if action == _sx(1396):
+                return self._copy_menu_text(self._selected_info_copy_all_text(self.help_topic_menu), self._selected_info_copy_all_message(self.help_topic_menu))
             return True
-
         if self.active_menu == self.whats_new_menu:
-            if action == "back":
+            if action == _sx(429):
                 self._set_active_menu(self.main_menu)
                 return True
-            if action == "copy_info_line":
-                return self._copy_menu_text(
-                    self.whats_new_menu.items[self.whats_new_menu.index].label,
-                    "Selected line copied to clipboard.",
-                )
-            if action == "copy_info_all":
-                return self._copy_menu_text(
-                    self._selected_info_copy_all_text(self.whats_new_menu),
-                    self._selected_info_copy_all_message(self.whats_new_menu),
-                )
+            if action == _sx(1395):
+                return self._copy_menu_text(self.whats_new_menu.items[self.whats_new_menu.index].label, _sx(1678))
+            if action == _sx(1396):
+                return self._copy_menu_text(self._selected_info_copy_all_text(self.whats_new_menu), self._selected_info_copy_all_message(self.whats_new_menu))
                 return True
-
         if self.active_menu == self.pause_menu:
-            if action == "resume":
+            if action == _sx(1420):
                 self.state.paused = False
                 self._set_active_menu(None)
-                self.speaker.speak("Resume", interrupt=True)
+                self.speaker.speak(_sx(1577), interrupt=True)
                 return True
-            if action == "pause_options":
+            if action == _sx(1421):
                 self._options_return_menu = self.pause_menu
                 self._refresh_options_menu_labels()
                 self._set_active_menu(self.options_menu)
                 return True
-            if action == "to_main":
+            if action == _sx(1422):
                 self._set_active_menu(self.pause_confirm_menu)
                 return True
-
         if self.active_menu == self.pause_confirm_menu:
-            if action == "confirm_to_main":
+            if action == _sx(1423):
                 self.end_run(to_menu=True)
                 return True
-            if action == "cancel_to_main":
-                self._set_active_menu(self.pause_menu, start_index=self._menu_index_for_action(self.pause_menu, "to_main"))
+            if action == _sx(1424):
+                self._set_active_menu(self.pause_menu, start_index=self._menu_index_for_action(self.pause_menu, _sx(1422)))
                 return True
-
         if self.active_menu == self.leaderboard_logout_confirm_menu:
-            if action == "confirm_leaderboard_logout":
+            if action == _sx(1425):
                 self._logout_leaderboard_account()
                 return True
-            if action == "cancel_leaderboard_logout":
+            if action == _sx(1426):
                 self._refresh_options_menu_labels()
-                self._set_active_menu(
-                    self.options_menu,
-                    start_index=self._update_option_index("opt_leaderboard_logout"),
-                )
+                self._set_active_menu(self.options_menu, start_index=self._update_option_index(_sx(1382)))
                 return True
-
         if self.active_menu == self.publish_confirm_menu:
-            if action == "publish_confirm_yes":
+            if action == _sx(1427):
                 self._publish_latest_game_over_run()
                 return True
-            if action == "publish_confirm_no":
+            if action == _sx(1428):
                 target_menu = self._publish_confirm_return_menu or self.game_over_menu
                 self._set_active_menu(target_menu, start_index=self._publish_confirm_return_index)
                 return True
-
         if self.active_menu == self.purchase_confirm_menu:
-            if action == "confirm_purchase_yes":
+            if action == _sx(1429):
                 self._resolve_pending_purchase(accepted=True)
                 return True
-            if action == "confirm_purchase_no":
+            if action == _sx(1430):
                 self._resolve_pending_purchase(accepted=False)
                 return True
-
         if self.active_menu == self.exit_confirm_menu:
-            if action == "confirm_exit":
+            if action == _sx(1431):
                 return False
-            if action == "cancel_exit":
-                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, "quit"))
+            if action == _sx(1432):
+                self._set_active_menu(self.main_menu, start_index=self._menu_index_for_action(self.main_menu, _sx(768)))
                 return True
-
         if self.active_menu == self.revive_menu:
-            if action == "revive":
+            if action == _sx(1433):
                 self._revive_run()
                 return True
-            if action in ("end_run", "close"):
-                self._finish_run_loss("Run ended after crash")
+            if action in (_sx(1580), _sx(1067)):
+                self._finish_run_loss(_sx(1009))
                 return True
-
         if self.active_menu == self.game_over_menu:
-            if action == "game_over_retry":
+            if action == _sx(964):
                 self.start_run(practice_mode=self._practice_mode_active)
                 return True
-            if action == "game_over_main_menu":
-                if self._game_over_publish_state != "published" and self._should_offer_publish_prompt():
+            if action == _sx(965):
+                if self._game_over_publish_state != _sx(1071) and self._should_offer_publish_prompt():
                     self._open_publish_confirmation(return_menu=self.main_menu, start_index=0)
                     return True
                 self.active_menu = self.main_menu
                 self.active_menu.open()
                 return True
-            if action.startswith("game_over_info_"):
+            if action.startswith(_sx(1434)):
                 current_item = self.active_menu.items[self.active_menu.index]
                 self.speaker.speak(current_item.label, interrupt=True)
                 return True
-
         return True
 
     def _set_server_status(self, title: str, message: str) -> None:
@@ -5369,21 +3987,11 @@ class SubwayBlindGame:
         self._leaderboard_active_operation = None
         self._leaderboard_operation_token += 1
 
-    def _start_leaderboard_operation(
-        self,
-        operation: str,
-        title: str,
-        message: str,
-        worker,
-        *,
-        return_menu: Menu | None = None,
-        show_status: bool = True,
-        reject_message: bool = True,
-    ) -> bool:
+    def _start_leaderboard_operation(self, operation: str, title: str, message: str, worker, *, return_menu: Menu | None=None, show_status: bool=True, reject_message: bool=True) -> bool:
         if self._leaderboard_active_operation is not None:
             if reject_message:
-                self.audio.play("menuedge", channel="ui")
-                self.speaker.speak("Please wait for the current server request to finish.", interrupt=True)
+                self.audio.play(_sx(52), channel=_sx(180))
+                self.speaker.speak(_sx(1687), interrupt=True)
             return False
         self._leaderboard_active_operation = operation
         self._leaderboard_operation_token += 1
@@ -5397,15 +4005,10 @@ class SubwayBlindGame:
             try:
                 result = worker()
             except Exception as exc:
-                self._leaderboard_operation_queue.put(
-                    LeaderboardOperationResult(token=token, operation=operation, success=False, payload=exc)
-                )
+                self._leaderboard_operation_queue.put(LeaderboardOperationResult(token=token, operation=operation, success=False, payload=exc))
                 return
-            self._leaderboard_operation_queue.put(
-                LeaderboardOperationResult(token=token, operation=operation, success=True, payload=result)
-            )
-
-        threading.Thread(target=runner, name=f"leaderboard-{operation}", daemon=True).start()
+            self._leaderboard_operation_queue.put(LeaderboardOperationResult(token=token, operation=operation, success=True, payload=result))
+        threading.Thread(target=runner, name=_sx(1815).format(operation), daemon=True).start()
         return True
 
     def _update_leaderboard_operation_state(self) -> None:
@@ -5423,49 +4026,46 @@ class SubwayBlindGame:
             self._handle_leaderboard_success(result.operation, result.payload)
 
     def _handle_leaderboard_success(self, operation: str, payload: object) -> None:
-        if operation in {"leaderboard_connect", "leaderboard_refresh"}:
+        if operation in {_sx(1435), _sx(1083)}:
             data = dict(payload or {})
-            if bool(data.get("just_connected")):
-                self.audio.play("connect", channel="ui")
+            if bool(data.get(_sx(1327))):
+                self.audio.play(_sx(96), channel=_sx(180))
             selected_action = None
             if self.active_menu == self.leaderboard_menu and self.leaderboard_menu.items:
                 selected_action = self.leaderboard_menu.items[self.leaderboard_menu.index].action
-            self._leaderboard_period_filter = str(data.get("period") or self._leaderboard_period_filter or "season")
-            self._leaderboard_difficulty_filter = str(data.get("difficulty") or self._leaderboard_difficulty_filter or "all")
-            self._leaderboard_season = dict(data.get("season") or self._leaderboard_season or {})
-            self._leaderboard_entries = list(data.get("entries") or [])
-            self._leaderboard_total_players = int(data.get("total_players", len(self._leaderboard_entries)) or 0)
+            self._leaderboard_period_filter = str(data.get(_sx(1816)) or self._leaderboard_period_filter or _sx(659))
+            self._leaderboard_difficulty_filter = str(data.get(_sx(318)) or self._leaderboard_difficulty_filter or _sx(660))
+            self._leaderboard_season = dict(data.get(_sx(659)) or self._leaderboard_season or {})
+            self._leaderboard_entries = list(data.get(_sx(1817)) or [])
+            self._leaderboard_total_players = int(data.get(_sx(1818), len(self._leaderboard_entries)) or 0)
             self._leaderboard_cache_loaded_at = time.monotonic()
             self._refresh_leaderboard_menu()
             if selected_action:
                 self.leaderboard_menu.index = self._menu_index_for_action(self.leaderboard_menu, selected_action)
-            if operation == "leaderboard_connect":
+            if operation == _sx(1435):
                 self._set_active_menu(self.leaderboard_menu, play_sound=False)
             return
-        if operation == "leaderboard_profile":
+        if operation == _sx(1068):
             data = dict(payload or {})
             self._leaderboard_profile = data
-            self._leaderboard_season = dict(data.get("season") or self._leaderboard_season or {})
-            self._leaderboard_profile_history_count = int(data.get("history_total", 0) or 0)
+            self._leaderboard_season = dict(data.get(_sx(659)) or self._leaderboard_season or {})
+            self._leaderboard_profile_history_count = int(data.get(_sx(1819), 0) or 0)
             self._refresh_leaderboard_profile_menu()
             self._set_active_menu(self.leaderboard_profile_menu, play_sound=False)
-            self.speaker.speak(f"{data.get('username', 'Player')} profile loaded.", interrupt=True)
+            self.speaker.speak(_sx(1436).format(data.get(_sx(1502), _sx(812))), interrupt=True)
             return
-        if operation == "leaderboard_auth":
+        if operation == _sx(1069):
             data = dict(payload or {})
-            if bool(data.get("just_connected")):
-                self.audio.play("connect", channel="ui")
-            self._leaderboard_username = str(data.get("username") or self._leaderboard_username or "").strip()
-            self.settings["leaderboard_username"] = self._leaderboard_username
-            account_sync = dict(data.get("account_sync") or {})
+            if bool(data.get(_sx(1327))):
+                self.audio.play(_sx(96), channel=_sx(180))
+            self._leaderboard_username = str(data.get(_sx(1502)) or self._leaderboard_username or _sx(2)).strip()
+            self.settings[_sx(330)] = self._leaderboard_username
+            account_sync = dict(data.get(_sx(1487)) or {})
             if account_sync:
                 self._apply_leaderboard_account_sync(account_sync, announce_rewards=True)
             self._refresh_options_menu_labels()
             self._persist_settings()
-            self.speaker.speak(
-                "Account created." if str(data.get("status")) == "created" else "Signed in.",
-                interrupt=True,
-            )
+            self.speaker.speak(_sx(1689) if str(data.get(_sx(1823))) == _sx(1820) else _sx(1690), interrupt=True)
             if self._publish_after_leaderboard_auth:
                 self._publish_after_leaderboard_auth = False
                 self._publish_latest_game_over_run()
@@ -5477,186 +4077,163 @@ class SubwayBlindGame:
             if self._leaderboard_return_menu is not None:
                 self._set_active_menu(self._leaderboard_return_menu, play_sound=False)
             return
-        if operation == "leaderboard_publish":
+        if operation == _sx(1070):
             data = dict(payload or {})
-            if bool(data.get("just_connected")):
-                self.audio.play("connect", channel="ui")
-            publish_username = str(data.get("username") or self._leaderboard_username or "").strip()
+            if bool(data.get(_sx(1327))):
+                self.audio.play(_sx(96), channel=_sx(180))
+            publish_username = str(data.get(_sx(1502)) or self._leaderboard_username or _sx(2)).strip()
             if publish_username:
                 self._leaderboard_username = publish_username
-                self.settings["leaderboard_username"] = publish_username
+                self.settings[_sx(330)] = publish_username
                 self._refresh_options_menu_labels()
                 self._persist_settings()
-            self._game_over_publish_state = "published"
+            self._game_over_publish_state = _sx(1071)
             self._leaderboard_cache_loaded_at = 0.0
             self._refresh_game_over_menu()
             target_menu = self._publish_confirm_return_menu or self.game_over_menu
             self._set_active_menu(target_menu, start_index=self._publish_confirm_return_index, play_sound=False)
             if target_menu == self.game_over_menu:
-                self.game_over_menu.index = self._menu_index_for_action(self.game_over_menu, "game_over_retry")
-            suspicious_run = str(data.get("verification_status") or "verified") == "suspicious"
-            if bool(data.get("high_score")):
-                rank = data.get("board_rank")
-                self.audio.play("high", channel="ui")
+                self.game_over_menu.index = self._menu_index_for_action(self.game_over_menu, _sx(964))
+            suspicious_run = str(data.get(_sx(1704)) or _sx(786)) == _sx(1437)
+            if bool(data.get(_sx(1691))):
+                rank = data.get(_sx(1692))
+                self.audio.play(_sx(97), channel=_sx(180))
                 if rank is not None:
-                    message = f"New personal best. Leaderboard rank {rank}."
+                    message = _sx(1693).format(rank)
                 else:
-                    message = "New personal best."
+                    message = _sx(1694)
                 if suspicious_run:
-                    message = f"{message} Run flagged as suspicious."
+                    message = _sx(1695).format(message)
                 self.speaker.speak(message, interrupt=True)
                 return
             if suspicious_run:
-                self.speaker.speak("Run published and flagged as suspicious.", interrupt=True)
+                self.speaker.speak(_sx(1696), interrupt=True)
             return
-        if operation in {"issue_connect", "issue_refresh"}:
+        if operation in {_sx(1099), _sx(1100)}:
             data = dict(payload or {})
-            if bool(data.get("just_connected")):
-                self.audio.play("connect", channel="ui")
+            if bool(data.get(_sx(1327))):
+                self.audio.play(_sx(96), channel=_sx(180))
             selected_action = None
             if self.active_menu == self.issue_menu and self.issue_menu.items:
                 selected_action = self.issue_menu.items[self.issue_menu.index].action
-            self._issue_status_filter = str(data.get("status") or self._issue_status_filter or "all")
-            self._issue_entries = list(data.get("entries") or [])
-            self._issue_total_reports = int(data.get("total_reports", len(self._issue_entries)) or 0)
-            self._issue_offset = int(data.get("offset", self._issue_offset) or 0)
+            self._issue_status_filter = str(data.get(_sx(1823)) or self._issue_status_filter or _sx(660))
+            self._issue_entries = list(data.get(_sx(1817)) or [])
+            self._issue_total_reports = int(data.get(_sx(1824), len(self._issue_entries)) or 0)
+            self._issue_offset = int(data.get(_sx(1825), self._issue_offset) or 0)
             self._issue_cache_loaded_at = time.monotonic()
             self._refresh_issue_menu()
             if selected_action:
                 self.issue_menu.index = self._menu_index_for_action(self.issue_menu, selected_action)
-            if operation == "issue_connect":
+            if operation == _sx(1099):
                 self._set_active_menu(self.issue_menu, play_sound=False)
             return
-        if operation == "issue_detail":
+        if operation == _sx(1072):
             data = dict(payload or {})
-            if bool(data.get("just_connected")):
-                self.audio.play("connect", channel="ui")
+            if bool(data.get(_sx(1327))):
+                self.audio.play(_sx(96), channel=_sx(180))
             self._set_issue_detail_content(data)
             self._set_active_menu(self.issue_detail_menu, play_sound=False)
             return
-        if operation == "issue_submit":
+        if operation == _sx(1073):
             data = dict(payload or {})
-            if bool(data.get("just_connected")):
-                self.audio.play("connect", channel="ui")
-            self._issue_status_filter = "investigating"
+            if bool(data.get(_sx(1327))):
+                self.audio.play(_sx(96), channel=_sx(180))
+            self._issue_status_filter = _sx(1074)
             self._issue_offset = 0
             self._issue_cache_loaded_at = 0.0
-            self._issue_draft_title = ""
-            self._issue_draft_message = ""
+            self._issue_draft_title = _sx(2)
+            self._issue_draft_message = _sx(2)
             self._refresh_issue_menu()
-            self._set_active_menu(
-                self.issue_menu,
-                start_index=self._menu_index_for_action(self.issue_menu, "issue_submit"),
-                play_sound=False,
-            )
-            submissions_remaining = int(data.get("submissions_remaining_today", 0) or 0)
-            self.audio.play("confirm", channel="ui")
-            self.speaker.speak(
-                f"Bug report submitted. Status: Investigating. {submissions_remaining} submissions remaining today.",
-                interrupt=True,
-            )
-            self._request_issue_refresh("issue_refresh", return_menu=self.issue_menu, show_status=False)
+            self._set_active_menu(self.issue_menu, start_index=self._menu_index_for_action(self.issue_menu, _sx(1073)), play_sound=False)
+            submissions_remaining = int(data.get(_sx(1826), 0) or 0)
+            self.audio.play(_sx(56), channel=_sx(180))
+            self.speaker.speak(_sx(1438).format(submissions_remaining), interrupt=True)
+            self._request_issue_refresh(_sx(1100), return_menu=self.issue_menu, show_status=False)
             return
-        if operation == "leaderboard_startup_sync":
+        if operation == _sx(1035):
             data = dict(payload or {})
             self._apply_leaderboard_account_sync(data, announce_rewards=True)
             self._refresh_leaderboard_menu()
             return
-        if operation == "wheel_sync":
+        if operation == _sx(1075):
             data = dict(payload or {})
-            if bool(data.get("just_connected")):
-                self.audio.play("connect", channel="ui")
+            if bool(data.get(_sx(1327))):
+                self.audio.play(_sx(96), channel=_sx(180))
             self._apply_leaderboard_account_sync(data, announce_rewards=True)
             self._refresh_leaderboard_menu()
             self._refresh_wheel_menu_labels()
             if self.active_menu == self.wheel_menu:
                 self._set_active_menu(self.wheel_menu, play_sound=False)
             return
-        if operation == "wheel_spin":
+        if operation == _sx(99):
             data = dict(payload or {})
-            reward = dict(data.get("reward") or {})
-            item_key = str(reward.get("item_key") or "").strip().lower()
-            item_label = self._special_item_label(item_key) if item_key else "Special Item"
-            amount = max(1, int(reward.get("amount", 1) or 1))
+            reward = dict(data.get(_sx(1827)) or {})
+            item_key = str(reward.get(_sx(1890)) or _sx(2)).strip().lower()
+            item_label = self._special_item_label(item_key) if item_key else _sx(871)
+            amount = max(1, int(reward.get(_sx(593), 1) or 1))
             self._set_active_menu(self.wheel_menu, play_sound=False)
-            self.audio.play("wheel_spin", channel="wheel_spin")
+            self.audio.play(_sx(99), channel=_sx(99))
             spin_delay = 0.0
-            spin_sound = self.audio.sounds.get("wheel_spin")
+            spin_sound = self.audio.sounds.get(_sx(99))
             if spin_sound is not None:
                 spin_delay = max(0.0, float(spin_sound.get_length()))
-            self._pending_wheel_spin_reward = {
-                "amount": amount,
-                "item_label": item_label,
-                "sync_payload": data,
-            }
+            self._pending_wheel_spin_reward = {_sx(593): amount, _sx(1439): item_label, _sx(1065): data}
             self._pending_wheel_spin_reward_delay = spin_delay
             return
-        if operation == "special_item_consume_sync":
+        if operation == _sx(1038):
             data = dict(payload or {})
             self._apply_leaderboard_account_sync(data, announce_rewards=False)
-            consumed_keys = list(data.get("consumed_special_item_keys") or [])
+            consumed_keys = list(data.get(_sx(1329)) or [])
             self._flush_consumed_special_items(consumed_keys)
             self._refresh_wheel_menu_labels()
             self._refresh_loadout_menu_labels()
             return
-        if operation == "special_item_toggle":
+        if operation == _sx(1076):
             data = dict(payload or {})
             self._apply_special_sync_payload(data)
-            toggled_key = str(data.get("item_key") or self._special_toggle_item_key or "").strip().lower()
-            self._special_toggle_item_key = ""
+            toggled_key = str(data.get(_sx(1890)) or self._special_toggle_item_key or _sx(2)).strip().lower()
+            self._special_toggle_item_key = _sx(2)
             if toggled_key:
-                state_text = "On" if bool(data.get("enabled", False)) else "Off"
-                self.audio.play("confirm", channel="ui")
-                self.speaker.speak(
-                    f"{self._special_item_label(toggled_key)} {state_text}.",
-                    interrupt=True,
-                )
+                state_text = _sx(1598) if bool(data.get(_sx(1863), False)) else _sx(1599)
+                self.audio.play(_sx(56), channel=_sx(180))
+                self.speaker.speak(_sx(1699).format(self._special_item_label(toggled_key), state_text), interrupt=True)
             if self._leaderboard_return_menu == self.loadout_menu:
                 self._refresh_loadout_menu_labels()
-                self._set_active_menu(
-                    self.loadout_menu,
-                    start_index=self._menu_index_for_action(
-                        self.loadout_menu,
-                        f"toggle_special_item:{toggled_key}" if toggled_key else "begin_run",
-                    ),
-                    play_sound=False,
-                )
+                self._set_active_menu(self.loadout_menu, start_index=self._menu_index_for_action(self.loadout_menu, _sx(1785).format(toggled_key) if toggled_key else _sx(1379)), play_sound=False)
             return
 
     def _handle_leaderboard_error(self, operation: str, error: object) -> None:
-        if operation == "leaderboard_auth":
+        if operation == _sx(1069):
             self._publish_after_leaderboard_auth = False
             self._issue_submit_after_leaderboard_auth = False
-        if isinstance(error, LeaderboardClientError) and error.code == "reauth_required":
-            self._leaderboard_username = ""
-            self.settings["leaderboard_username"] = ""
-            self.leaderboard_client.principal_username = ""
-            self.leaderboard_client.auth_token = ""
+        if isinstance(error, LeaderboardClientError) and error.code == _sx(1440):
+            self._leaderboard_username = _sx(2)
+            self.settings[_sx(330)] = _sx(2)
+            self.leaderboard_client.principal_username = _sx(2)
+            self.leaderboard_client.auth_token = _sx(2)
             self._clear_server_special_state()
             self._refresh_options_menu_labels()
             self._persist_settings()
-        if operation == "special_item_consume_sync":
+        if operation == _sx(1038):
             return
-        if operation == "leaderboard_startup_sync" and not (
-            isinstance(error, LeaderboardClientError) and error.code == "reauth_required"
-        ):
+        if operation == _sx(1035) and (not (isinstance(error, LeaderboardClientError) and error.code == _sx(1440))):
             return
         message = self._leaderboard_error_message(operation, error)
-        if operation == "leaderboard_refresh" and self._leaderboard_entries:
-            self.audio.play("menuedge", channel="ui")
+        if operation == _sx(1083) and self._leaderboard_entries:
+            self.audio.play(_sx(52), channel=_sx(180))
             self._refresh_leaderboard_menu()
             if self.active_menu != self.leaderboard_menu:
                 self._set_active_menu(self.leaderboard_menu, play_sound=False)
-            self.speaker.speak(f"{message} Showing the last downloaded leaderboard.", interrupt=True)
+            self.speaker.speak(_sx(1441).format(message), interrupt=True)
             return
-        if operation == "issue_refresh" and (self._issue_entries or self._issue_total_reports == 0):
-            self.audio.play("menuedge", channel="ui")
+        if operation == _sx(1100) and (self._issue_entries or self._issue_total_reports == 0):
+            self.audio.play(_sx(52), channel=_sx(180))
             self._refresh_issue_menu()
             if self.active_menu != self.issue_menu:
                 self._set_active_menu(self.issue_menu, play_sound=False)
-            self.speaker.speak(f"{message} Showing the last downloaded bug reports.", interrupt=True)
+            self.speaker.speak(_sx(1442).format(message), interrupt=True)
             return
-        self.audio.play("menuedge", channel="ui")
+        self.audio.play(_sx(52), channel=_sx(180))
         if self._leaderboard_return_menu is not None:
             self._set_active_menu(self._leaderboard_return_menu, play_sound=False)
         else:
@@ -5665,350 +4242,200 @@ class SubwayBlindGame:
 
     @staticmethod
     def _leaderboard_error_message(operation: str, error: object) -> str:
-        if (
-            operation.startswith("issue_")
-            and isinstance(error, LeaderboardClientError)
-            and error.code == "unsupported_request"
-        ):
-            return "This server does not support the bug report system yet. Update the server and try again."
+        if operation.startswith(_sx(1443)) and isinstance(error, LeaderboardClientError) and (error.code == _sx(1444)):
+            return _sx(1077)
         return str(error)
 
     def _open_wheel_menu(self) -> None:
         if not self._leaderboard_is_authenticated():
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("Sign in from Options, Set User Name, before opening Wheel Spin.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1445), interrupt=True)
             return
         self._refresh_wheel_menu_labels()
         self._set_active_menu(self.wheel_menu)
         self._request_wheel_sync(show_status=False)
 
     def _request_wheel_sync(self, *, show_status: bool) -> None:
+
         def worker() -> dict[str, object]:
             just_connected = self.leaderboard_client.connect()
             payload = self.leaderboard_client.sync_account(self._claimed_leaderboard_reward_ids())
-            payload["just_connected"] = just_connected
+            payload[_sx(1327)] = just_connected
             return payload
-
-        self._start_leaderboard_operation(
-            "wheel_sync",
-            "Wheel Spin",
-            "Syncing wheel status...",
-            worker,
-            return_menu=self.wheel_menu,
-            show_status=show_status,
-            reject_message=False,
-        )
+        self._start_leaderboard_operation(_sx(1075), _sx(703), _sx(1078), worker, return_menu=self.wheel_menu, show_status=show_status, reject_message=False)
 
     def _request_weekly_wheel_spin(self) -> None:
         if not self._leaderboard_is_authenticated():
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("Sign in required.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1446), interrupt=True)
             return
-        spins_remaining = int(self._server_wheel_status.get("spins_remaining", 0) or 0)
+        spins_remaining = int(self._server_wheel_status.get(_sx(1600), 0) or 0)
         if spins_remaining <= 0:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("No wheel spins left this week.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1447), interrupt=True)
             return
 
         def worker() -> dict[str, object]:
             self.leaderboard_client.connect()
             return self.leaderboard_client.spin_weekly_wheel()
-
-        self._start_leaderboard_operation(
-            "wheel_spin",
-            "Wheel Spin",
-            "Spinning the wheel...",
-            worker,
-            return_menu=self.wheel_menu,
-            show_status=True,
-            reject_message=True,
-        )
+        self._start_leaderboard_operation(_sx(99), _sx(703), _sx(1079), worker, return_menu=self.wheel_menu, show_status=True, reject_message=True)
 
     def _toggle_special_item_loadout(self, item_key: str) -> None:
-        normalized_key = str(item_key or "").strip().lower()
+        normalized_key = str(item_key or _sx(2)).strip().lower()
         if normalized_key not in SPECIAL_ITEM_ORDER:
-            self.audio.play("menuedge", channel="ui")
+            self.audio.play(_sx(52), channel=_sx(180))
             return
         if not self._leaderboard_is_authenticated():
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("Sign in required.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1446), interrupt=True)
             return
         if self._special_item_owned_count(normalized_key) <= 0:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("This special item is not unlocked yet.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1448), interrupt=True)
             return
         next_enabled = not self._special_item_enabled(normalized_key)
 
         def worker() -> dict[str, object]:
             self.leaderboard_client.connect()
             return self.leaderboard_client.set_special_item_loadout(normalized_key, next_enabled)
-
-        if self._start_leaderboard_operation(
-            "special_item_toggle",
-            "Wheel Loadout",
-            f"Updating {self._special_item_label(normalized_key)}...",
-            worker,
-            return_menu=self.loadout_menu,
-            show_status=True,
-            reject_message=True,
-        ):
+        if self._start_leaderboard_operation(_sx(1076), _sx(1039), _sx(1080).format(self._special_item_label(normalized_key)), worker, return_menu=self.loadout_menu, show_status=True, reject_message=True):
             self._special_toggle_item_key = normalized_key
 
-    def _open_leaderboard(self, force_refresh: bool = False) -> None:
+    def _open_leaderboard(self, force_refresh: bool=False) -> None:
         if not self._leaderboard_is_authenticated():
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("Sign in from Options, Set User Name, before opening the leaderboard.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1451), interrupt=True)
             return
-
-        if self._leaderboard_entries and not force_refresh:
+        if self._leaderboard_entries and (not force_refresh):
             self._refresh_leaderboard_menu()
             self._set_active_menu(self.leaderboard_menu)
             if not self._leaderboard_cache_is_fresh():
-                self._request_leaderboard_refresh(
-                    operation="leaderboard_refresh",
-                    return_menu=self.leaderboard_menu,
-                    show_status=False,
-                )
+                self._request_leaderboard_refresh(operation=_sx(1083), return_menu=self.leaderboard_menu, show_status=False)
             return
-        self._request_leaderboard_refresh(
-            operation="leaderboard_connect",
-            return_menu=self.main_menu,
-            show_status=not self._leaderboard_entries,
-        )
+        self._request_leaderboard_refresh(operation=_sx(1435), return_menu=self.main_menu, show_status=not self._leaderboard_entries)
 
     def _refresh_leaderboard_menu(self) -> None:
         total = max(self._leaderboard_total_players, len(self._leaderboard_entries))
-        self.leaderboard_menu.title = f"Season Leaderboard   {len(self._leaderboard_entries)}/{total}"
-        items = [
-            MenuItem(
-                self._leaderboard_season_identity_label(),
-                "leaderboard_info",
-            ),
-            MenuItem(self._leaderboard_season_status_label(), "leaderboard_info"),
-            MenuItem(self._leaderboard_reward_status_label(), "leaderboard_info"),
-            MenuItem(self._leaderboard_difficulty_option_label(), "leaderboard_cycle_difficulty"),
-        ]
-        items.extend(
-            MenuItem(self._leaderboard_entry_label(entry), f"leaderboard_player:{entry['username']}")
-            for entry in self._leaderboard_entries
-        )
+        self.leaderboard_menu.title = _sx(775).format(len(self._leaderboard_entries), total)
+        items = [MenuItem(self._leaderboard_season_identity_label(), _sx(1390)), MenuItem(self._leaderboard_season_status_label(), _sx(1390)), MenuItem(self._leaderboard_reward_status_label(), _sx(1390)), MenuItem(self._leaderboard_difficulty_option_label(), _sx(1388))]
+        items.extend((MenuItem(self._leaderboard_entry_label(entry), _sx(1702).format(entry[_sx(1502)])) for entry in self._leaderboard_entries))
         if not self._leaderboard_entries:
-            items.append(MenuItem("No published runs were found for the current filters.", "leaderboard_info"))
-        items.append(MenuItem("Refresh", "leaderboard_refresh"))
-        items.append(MenuItem("Back", "back"))
+            items.append(MenuItem(_sx(1703), _sx(1390)))
+        items.append(MenuItem(_sx(1452), _sx(1083)))
+        items.append(MenuItem(TEXT[_sx(429)], _sx(429)))
         self.leaderboard_menu.items = items
 
     def _leaderboard_period_option_label(self) -> str:
-        return f"Season: {leaderboard_period_display_label(self._leaderboard_period_filter)}"
+        return _sx(776).format(leaderboard_period_display_label(self._leaderboard_period_filter))
 
     def _leaderboard_difficulty_option_label(self) -> str:
-        return f"Difficulty: {leaderboard_difficulty_filter_display_label(self._leaderboard_difficulty_filter)}"
+        return _sx(679).format(leaderboard_difficulty_filter_display_label(self._leaderboard_difficulty_filter))
 
     def _leaderboard_entry_label(self, entry: dict[str, object]) -> str:
-        segments = [
-            f"{int(entry.get('rank', 0) or 0)}. {entry.get('username', 'Player')}",
-            verification_display_label(entry.get("verification_status")),
-        ]
-        if self._leaderboard_difficulty_filter == "all":
-            segments.append(difficulty_display_label(entry.get("difficulty")))
-        segments.extend(
-            [
-                f"Score {int(entry.get('score', 0) or 0)}",
-                f"Coins {int(entry.get('coins', 0) or 0)}",
-                f"Time {format_play_time(entry.get('play_time_seconds', 0) or 0)}",
-            ]
-        )
-        return "   ".join(segments)
+        segments = [_sx(988).format(int(entry.get(_sx(1871), 0) or 0), entry.get(_sx(1502), _sx(812))), verification_display_label(entry.get(_sx(1704)))]
+        if self._leaderboard_difficulty_filter == _sx(660):
+            segments.append(difficulty_display_label(entry.get(_sx(318))))
+        segments.extend([_sx(1453).format(int(entry.get(_sx(968), 0) or 0)), _sx(1454).format(int(entry.get(_sx(363), 0) or 0)), _sx(1455).format(format_play_time(entry.get(_sx(969), 0) or 0))])
+        return _sx(877).join(segments)
 
     def _cycle_leaderboard_period(self) -> None:
         current_index = LEADERBOARD_PERIOD_ORDER.index(self._leaderboard_period_filter)
         self._leaderboard_period_filter = LEADERBOARD_PERIOD_ORDER[(current_index + 1) % len(LEADERBOARD_PERIOD_ORDER)]
         self._leaderboard_cache_loaded_at = 0.0
         self._refresh_leaderboard_menu()
-        self._set_active_menu(self.leaderboard_menu, start_index=self._menu_index_for_action(self.leaderboard_menu, "leaderboard_cycle_period"))
-        self._request_leaderboard_refresh("leaderboard_refresh", return_menu=self.leaderboard_menu, show_status=False)
+        self._set_active_menu(self.leaderboard_menu, start_index=self._menu_index_for_action(self.leaderboard_menu, _sx(1387)))
+        self._request_leaderboard_refresh(_sx(1083), return_menu=self.leaderboard_menu, show_status=False)
 
     def _cycle_leaderboard_difficulty(self) -> None:
         current_index = LEADERBOARD_DIFFICULTY_FILTER_ORDER.index(self._leaderboard_difficulty_filter)
-        self._leaderboard_difficulty_filter = LEADERBOARD_DIFFICULTY_FILTER_ORDER[
-            (current_index + 1) % len(LEADERBOARD_DIFFICULTY_FILTER_ORDER)
-        ]
+        self._leaderboard_difficulty_filter = LEADERBOARD_DIFFICULTY_FILTER_ORDER[(current_index + 1) % len(LEADERBOARD_DIFFICULTY_FILTER_ORDER)]
         self._leaderboard_cache_loaded_at = 0.0
         self._refresh_leaderboard_menu()
-        self._set_active_menu(
-            self.leaderboard_menu,
-            start_index=self._menu_index_for_action(self.leaderboard_menu, "leaderboard_cycle_difficulty"),
-        )
-        self._request_leaderboard_refresh("leaderboard_refresh", return_menu=self.leaderboard_menu, show_status=False)
+        self._set_active_menu(self.leaderboard_menu, start_index=self._menu_index_for_action(self.leaderboard_menu, _sx(1388)))
+        self._request_leaderboard_refresh(_sx(1083), return_menu=self.leaderboard_menu, show_status=False)
 
     def _open_leaderboard_profile(self, username: str) -> None:
+
         def worker() -> dict[str, object]:
             self.leaderboard_client.connect()
             return self.leaderboard_client.fetch_profile(username=username, history_limit=50)
-
-        self._start_leaderboard_operation(
-            "leaderboard_profile",
-            "Leaderboard",
-            f"Loading {username}...",
-            worker,
-            return_menu=self.leaderboard_menu,
-        )
+        self._start_leaderboard_operation(_sx(1068), _sx(811), _sx(1084).format(username), worker, return_menu=self.leaderboard_menu)
 
     def _request_leaderboard_refresh(self, operation: str, return_menu: Menu, show_status: bool) -> bool:
+
         def worker() -> dict[str, object]:
             just_connected = self.leaderboard_client.connect()
-            board = self.leaderboard_client.fetch_leaderboard(
-                limit=100,
-                period=self._leaderboard_period_filter,
-                difficulty=self._leaderboard_difficulty_filter,
-            )
-            board["just_connected"] = just_connected
+            board = self.leaderboard_client.fetch_leaderboard(limit=100, period=self._leaderboard_period_filter, difficulty=self._leaderboard_difficulty_filter)
+            board[_sx(1327)] = just_connected
             return board
-
-        return self._start_leaderboard_operation(
-            operation,
-            "Leaderboard",
-            "Refreshing leaderboard..." if operation == "leaderboard_refresh" else "Connecting to server...",
-            worker,
-            return_menu=return_menu,
-            show_status=show_status,
-            reject_message=show_status,
-        )
+        return self._start_leaderboard_operation(operation, _sx(811), _sx(1457) if operation == _sx(1083) else _sx(1086), worker, return_menu=return_menu, show_status=show_status, reject_message=show_status)
 
     def _leaderboard_cache_is_fresh(self) -> bool:
         if not self._leaderboard_entries or self._leaderboard_cache_loaded_at <= 0:
             return False
-        return (time.monotonic() - self._leaderboard_cache_loaded_at) <= LEADERBOARD_CACHE_TTL_SECONDS
+        return time.monotonic() - self._leaderboard_cache_loaded_at <= LEADERBOARD_CACHE_TTL_SECONDS
 
     def _refresh_leaderboard_profile_menu(self) -> None:
         profile = self._leaderboard_profile or {}
-        summary = dict(profile.get("summary") or {})
-        latest_run = dict(profile.get("latest_run") or {})
-        best_run = dict(profile.get("best_run") or {})
-        history = list(profile.get("history") or [])
-        self.leaderboard_profile_menu.title = str(profile.get("username") or "Player")
-        items = [
-            MenuItem(
-                f"Season Rank: {profile.get('board_rank') if profile.get('board_rank') is not None else 'Unranked'}",
-                "leaderboard_profile_info",
-            ),
-            MenuItem(f"Published Runs: {int(summary.get('published_runs_total', 0) or 0)}", "leaderboard_profile_info"),
-            MenuItem(f"Active Days: {int(summary.get('active_days', 0) or 0)}", "leaderboard_profile_info"),
-            MenuItem(f"Recent Avg Score: {int(summary.get('recent_average_score', 0) or 0)}", "leaderboard_profile_info"),
-            MenuItem(f"Recent Avg Coins: {int(summary.get('recent_average_coins', 0) or 0)}", "leaderboard_profile_info"),
-            MenuItem(
-                f"Recent Avg Play Time: {format_play_time(summary.get('recent_average_play_time_seconds', 0) or 0)}",
-                "leaderboard_profile_info",
-            ),
-            MenuItem(
-                f"Recent Avg Distance: {int(summary.get('recent_average_distance_meters', 0) or 0)} meters",
-                "leaderboard_profile_info",
-            ),
-            MenuItem(
-                f"Best Score Improvement: +{int(summary.get('best_improvement_score', 0) or 0)}",
-                "leaderboard_profile_info",
-            ),
-            MenuItem(f"Latest Score: {int(latest_run.get('score', 0) or 0)}", "leaderboard_profile_info"),
-            MenuItem(f"Latest Coins: {int(latest_run.get('coins', 0) or 0)}", "leaderboard_profile_info"),
-            MenuItem(f"Latest Play Time: {format_play_time(latest_run.get('play_time_seconds', 0) or 0)}", "leaderboard_profile_info"),
-            MenuItem(f"Latest Difficulty: {difficulty_display_label(latest_run.get('difficulty'))}", "leaderboard_profile_info"),
-            MenuItem(f"Latest Status: {verification_display_label(latest_run.get('verification_status'))}", "leaderboard_profile_info"),
-            MenuItem(f"Best Score: {int(best_run.get('score', 0) or 0)}", "leaderboard_profile_info"),
-            MenuItem(f"Best Coins: {int(best_run.get('coins', 0) or 0)}", "leaderboard_profile_info"),
-            MenuItem(f"Best Play Time: {format_play_time(best_run.get('play_time_seconds', 0) or 0)}", "leaderboard_profile_info"),
-            MenuItem(f"Best Difficulty: {difficulty_display_label(best_run.get('difficulty'))}", "leaderboard_profile_info"),
-            MenuItem(f"Best Status: {verification_display_label(best_run.get('verification_status'))}", "leaderboard_profile_info"),
-        ]
+        summary = dict(profile.get(_sx(1708)) or {})
+        latest_run = dict(profile.get(_sx(1709)) or {})
+        best_run = dict(profile.get(_sx(1710)) or {})
+        history = list(profile.get(_sx(1711)) or [])
+        self.leaderboard_profile_menu.title = str(profile.get(_sx(1502)) or _sx(812))
+        items = [MenuItem(_sx(1458).format(profile.get(_sx(1692)) if profile.get(_sx(1692)) is not None else _sx(1864)), _sx(1459)), MenuItem(_sx(1460).format(int(summary.get(_sx(1878), 0) or 0)), _sx(1459)), MenuItem(_sx(1461).format(int(summary.get(_sx(1879), 0) or 0)), _sx(1459)), MenuItem(_sx(1462).format(int(summary.get(_sx(1880), 0) or 0)), _sx(1459)), MenuItem(_sx(1463).format(int(summary.get(_sx(1881), 0) or 0)), _sx(1459)), MenuItem(_sx(1464).format(format_play_time(summary.get(_sx(1882), 0) or 0)), _sx(1459)), MenuItem(_sx(1465).format(int(summary.get(_sx(1883), 0) or 0)), _sx(1459)), MenuItem(_sx(1466).format(int(summary.get(_sx(1884), 0) or 0)), _sx(1459)), MenuItem(_sx(1467).format(int(latest_run.get(_sx(968), 0) or 0)), _sx(1459)), MenuItem(_sx(1468).format(int(latest_run.get(_sx(363), 0) or 0)), _sx(1459)), MenuItem(_sx(1469).format(format_play_time(latest_run.get(_sx(969), 0) or 0)), _sx(1459)), MenuItem(_sx(1470).format(difficulty_display_label(latest_run.get(_sx(318)))), _sx(1459)), MenuItem(_sx(1471).format(verification_display_label(latest_run.get(_sx(1704)))), _sx(1459)), MenuItem(_sx(1472).format(int(best_run.get(_sx(968), 0) or 0)), _sx(1459)), MenuItem(_sx(1473).format(int(best_run.get(_sx(363), 0) or 0)), _sx(1459)), MenuItem(_sx(1474).format(format_play_time(best_run.get(_sx(969), 0) or 0)), _sx(1459)), MenuItem(_sx(1475).format(difficulty_display_label(best_run.get(_sx(318)))), _sx(1459)), MenuItem(_sx(1476).format(verification_display_label(best_run.get(_sx(1704)))), _sx(1459))]
         for history_entry in history:
-            items.append(
-                MenuItem(
-                    self._leaderboard_history_label(history_entry),
-                    f"leaderboard_run:{history_entry['submission_id']}",
-                )
-            )
-        items.append(MenuItem("Back", "back"))
+            items.append(MenuItem(self._leaderboard_history_label(history_entry), _sx(1731).format(history_entry[_sx(1865)])))
+        items.append(MenuItem(TEXT[_sx(429)], _sx(429)))
         self.leaderboard_profile_menu.items = items
 
     def _leaderboard_history_label(self, history_entry: dict[str, object]) -> str:
-        published_at = str(history_entry.get("published_at") or "").replace("T", " ")[:19]
-        return "   ".join(
-            [
-                published_at,
-                difficulty_display_label(history_entry.get("difficulty")),
-                verification_display_label(history_entry.get("verification_status")),
-                f"Score {int(history_entry.get('score', 0) or 0)}",
-                f"Coins {int(history_entry.get('coins', 0) or 0)}",
-                f"Time {format_play_time(history_entry.get('play_time_seconds', 0) or 0)}",
-            ]
-        )
+        published_at = str(history_entry.get(_sx(1872)) or _sx(2)).replace(_sx(1477), _sx(4))[:19]
+        return _sx(877).join([published_at, difficulty_display_label(history_entry.get(_sx(318))), verification_display_label(history_entry.get(_sx(1704))), _sx(1453).format(int(history_entry.get(_sx(968), 0) or 0)), _sx(1454).format(int(history_entry.get(_sx(363), 0) or 0)), _sx(1455).format(format_play_time(history_entry.get(_sx(969), 0) or 0))])
 
     def _open_leaderboard_run_detail(self, submission_id: str) -> None:
         profile = self._leaderboard_profile or {}
-        for history_entry in list(profile.get("history") or []):
-            if str(history_entry.get("submission_id") or "") != str(submission_id):
+        for history_entry in list(profile.get(_sx(1711)) or []):
+            if str(history_entry.get(_sx(1865)) or _sx(2)) != str(submission_id):
                 continue
             self._leaderboard_selected_run = dict(history_entry)
             self._refresh_leaderboard_run_detail_menu()
             self._set_active_menu(self.leaderboard_run_detail_menu)
             return
-        self.audio.play("menuedge", channel="ui")
-        self.speaker.speak("Unable to open the selected run.", interrupt=True)
+        self.audio.play(_sx(52), channel=_sx(180))
+        self.speaker.speak(_sx(1085), interrupt=True)
 
     def _refresh_leaderboard_run_detail_menu(self) -> None:
         run_data = self._leaderboard_selected_run or {}
-        published_at = str(run_data.get("published_at") or "").replace("T", " ")[:19]
-        verification_reasons = list(run_data.get("verification_reasons") or [])
-        self.leaderboard_run_detail_menu.title = "Published Run"
-        items = [
-            MenuItem(f"Verification: {verification_display_label(run_data.get('verification_status'))}", "leaderboard_run_info"),
-            MenuItem(f"Difficulty: {difficulty_display_label(run_data.get('difficulty'))}", "leaderboard_run_info"),
-            MenuItem(f"Score: {int(run_data.get('score', 0) or 0)}", "leaderboard_run_info"),
-            MenuItem(f"Coins: {int(run_data.get('coins', 0) or 0)}", "leaderboard_run_info"),
-            MenuItem(f"Play Time: {format_play_time(run_data.get('play_time_seconds', 0) or 0)}", "leaderboard_run_info"),
-            MenuItem(f"Distance: {int(run_data.get('distance_meters', 0) or 0)} meters", "leaderboard_run_info"),
-            MenuItem(f"Clean Escapes: {int(run_data.get('clean_escapes', 0) or 0)}", "leaderboard_run_info"),
-            MenuItem(f"Revives Used: {int(run_data.get('revives_used', 0) or 0)}", "leaderboard_run_info"),
-            MenuItem(self._powerup_usage_label(run_data.get("powerup_usage")), "leaderboard_run_info"),
-            MenuItem(f"Death Reason: {run_data.get('death_reason') or 'Run ended.'}", "leaderboard_run_info"),
-            MenuItem(f"Game Version: {run_data.get('game_version') or 'unknown'}", "leaderboard_run_info"),
-            MenuItem(f"Published At: {published_at}", "leaderboard_run_info"),
-        ]
+        published_at = str(run_data.get(_sx(1872)) or _sx(2)).replace(_sx(1477), _sx(4))[:19]
+        verification_reasons = list(run_data.get(_sx(1732)) or [])
+        self.leaderboard_run_detail_menu.title = _sx(777)
+        items = [MenuItem(_sx(1478).format(verification_display_label(run_data.get(_sx(1704)))), _sx(1479)), MenuItem(_sx(679).format(difficulty_display_label(run_data.get(_sx(318)))), _sx(1479)), MenuItem(_sx(748).format(int(run_data.get(_sx(968), 0) or 0)), _sx(1479)), MenuItem(_sx(666).format(int(run_data.get(_sx(363), 0) or 0)), _sx(1479)), MenuItem(_sx(749).format(format_play_time(run_data.get(_sx(969), 0) or 0)), _sx(1479)), MenuItem(_sx(1480).format(int(run_data.get(_sx(972), 0) or 0)), _sx(1479)), MenuItem(_sx(1481).format(int(run_data.get(_sx(966), 0) or 0)), _sx(1479)), MenuItem(_sx(1482).format(int(run_data.get(_sx(973), 0) or 0)), _sx(1479)), MenuItem(self._powerup_usage_label(run_data.get(_sx(967))), _sx(1479)), MenuItem(_sx(1483).format(run_data.get(_sx(970)) or _sx(661)), _sx(1479)), MenuItem(_sx(1484).format(run_data.get(_sx(971)) or _sx(578)), _sx(1479)), MenuItem(_sx(1485).format(published_at), _sx(1479))]
         for reason in verification_reasons:
-            items.append(MenuItem(f"Review Note: {reason}", "leaderboard_run_info"))
-        items.append(MenuItem("Back", "back"))
+            items.append(MenuItem(_sx(1740).format(reason), _sx(1479)))
+        items.append(MenuItem(TEXT[_sx(429)], _sx(429)))
         self.leaderboard_run_detail_menu.items = items
 
     def _prompt_for_leaderboard_credentials(self) -> tuple[str, str] | None:
         try:
-            result = prompt_for_credentials(
-                caption="Subway Surfers Blind Leaderboard",
-                message="Enter your user name and password. If the account does not exist yet, it will be created.",
-                username_hint=self._leaderboard_username,
-            )
+            result = prompt_for_credentials(caption=_sx(1741), message=_sx(1742), username_hint=self._leaderboard_username)
         except CredentialPromptCancelled:
             self._reset_input_after_native_modal()
             return None
         except NativeCredentialPromptError as exc:
             self._reset_input_after_native_modal()
-            self.audio.play("menuedge", channel="ui")
+            self.audio.play(_sx(52), channel=_sx(180))
             self.speaker.speak(str(exc), interrupt=True)
             return None
         self._reset_input_after_native_modal()
         username = result.username.strip()
         password = result.password
         if not username or not password:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("User name and password are required.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1486), interrupt=True)
             return None
-        return username, password
+        return (username, password)
 
-    def _prompt_and_authenticate_leaderboard_account(
-        self,
-        *,
-        return_menu: Menu | None = None,
-        publish_after_auth: bool = False,
-        submit_issue_after_auth: bool = False,
-    ) -> None:
+    def _prompt_and_authenticate_leaderboard_account(self, *, return_menu: Menu | None=None, publish_after_auth: bool=False, submit_issue_after_auth: bool=False) -> None:
         self._publish_after_leaderboard_auth = False
         self._issue_submit_after_leaderboard_auth = False
         credentials = self._prompt_for_leaderboard_credentials()
@@ -6021,22 +4448,15 @@ class SubwayBlindGame:
         def worker() -> dict[str, object]:
             just_connected = self.leaderboard_client.connect()
             result = self.leaderboard_client.login(username=username, password=password)
-            result["account_sync"] = self.leaderboard_client.sync_account(self._claimed_leaderboard_reward_ids())
-            result["just_connected"] = just_connected
+            result[_sx(1487)] = self.leaderboard_client.sync_account(self._claimed_leaderboard_reward_ids())
+            result[_sx(1327)] = just_connected
             return result
-
-        self._start_leaderboard_operation(
-            "leaderboard_auth",
-            "Leaderboard",
-            "Connecting to server...",
-            worker,
-            return_menu=return_menu or self.options_menu,
-        )
+        self._start_leaderboard_operation(_sx(1069), _sx(811), _sx(1086), worker, return_menu=return_menu or self.options_menu)
 
     def _logout_leaderboard_account(self) -> None:
         self.leaderboard_client.logout()
-        self._leaderboard_username = ""
-        self.settings["leaderboard_username"] = ""
+        self._leaderboard_username = _sx(2)
+        self.settings[_sx(330)] = _sx(2)
         self._clear_server_special_state()
         self._leaderboard_entries = []
         self._leaderboard_total_players = 0
@@ -6046,134 +4466,94 @@ class SubwayBlindGame:
         self._leaderboard_cache_loaded_at = 0.0
         self._refresh_options_menu_labels()
         self._persist_settings()
-        self._set_active_menu(
-            self.options_menu,
-            start_index=self._update_option_index("opt_leaderboard_account"),
-            play_sound=False,
-        )
-        self.audio.play("confirm", channel="ui")
-        self.speaker.speak("Leaderboard account signed out.", interrupt=True)
+        self._set_active_menu(self.options_menu, start_index=self._update_option_index(_sx(1195)), play_sound=False)
+        self.audio.play(_sx(56), channel=_sx(180))
+        self.speaker.speak(_sx(1087), interrupt=True)
 
     def _issue_filter_option_label(self) -> str:
-        return f"Status: {issue_status_display_label(self._issue_status_filter)}"
+        return _sx(729).format(issue_status_display_label(self._issue_status_filter))
 
     def _issue_total_pages(self) -> int:
         total_reports = max(0, int(self._issue_total_reports))
         return max(1, (total_reports + ISSUE_REPORT_PAGE_SIZE - 1) // ISSUE_REPORT_PAGE_SIZE)
 
     def _issue_current_page(self) -> int:
-        return (max(0, int(self._issue_offset)) // ISSUE_REPORT_PAGE_SIZE) + 1
+        return max(0, int(self._issue_offset)) // ISSUE_REPORT_PAGE_SIZE + 1
 
     def _issue_page_info_label(self) -> str:
-        return f"Page {self._issue_current_page()} of {self._issue_total_pages()}"
+        return _sx(778).format(self._issue_current_page(), self._issue_total_pages())
 
     def _issue_report_summary_label(self, entry: dict[str, object]) -> str:
-        created_at = str(entry.get("created_at") or "").replace("T", " ")[:19]
-        username = (
-            str(
-                entry.get("reporter_username")
-                or entry.get("username")
-                or entry.get("reported_by")
-                or "Unknown user"
-            ).strip()
-            or "Unknown user"
-        )
-        return (
-            f"{username}: "
-            f"{str(entry.get('title') or 'Untitled issue')}: "
-            f"{issue_status_display_label(entry.get('status'))}: "
-            f"{created_at or 'Unknown date'}"
-        )
+        created_at = str(entry.get(_sx(1873)) or _sx(2)).replace(_sx(1477), _sx(4))[:19]
+        username = str(entry.get(_sx(1874)) or entry.get(_sx(1502)) or entry.get(_sx(1875)) or _sx(1089)).strip() or _sx(1089)
+        return _sx(779).format(username, str(entry.get(_sx(1106)) or _sx(1829)), issue_status_display_label(entry.get(_sx(1823))), created_at or _sx(1743))
 
     def _issue_draft_title_label(self) -> str:
-        title = " ".join(self._issue_draft_title.strip().split())
+        title = _sx(4).join(self._issue_draft_title.strip().split())
         if not title:
-            return "Title: Not set"
-        preview = title if len(title) <= 72 else f"{title[:69].rstrip()}..."
-        return f"Title: {preview}"
+            return _sx(1090)
+        preview = title if len(title) <= 72 else _sx(1091).format(title[:69].rstrip())
+        return _sx(780).format(preview)
 
     def _issue_draft_message_label(self) -> str:
-        normalized_message = self._issue_draft_message.replace("\r\n", "\n").replace("\r", "\n")
+        normalized_message = self._issue_draft_message.replace(_sx(1166), _sx(652)).replace(_sx(651), _sx(652))
         if not normalized_message.strip():
-            return "Message: Not set"
-        first_line = next((line.strip() for line in normalized_message.split("\n") if line.strip()), "")
+            return _sx(1093)
+        first_line = next((line.strip() for line in normalized_message.split(_sx(652)) if line.strip()), _sx(2))
         if not first_line:
-            first_line = "Blank lines only"
-        preview = first_line if len(first_line) <= 56 else f"{first_line[:53].rstrip()}..."
-        line_count = len(normalized_message.split("\n"))
-        return f"Message: {preview}   {len(normalized_message)}/{ISSUE_MESSAGE_LIMIT} chars   {line_count} lines"
+            first_line = _sx(1094)
+        preview = first_line if len(first_line) <= 56 else _sx(1091).format(first_line[:53].rstrip())
+        line_count = len(normalized_message.split(_sx(652)))
+        return _sx(781).format(preview, len(normalized_message), ISSUE_MESSAGE_LIMIT, line_count)
 
     def _issue_draft_preview_lines(self) -> tuple[str, ...]:
-        normalized_message = self._issue_draft_message.replace("\r\n", "\n").replace("\r", "\n")
+        normalized_message = self._issue_draft_message.replace(_sx(1166), _sx(652)).replace(_sx(651), _sx(652))
         if not normalized_message:
-            return ("No message written yet.",)
+            return (_sx(1488),)
         lines: list[str] = []
-        for raw_line in normalized_message.split("\n")[:5]:
-            wrapped = textwrap.wrap(raw_line if raw_line else " ", width=62) or [" "]
+        for raw_line in normalized_message.split(_sx(652))[:5]:
+            wrapped = textwrap.wrap(raw_line if raw_line else _sx(4), width=62) or [_sx(4)]
             lines.extend(wrapped[:2])
             if len(lines) >= 5:
                 break
-        return tuple(lines[:5]) or ("No message written yet.",)
+        return tuple(lines[:5]) or (_sx(1488),)
 
     def _issue_cache_is_fresh(self) -> bool:
         if self._issue_cache_loaded_at <= 0:
             return False
         if self._issue_entries:
-            return (time.monotonic() - self._issue_cache_loaded_at) <= ISSUE_CACHE_TTL_SECONDS
-        return self._issue_total_reports == 0 and (time.monotonic() - self._issue_cache_loaded_at) <= ISSUE_CACHE_TTL_SECONDS
+            return time.monotonic() - self._issue_cache_loaded_at <= ISSUE_CACHE_TTL_SECONDS
+        return self._issue_total_reports == 0 and time.monotonic() - self._issue_cache_loaded_at <= ISSUE_CACHE_TTL_SECONDS
 
     def _refresh_issue_menu(self) -> None:
         total = max(self._issue_total_reports, len(self._issue_entries))
-        self.issue_menu.title = f"Report a Bug   {len(self._issue_entries)}/{total}"
-        items = [
-            MenuItem("Report an Issue", "issue_submit"),
-            MenuItem(self._issue_filter_option_label(), "issue_cycle_status"),
-        ]
+        self.issue_menu.title = _sx(782).format(len(self._issue_entries), total)
+        items = [MenuItem(_sx(1489), _sx(1073)), MenuItem(self._issue_filter_option_label(), _sx(1392))]
         if self._issue_entries:
-            items.extend(
-                MenuItem(self._issue_report_summary_label(entry), f"issue_report:{entry['report_id']}")
-                for entry in self._issue_entries
-            )
+            items.extend((MenuItem(self._issue_report_summary_label(entry), _sx(1830).format(entry[_sx(1885)])) for entry in self._issue_entries))
         else:
-            items.append(MenuItem("No bug reports were found for the current filter.", "issue_info"))
-        items.extend(
-            [
-                MenuItem(self._issue_page_info_label(), "issue_page_info"),
-                MenuItem("Previous Page", "issue_prev_page"),
-                MenuItem("Next Page", "issue_next_page"),
-                MenuItem("Refresh", "issue_refresh"),
-                MenuItem("Back", "back"),
-            ]
-        )
+            items.append(MenuItem(_sx(1744), _sx(1593)))
+        items.extend([MenuItem(self._issue_page_info_label(), _sx(1595)), MenuItem(_sx(1596), _sx(1101)), MenuItem(_sx(1597), _sx(1102)), MenuItem(_sx(1452), _sx(1100)), MenuItem(TEXT[_sx(429)], _sx(429))])
         self.issue_menu.items = items
         self.issue_menu.index = min(self.issue_menu.index, len(self.issue_menu.items) - 1)
 
     def _refresh_issue_compose_menu(self) -> None:
-        self.issue_compose_menu.title = "Report a Bug   Compose"
-        self.issue_compose_menu.items = [
-            MenuItem(self._issue_draft_title_label(), "issue_edit_title"),
-            MenuItem(self._issue_draft_message_label(), "issue_edit_message"),
-            MenuItem("Submit Report", "issue_submit_confirm"),
-            MenuItem("Back", "back"),
-        ]
+        self.issue_compose_menu.title = _sx(783)
+        self.issue_compose_menu.items = [MenuItem(self._issue_draft_title_label(), _sx(1108)), MenuItem(self._issue_draft_message_label(), _sx(1109)), MenuItem(_sx(1490), _sx(1394)), MenuItem(TEXT[_sx(429)], _sx(429))]
         self.issue_compose_menu.index = min(self.issue_compose_menu.index, len(self.issue_compose_menu.items) - 1)
 
     def _open_issue_compose_menu(self) -> None:
         self._refresh_issue_compose_menu()
         self._set_active_menu(self.issue_compose_menu)
 
-    def _open_issue_reports(self, force_refresh: bool = False) -> None:
-        if (self._issue_entries or self._issue_total_reports == 0) and self._issue_cache_loaded_at > 0 and not force_refresh:
+    def _open_issue_reports(self, force_refresh: bool=False) -> None:
+        if (self._issue_entries or self._issue_total_reports == 0) and self._issue_cache_loaded_at > 0 and (not force_refresh):
             self._refresh_issue_menu()
             self._set_active_menu(self.issue_menu)
             if not self._issue_cache_is_fresh():
-                self._request_issue_refresh("issue_refresh", return_menu=self.issue_menu, show_status=False)
+                self._request_issue_refresh(_sx(1100), return_menu=self.issue_menu, show_status=False)
             return
-        self._request_issue_refresh(
-            "issue_connect",
-            return_menu=self.main_menu,
-            show_status=self._issue_cache_loaded_at <= 0,
-        )
+        self._request_issue_refresh(_sx(1099), return_menu=self.main_menu, show_status=self._issue_cache_loaded_at <= 0)
 
     def _request_issue_refresh(self, operation: str, return_menu: Menu, show_status: bool) -> bool:
         issue_offset = self._issue_offset
@@ -6181,22 +4561,10 @@ class SubwayBlindGame:
 
         def worker() -> dict[str, object]:
             just_connected = self.leaderboard_client.connect()
-            result = self.leaderboard_client.fetch_issue_reports(
-                offset=issue_offset,
-                limit=ISSUE_REPORT_PAGE_SIZE,
-                status=issue_filter,
-            )
-            result["just_connected"] = just_connected
+            result = self.leaderboard_client.fetch_issue_reports(offset=issue_offset, limit=ISSUE_REPORT_PAGE_SIZE, status=issue_filter)
+            result[_sx(1327)] = just_connected
             return result
-
-        return self._start_leaderboard_operation(
-            operation,
-            "Server",
-            "Loading bug reports..." if operation != "issue_submit" else "Submitting bug report...",
-            worker,
-            return_menu=return_menu,
-            show_status=show_status,
-        )
+        return self._start_leaderboard_operation(operation, _sx(810), _sx(1491) if operation != _sx(1073) else _sx(1111), worker, return_menu=return_menu, show_status=show_status)
 
     def _cycle_issue_status_filter(self) -> None:
         current_index = ISSUE_STATUS_ORDER.index(self._issue_status_filter)
@@ -6204,8 +4572,8 @@ class SubwayBlindGame:
         self._issue_offset = 0
         self._issue_cache_loaded_at = 0.0
         self._refresh_issue_menu()
-        self._set_active_menu(self.issue_menu, start_index=self._menu_index_for_action(self.issue_menu, "issue_cycle_status"))
-        self._request_issue_refresh("issue_refresh", return_menu=self.issue_menu, show_status=False)
+        self._set_active_menu(self.issue_menu, start_index=self._menu_index_for_action(self.issue_menu, _sx(1392)))
+        self._request_issue_refresh(_sx(1100), return_menu=self.issue_menu, show_status=False)
 
     def _change_issue_page(self, direction: int) -> None:
         if direction not in (-1, 1):
@@ -6214,105 +4582,80 @@ class SubwayBlindGame:
         total_pages = self._issue_total_pages()
         next_page = current_page + direction
         if next_page < 1 or next_page > total_pages:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("No more pages in that direction.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1492), interrupt=True)
             return
         self._issue_offset = (next_page - 1) * ISSUE_REPORT_PAGE_SIZE
         self._issue_cache_loaded_at = 0.0
         self._refresh_issue_menu()
-        target_action = "issue_prev_page" if direction < 0 else "issue_next_page"
+        target_action = _sx(1101) if direction < 0 else _sx(1102)
         self._set_active_menu(self.issue_menu, start_index=self._menu_index_for_action(self.issue_menu, target_action))
-        self._request_issue_refresh("issue_refresh", return_menu=self.issue_menu, show_status=False)
+        self._request_issue_refresh(_sx(1100), return_menu=self.issue_menu, show_status=False)
 
     def _open_issue_report_detail(self, report_id: str) -> None:
-        selected_id = str(report_id or "").strip()
+        selected_id = str(report_id or _sx(2)).strip()
 
         def worker() -> dict[str, object]:
             just_connected = self.leaderboard_client.connect()
             result = self.leaderboard_client.fetch_issue_report_detail(selected_id)
-            result["just_connected"] = just_connected
+            result[_sx(1327)] = just_connected
             return result
-
-        self._start_leaderboard_operation(
-            "issue_detail",
-            "Server",
-            "Loading bug report...",
-            worker,
-            return_menu=self.issue_menu,
-        )
+        self._start_leaderboard_operation(_sx(1072), _sx(810), _sx(1103), worker, return_menu=self.issue_menu)
 
     def _set_issue_detail_content(self, report: dict[str, object]) -> None:
         self._selected_issue_report = dict(report)
-        message_lines = str(report.get("message") or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
-        created_at = str(report.get("created_at") or "").replace("T", " ")[:19]
-        lines = [
-            f"Title: {str(report.get('title') or 'Untitled issue')}",
-            f"Status: {issue_status_display_label(report.get('status'))}",
-            f"Created: {created_at or 'Unknown date'}",
-            "Message:",
-            *[(line if line else " ") for line in message_lines],
-        ]
-        content = InfoDialogContent(title="Bug Report", lines=tuple(lines))
+        message_lines = str(report.get(_sx(1495)) or _sx(2)).replace(_sx(1166), _sx(652)).replace(_sx(651), _sx(652)).split(_sx(652))
+        created_at = str(report.get(_sx(1873)) or _sx(2)).replace(_sx(1477), _sx(4))[:19]
+        lines = [_sx(780).format(str(report.get(_sx(1106)) or _sx(1829))), _sx(729).format(issue_status_display_label(report.get(_sx(1823)))), _sx(1104).format(created_at or _sx(1743)), _sx(1105), *[line if line else _sx(4) for line in message_lines]]
+        content = InfoDialogContent(title=_sx(814), lines=tuple(lines))
         self._selected_issue_detail_content = content
         self.issue_detail_menu.title = content.title
-        self.issue_detail_menu.items = [MenuItem(line, "copy_info_line") for line in content.lines] + [
-            MenuItem("Copy All", "copy_info_all"),
-            MenuItem("Back", "back"),
-        ]
+        self.issue_detail_menu.items = [MenuItem(line, _sx(1395)) for line in content.lines] + [MenuItem(_sx(1616), _sx(1396)), MenuItem(TEXT[_sx(429)], _sx(429))]
 
     def _begin_issue_submission(self) -> None:
         if not self._leaderboard_is_authenticated():
             if self._leaderboard_has_publish_identity():
-                self._prompt_and_authenticate_leaderboard_account(
-                    return_menu=self.issue_menu,
-                    publish_after_auth=False,
-                    submit_issue_after_auth=True,
-                )
+                self._prompt_and_authenticate_leaderboard_account(return_menu=self.issue_menu, publish_after_auth=False, submit_issue_after_auth=True)
                 return
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("Sign in from Options, Set User Name, before submitting a bug report.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1494), interrupt=True)
             return
         self._open_issue_compose_menu()
 
     def _edit_issue_draft_field(self, field_name: str) -> None:
-        field_key = str(field_name or "").strip().lower()
-        if field_key == "title":
+        field_key = str(field_name or _sx(2)).strip().lower()
+        if field_key == _sx(1106):
             current_value = self._issue_draft_title
-            caption = "Bug Report Title"
+            caption = _sx(1107)
             multiline = False
             text_limit = ISSUE_TITLE_LIMIT
-        elif field_key == "message":
+        elif field_key == _sx(1495):
             current_value = self._issue_draft_message
-            caption = "Bug Report Message"
+            caption = _sx(1496)
             multiline = True
             text_limit = ISSUE_MESSAGE_LIMIT
         else:
             return
         try:
-            result = prompt_for_inline_issue_text(
-                caption=caption,
-                text_hint=current_value,
-                multiline=multiline,
-                text_limit=text_limit,
-            )
+            result = prompt_for_inline_issue_text(caption=caption, text_hint=current_value, multiline=multiline, text_limit=text_limit)
         except IssueDialogCancelled:
             self._reset_input_after_native_modal()
-            self.audio.play("menuclose", channel="ui")
-            self.speaker.speak("Editing cancelled.", interrupt=True)
+            self.audio.play(_sx(55), channel=_sx(180))
+            self.speaker.speak(_sx(1745), interrupt=True)
             return
         except NativeIssueDialogError as exc:
             self._reset_input_after_native_modal()
-            self.audio.play("menuedge", channel="ui")
+            self.audio.play(_sx(52), channel=_sx(180))
             self.speaker.speak(str(exc), interrupt=True)
             return
         self._reset_input_after_native_modal()
-        if field_key == "title":
+        if field_key == _sx(1106):
             self._issue_draft_title = result
-            target_action = "issue_edit_title"
+            target_action = _sx(1108)
         else:
             self._issue_draft_message = result
-            target_action = "issue_edit_message"
-        self.audio.play("confirm", channel="ui")
+            target_action = _sx(1109)
+        self.audio.play(_sx(56), channel=_sx(180))
         self._refresh_issue_compose_menu()
         self.issue_compose_menu.index = self._menu_index_for_action(self.issue_compose_menu, target_action)
         self.speaker.speak(self.issue_compose_menu.items[self.issue_compose_menu.index].label, interrupt=True)
@@ -6320,119 +4663,83 @@ class SubwayBlindGame:
     def _edit_practice_hazard_target(self) -> None:
         current_target = self._practice_hazard_target_setting()
         try:
-            result = prompt_for_inline_issue_text(
-                caption="Practice Hazard Target",
-                text_hint=str(current_target),
-                multiline=False,
-                text_limit=5,
-                numeric_only=True,
-            )
+            result = prompt_for_inline_issue_text(caption=_sx(1746), text_hint=str(current_target), multiline=False, text_limit=5, numeric_only=True)
         except IssueDialogCancelled:
             self._reset_input_after_native_modal()
-            self.audio.play("menuclose", channel="ui")
-            self.speaker.speak("Editing cancelled.", interrupt=True)
+            self.audio.play(_sx(55), channel=_sx(180))
+            self.speaker.speak(_sx(1745), interrupt=True)
             return
         except NativeIssueDialogError as exc:
             self._reset_input_after_native_modal()
-            self.audio.play("menuedge", channel="ui")
+            self.audio.play(_sx(52), channel=_sx(180))
             self.speaker.speak(str(exc), interrupt=True)
             return
         self._reset_input_after_native_modal()
-        normalized_value = str(result or "").strip()
+        normalized_value = str(result or _sx(2)).strip()
         if not normalized_value.isdigit():
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("Enter a number between 1 and 10000.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1497), interrupt=True)
             return
         target_value = int(normalized_value)
         if target_value < PRACTICE_TARGET_HAZARDS_MIN or target_value > PRACTICE_TARGET_HAZARDS_MAX:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("Hazard target must be between 1 and 10000.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1498), interrupt=True)
             return
-        self.settings["practice_hazard_target"] = target_value
-        self.audio.play("confirm", channel="ui")
+        self.settings[_sx(326)] = target_value
+        self.audio.play(_sx(56), channel=_sx(180))
         self._refresh_loadout_menu_labels()
-        self.loadout_menu.index = self._menu_index_for_action(self.loadout_menu, "edit_practice_hazard_target")
+        self.loadout_menu.index = self._menu_index_for_action(self.loadout_menu, _sx(1110))
         self.speaker.speak(self.loadout_menu.items[self.loadout_menu.index].label, interrupt=True)
 
     def _submit_issue_draft(self) -> None:
-        normalized_title = " ".join(self._issue_draft_title.strip().split())
-        normalized_message = self._issue_draft_message.replace("\r\n", "\n").replace("\r", "\n")
+        normalized_title = _sx(4).join(self._issue_draft_title.strip().split())
+        normalized_message = self._issue_draft_message.replace(_sx(1166), _sx(652)).replace(_sx(651), _sx(652))
         if not normalized_title:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("Issue title is required.", interrupt=True)
-            self.issue_compose_menu.index = self._menu_index_for_action(self.issue_compose_menu, "issue_edit_title")
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1499), interrupt=True)
+            self.issue_compose_menu.index = self._menu_index_for_action(self.issue_compose_menu, _sx(1108))
             return
         if not normalized_message.strip():
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("Issue message is required.", interrupt=True)
-            self.issue_compose_menu.index = self._menu_index_for_action(self.issue_compose_menu, "issue_edit_message")
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1500), interrupt=True)
+            self.issue_compose_menu.index = self._menu_index_for_action(self.issue_compose_menu, _sx(1109))
             return
 
         def worker() -> dict[str, object]:
             just_connected = self.leaderboard_client.connect()
-            result = self.leaderboard_client.submit_issue_report(
-                title=normalized_title,
-                message=normalized_message,
-            )
-            result["just_connected"] = just_connected
+            result = self.leaderboard_client.submit_issue_report(title=normalized_title, message=normalized_message)
+            result[_sx(1327)] = just_connected
             return result
-
-        self._start_leaderboard_operation(
-            "issue_submit",
-            "Server",
-            "Submitting bug report...",
-            worker,
-            return_menu=self.issue_compose_menu,
-        )
+        self._start_leaderboard_operation(_sx(1073), _sx(810), _sx(1111), worker, return_menu=self.issue_compose_menu)
 
     def _publish_latest_game_over_run(self) -> None:
         if self._practice_mode_active:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("Practice Lane runs cannot be published to the leaderboard.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1501), interrupt=True)
             self._set_active_menu(self.game_over_menu)
             return
         if not self._leaderboard_is_authenticated():
             if self._leaderboard_has_publish_identity():
-                self._prompt_and_authenticate_leaderboard_account(
-                    return_menu=self.publish_confirm_menu,
-                    publish_after_auth=True,
-                )
+                self._prompt_and_authenticate_leaderboard_account(return_menu=self.publish_confirm_menu, publish_after_auth=True)
                 return
             self._set_active_menu(self.game_over_menu)
             return
-        if self._game_over_publish_state in {"publishing", "published"}:
+        if self._game_over_publish_state in {_sx(784), _sx(1071)}:
             return
         submission_payload = self._build_leaderboard_submission_payload()
-        self._game_over_publish_state = "publishing"
+        self._game_over_publish_state = _sx(784)
 
         def worker() -> dict[str, object]:
             just_connected = self.leaderboard_client.connect()
             result = self.leaderboard_client.submit_score(**submission_payload)
-            result["just_connected"] = just_connected
-            result["username"] = self.leaderboard_client.principal_username
+            result[_sx(1327)] = just_connected
+            result[_sx(1502)] = self.leaderboard_client.principal_username
             return result
-
-        self._start_leaderboard_operation(
-            "leaderboard_publish",
-            "Leaderboard",
-            "Publishing your score...",
-            worker,
-            return_menu=self.game_over_menu,
-        )
+        self._start_leaderboard_operation(_sx(1070), _sx(811), _sx(1112), worker, return_menu=self.game_over_menu)
 
     def _build_leaderboard_submission_payload(self) -> dict[str, object]:
         summary = dict(self._game_over_summary)
-        return {
-            "score": int(summary.get("score", 0) or 0),
-            "coins": int(summary.get("coins", 0) or 0),
-            "play_time_seconds": int(summary.get("play_time_seconds", 0) or 0),
-            "difficulty": str(summary.get("difficulty") or self._difficulty_key()),
-            "death_reason": str(summary.get("death_reason") or "Run ended."),
-            "distance_meters": int(summary.get("distance_meters", 0) or 0),
-            "clean_escapes": int(summary.get("clean_escapes", 0) or 0),
-            "revives_used": int(summary.get("revives_used", 0) or 0),
-            "powerup_usage": dict(summary.get("powerup_usage") or {}),
-        }
+        return {_sx(968): int(summary.get(_sx(968), 0) or 0), _sx(363): int(summary.get(_sx(363), 0) or 0), _sx(969): int(summary.get(_sx(969), 0) or 0), _sx(318): str(summary.get(_sx(318)) or self._difficulty_key()), _sx(970): str(summary.get(_sx(970)) or _sx(661)), _sx(972): int(summary.get(_sx(972), 0) or 0), _sx(966): int(summary.get(_sx(966), 0) or 0), _sx(973): int(summary.get(_sx(973), 0) or 0), _sx(967): dict(summary.get(_sx(967)) or {})}
 
     def _cycle_output_device_in_options(self, direction: int) -> None:
         devices = self.audio.output_device_choices()
@@ -6446,15 +4753,9 @@ class SubwayBlindGame:
         self._refresh_options_menu_labels()
         selected_label = applied_device or SYSTEM_DEFAULT_OUTPUT_LABEL
         if requested_device == applied_device:
-            self.speaker.speak(
-                f"Output device set to {selected_label}.",
-                interrupt=True,
-            )
+            self.speaker.speak(_sx(1503).format(selected_label), interrupt=True)
             return
-        self.speaker.speak(
-            f"Requested output device unavailable. Using {selected_label}.",
-            interrupt=True,
-        )
+        self.speaker.speak(_sx(1113).format(selected_label), interrupt=True)
 
     def _apply_speaker_settings(self) -> None:
         self.speaker.apply_settings(self.settings)
@@ -6463,238 +4764,205 @@ class SubwayBlindGame:
         if self.active_menu not in {self.options_menu, self.sapi_menu, self.announcements_menu} or direction not in (-1, 1):
             return
         selected_action = self.active_menu.items[self.active_menu.index].action
-        if selected_action == "back":
+        if selected_action == _sx(429):
             return
-        if selected_action == "opt_sfx":
-            current = float(self.settings["sfx_volume"])
+        if selected_action == _sx(1114):
+            current = float(self.settings[_sx(130)])
             updated = step_volume(current, direction)
             if updated == current:
-                self._play_menu_feedback("menuedge")
+                self._play_menu_feedback(_sx(52))
                 return
-            self.settings["sfx_volume"] = updated
+            self.settings[_sx(130)] = updated
             self.audio.refresh_volumes()
-            self._play_menu_feedback("confirm")
+            self._play_menu_feedback(_sx(56))
             self._refresh_options_menu_labels()
-            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_sfx")].label, interrupt=True)
+            self.speaker.speak(self.options_menu.items[self._update_option_index(_sx(1114))].label, interrupt=True)
             return
-        if selected_action == "opt_music":
-            current = float(self.settings["music_volume"])
+        if selected_action == _sx(1115):
+            current = float(self.settings[_sx(196)])
             updated = step_volume(current, direction)
             if updated == current:
-                self._play_menu_feedback("menuedge")
+                self._play_menu_feedback(_sx(52))
                 return
-            self.settings["music_volume"] = updated
+            self.settings[_sx(196)] = updated
             self.audio.refresh_volumes()
-            self._play_menu_feedback("confirm")
+            self._play_menu_feedback(_sx(56))
             self._refresh_options_menu_labels()
-            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_music")].label, interrupt=True)
+            self.speaker.speak(self.options_menu.items[self._update_option_index(_sx(1115))].label, interrupt=True)
             return
-        if selected_action == "opt_updates":
-            self.settings["check_updates_on_startup"] = direction > 0
-            self._play_menu_feedback("confirm")
+        if selected_action == _sx(1116):
+            self.settings[_sx(316)] = direction > 0
+            self._play_menu_feedback(_sx(56))
             self._refresh_options_menu_labels()
-            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_updates")].label, interrupt=True)
+            self.speaker.speak(self.options_menu.items[self._update_option_index(_sx(1116))].label, interrupt=True)
             return
-        if selected_action == "opt_output":
-            self._play_menu_feedback("confirm")
+        if selected_action == _sx(1117):
+            self._play_menu_feedback(_sx(56))
             self._cycle_output_device_in_options(direction)
             return
-        if selected_action == "opt_menu_hrtf":
-            self.settings["menu_sound_hrtf"] = direction > 0
-            self._play_menu_feedback("confirm")
+        if selected_action == _sx(1118):
+            self.settings[_sx(195)] = direction > 0
+            self._play_menu_feedback(_sx(56))
             self._refresh_options_menu_labels()
-            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_menu_hrtf")].label, interrupt=True)
+            self.speaker.speak(self.options_menu.items[self._update_option_index(_sx(1118))].label, interrupt=True)
             return
-        if selected_action == "opt_menu_wrap":
-            self.settings["menu_wrap_enabled"] = direction > 0
-            self._play_menu_feedback("confirm")
+        if selected_action == _sx(1119):
+            self.settings[_sx(315)] = direction > 0
+            self._play_menu_feedback(_sx(56))
             self._refresh_options_menu_labels()
-            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_menu_wrap")].label, interrupt=True)
+            self.speaker.speak(self.options_menu.items[self._update_option_index(_sx(1119))].label, interrupt=True)
             return
-        if selected_action == "opt_speech":
-            self._play_menu_feedback("confirm")
-            self.settings["speech_enabled"] = direction > 0
+        if selected_action == _sx(1120):
+            self._play_menu_feedback(_sx(56))
+            self.settings[_sx(117)] = direction > 0
             self._refresh_options_menu_labels()
-            label = self.options_menu.items[self._update_option_index("opt_speech")].label
-            if self.settings["speech_enabled"]:
+            label = self.options_menu.items[self._update_option_index(_sx(1120))].label
+            if self.settings[_sx(117)]:
                 self._apply_speaker_settings()
                 self.speaker.speak(label, interrupt=True)
             else:
                 self.speaker.speak(label, interrupt=True)
                 self._apply_speaker_settings()
             return
-        if selected_action == "opt_sapi":
-            self.settings["sapi_speech_enabled"] = direction > 0
+        if selected_action == _sx(1121):
+            self.settings[_sx(118)] = direction > 0
             self._apply_speaker_settings()
-            self._play_menu_feedback("confirm")
+            self._play_menu_feedback(_sx(56))
             self._refresh_options_menu_labels()
             self._refresh_sapi_menu_labels()
             self.speaker.speak(self.sapi_menu.items[0].label, interrupt=True)
             return
-        if selected_action == "opt_sapi_volume":
-            current = int(self.settings.get("sapi_volume", 100))
+        if selected_action == _sx(1122):
+            current = int(self.settings.get(_sx(122), 100))
             updated = step_int(current, direction, SAPI_VOLUME_MIN, SAPI_VOLUME_MAX)
             if updated == current:
-                self._play_menu_feedback("menuedge")
+                self._play_menu_feedback(_sx(52))
                 return
-            self.settings["sapi_volume"] = updated
+            self.settings[_sx(122)] = updated
             self._apply_speaker_settings()
-            self._play_menu_feedback("confirm")
+            self._play_menu_feedback(_sx(56))
             self._refresh_options_menu_labels()
             self._refresh_sapi_menu_labels()
             self.speaker.speak(self.sapi_menu.items[1].label, interrupt=True)
             return
-        if selected_action == "opt_sapi_voice":
+        if selected_action == _sx(1123):
             selected_voice = self.speaker.cycle_sapi_voice(direction)
             if selected_voice == SAPI_VOICE_UNAVAILABLE_LABEL:
-                self._play_menu_feedback("menuedge")
-                self.speaker.speak("No SAPI voices available.", interrupt=True)
+                self._play_menu_feedback(_sx(52))
+                self.speaker.speak(_sx(1748), interrupt=True)
                 return
-            self.settings["sapi_voice_id"] = self.speaker.sapi_voice_id or ""
+            self.settings[_sx(119)] = self.speaker.sapi_voice_id or _sx(2)
             self._apply_speaker_settings()
-            self._play_menu_feedback("confirm")
+            self._play_menu_feedback(_sx(56))
             self._refresh_options_menu_labels()
             self._refresh_sapi_menu_labels()
             self.speaker.speak(self.sapi_menu.items[2].label, interrupt=True)
             return
-        if selected_action == "opt_sapi_rate":
-            current = int(self.settings.get("sapi_rate", 0))
+        if selected_action == _sx(1124):
+            current = int(self.settings.get(_sx(120), 0))
             updated = step_int(current, direction, SAPI_RATE_MIN, SAPI_RATE_MAX)
             if updated == current:
-                self._play_menu_feedback("menuedge")
+                self._play_menu_feedback(_sx(52))
                 return
-            self.settings["sapi_rate"] = updated
+            self.settings[_sx(120)] = updated
             self._apply_speaker_settings()
-            self._play_menu_feedback("confirm")
+            self._play_menu_feedback(_sx(56))
             self._refresh_options_menu_labels()
             self._refresh_sapi_menu_labels()
             self.speaker.speak(self.sapi_menu.items[3].label, interrupt=True)
             return
-        if selected_action == "opt_sapi_pitch":
-            current = int(self.settings.get("sapi_pitch", 0))
+        if selected_action == _sx(1125):
+            current = int(self.settings.get(_sx(121), 0))
             updated = step_int(current, direction, SAPI_PITCH_MIN, SAPI_PITCH_MAX)
             if updated == current:
-                self._play_menu_feedback("menuedge")
+                self._play_menu_feedback(_sx(52))
                 return
-            self.settings["sapi_pitch"] = updated
+            self.settings[_sx(121)] = updated
             self._apply_speaker_settings()
-            self._play_menu_feedback("confirm")
+            self._play_menu_feedback(_sx(56))
             self._refresh_options_menu_labels()
             self._refresh_sapi_menu_labels()
             self.speaker.speak(self.sapi_menu.items[4].label, interrupt=True)
             return
-        if selected_action == "opt_diff":
-            order = ["easy", "normal", "hard"]
-            current = str(self.settings["difficulty"])
+        if selected_action == _sx(1126):
+            order = [_sx(199), _sx(200), _sx(201)]
+            current = str(self.settings[_sx(318)])
             try:
                 current_index = order.index(current)
             except ValueError:
-                current_index = order.index("normal")
-            self.settings["difficulty"] = order[(current_index + direction) % len(order)]
-            self._play_menu_feedback("confirm")
+                current_index = order.index(_sx(200))
+            self.settings[_sx(318)] = order[(current_index + direction) % len(order)]
+            self._play_menu_feedback(_sx(56))
             self._refresh_options_menu_labels()
-            self.speaker.speak(self.options_menu.items[self._update_option_index("opt_diff")].label, interrupt=True)
+            self.speaker.speak(self.options_menu.items[self._update_option_index(_sx(1126))].label, interrupt=True)
             return
-        if selected_action == "opt_main_menu_descriptions":
-            self.settings["main_menu_descriptions_enabled"] = direction > 0
-            self._play_menu_feedback("confirm")
+        if selected_action == _sx(1127):
+            self.settings[_sx(327)] = direction > 0
+            self._play_menu_feedback(_sx(56))
             self._refresh_options_menu_labels()
-            self.speaker.speak(
-                self.options_menu.items[self._update_option_index("opt_main_menu_descriptions")].label,
-                interrupt=True,
-            )
+            self.speaker.speak(self.options_menu.items[self._update_option_index(_sx(1127))].label, interrupt=True)
             return
-        if selected_action == "opt_exit_confirmation":
-            self.settings["confirm_exit_enabled"] = direction > 0
-            self._play_menu_feedback("confirm")
+        if selected_action == _sx(1128):
+            self.settings[_sx(328)] = direction > 0
+            self._play_menu_feedback(_sx(56))
             self._refresh_options_menu_labels()
-            self.speaker.speak(
-                self.options_menu.items[self._update_option_index("opt_exit_confirmation")].label,
-                interrupt=True,
-            )
+            self.speaker.speak(self.options_menu.items[self._update_option_index(_sx(1128))].label, interrupt=True)
             return
-        if selected_action == "opt_purchase_confirmation":
-            self.settings["confirm_purchase_enabled"] = direction > 0
-            self._play_menu_feedback("confirm")
+        if selected_action == _sx(1129):
+            self.settings[_sx(329)] = direction > 0
+            self._play_menu_feedback(_sx(56))
             self._refresh_options_menu_labels()
-            self.speaker.speak(
-                self.options_menu.items[self._update_option_index("opt_purchase_confirmation")].label,
-                interrupt=True,
-            )
+            self.speaker.speak(self.options_menu.items[self._update_option_index(_sx(1129))].label, interrupt=True)
             return
-        if selected_action == "opt_meters":
-            self.settings["meter_announcements_enabled"] = direction > 0
-            self._play_menu_feedback("confirm")
+        if selected_action == _sx(1130):
+            self.settings[_sx(321)] = direction > 0
+            self._play_menu_feedback(_sx(56))
             self._refresh_announcements_menu_labels()
-            self.speaker.speak(
-                self.announcements_menu.items[self._update_announcements_index("opt_meters")].label,
-                interrupt=True,
-            )
+            self.speaker.speak(self.announcements_menu.items[self._update_announcements_index(_sx(1130))].label, interrupt=True)
             return
-        if selected_action == "opt_coin_counters":
-            self.settings["coin_counters_enabled"] = direction > 0
-            self._play_menu_feedback("confirm")
+        if selected_action == _sx(1131):
+            self.settings[_sx(322)] = direction > 0
+            self._play_menu_feedback(_sx(56))
             self._refresh_announcements_menu_labels()
-            self.speaker.speak(
-                self.announcements_menu.items[self._update_announcements_index("opt_coin_counters")].label,
-                interrupt=True,
-            )
+            self.speaker.speak(self.announcements_menu.items[self._update_announcements_index(_sx(1131))].label, interrupt=True)
             return
-        if selected_action == "opt_quest_changes":
-            self.settings["quest_changes_enabled"] = direction > 0
-            self._play_menu_feedback("confirm")
+        if selected_action == _sx(1132):
+            self.settings[_sx(323)] = direction > 0
+            self._play_menu_feedback(_sx(56))
             self._refresh_announcements_menu_labels()
-            self.speaker.speak(
-                self.announcements_menu.items[self._update_announcements_index("opt_quest_changes")].label,
-                interrupt=True,
-            )
+            self.speaker.speak(self.announcements_menu.items[self._update_announcements_index(_sx(1132))].label, interrupt=True)
             return
-        if selected_action == "opt_pause_on_focus_loss":
-            self.settings["pause_on_focus_loss_enabled"] = direction > 0
-            self._play_menu_feedback("confirm")
+        if selected_action == _sx(1133):
+            self.settings[_sx(324)] = direction > 0
+            self._play_menu_feedback(_sx(56))
             self._refresh_announcements_menu_labels()
-            self.speaker.speak(
-                self.announcements_menu.items[self._update_announcements_index("opt_pause_on_focus_loss")].label,
-                interrupt=True,
-            )
+            self.speaker.speak(self.announcements_menu.items[self._update_announcements_index(_sx(1133))].label, interrupt=True)
             return
 
-    def start_run(self, practice_mode: bool = False) -> None:
+    def start_run(self, practice_mode: bool=False) -> None:
         ensure_progression_state(self.settings)
         self._sync_character_progress()
         self._practice_mode_active = bool(practice_mode)
         practice_speed_scaling_enabled = self._practice_speed_scaling_enabled() if self._practice_mode_active else False
         self._practice_speed_scaling_active = practice_speed_scaling_enabled
         self._practice_hazards_cleared = 0
-        self._practice_hazard_target = (
-            self._practice_hazard_target_setting()
-            if self._practice_mode_active
-            else PRACTICE_TARGET_HAZARDS
-        )
+        self._practice_hazard_target = self._practice_hazard_target_setting() if self._practice_mode_active else PRACTICE_TARGET_HAZARDS
         self._practice_next_progress_announcement = PRACTICE_PROGRESS_STEP
         self.state = RunState(running=True)
         self._set_active_menu(None)
         self.player = Player()
-        self.player.hoverboards = int(self.settings.get("hoverboards", 0))
+        self.player.hoverboards = int(self.settings.get(_sx(335), 0))
         self.obstacles = []
         if self._practice_mode_active:
-            self.speed_profile = SpeedProfile(
-                base_speed=PRACTICE_BASE_SPEED,
-                max_speed=PRACTICE_SCALING_MAX_SPEED if practice_speed_scaling_enabled else PRACTICE_BASE_SPEED,
-                cap_seconds=PRACTICE_SCALING_CAP_SECONDS if practice_speed_scaling_enabled else 1.0,
-                spawn_gap_start=1.28,
-                spawn_gap_end=1.0 if practice_speed_scaling_enabled else 1.28,
-            )
+            self.speed_profile = SpeedProfile(base_speed=PRACTICE_BASE_SPEED, max_speed=PRACTICE_SCALING_MAX_SPEED if practice_speed_scaling_enabled else PRACTICE_BASE_SPEED, cap_seconds=PRACTICE_SCALING_CAP_SECONDS if practice_speed_scaling_enabled else 1.0, spawn_gap_start=1.28, spawn_gap_end=1.0 if practice_speed_scaling_enabled else 1.28)
         else:
-            self.speed_profile = speed_profile_for_difficulty(str(self.settings["difficulty"]))
+            self.speed_profile = speed_profile_for_difficulty(str(self.settings[_sx(318)]))
         self.spatial_audio.reset()
         self.spawn_director.reset()
         if self._practice_mode_active:
             self.state.multiplier = 1
         else:
-            self.state.multiplier = 1 + int(self.settings.get("mission_multiplier_bonus", 0)) + score_booster_bonus(
-                self.selected_score_boosters
-            ) + self._active_character_bonuses.starting_multiplier_bonus + int(self._active_event_profile.get("featured_multiplier_bonus", 0) or 0)
+            self.state.multiplier = 1 + int(self.settings.get(_sx(340), 0)) + score_booster_bonus(self.selected_score_boosters) + self._active_character_bonuses.starting_multiplier_bonus + int(self._active_event_profile.get(_sx(613), 0) or 0)
         self.state.speed = self.speed_profile.base_speed
         self._active_run_stats = self._empty_run_stats()
         self._footstep_timer = 0.0
@@ -6705,8 +4973,8 @@ class SubwayBlindGame:
         self._coin_pitch_index = 0
         self._coin_pitch_timer = 0.0
         self._coin_streak = 0
-        self._last_death_reason = "Run ended."
-        self._game_over_publish_state = "idle"
+        self._last_death_reason = _sx(661)
+        self._game_over_publish_state = _sx(658)
         self._game_over_summary = self._empty_game_over_summary()
         self._magnet_loop_active = False
         self._jetpack_loop_active = False
@@ -6717,81 +4985,59 @@ class SubwayBlindGame:
         self._box_high_tier_meter = 0
         self._coin_streak_grace_timer = 0.0
         if self._leaderboard_is_authenticated():
-            self._active_special_run_items = {
-                item_key
-                for item_key in SPECIAL_ITEM_ORDER
-                if self._special_item_enabled(item_key)
-            }
+            self._active_special_run_items = {item_key for item_key in SPECIAL_ITEM_ORDER if self._special_item_enabled(item_key)}
         else:
             self._active_special_run_items = set()
         self.player.board_extra_jump_available = False
         active_character = selected_character_definition(self.settings)
         active_board = selected_board_definition(self.settings)
-
         if not self._practice_mode_active and self.selected_headstarts > 0:
-            self.settings["headstarts"] = max(0, int(self.settings.get("headstarts", 0)) - self.selected_headstarts)
+            self.settings[_sx(336)] = max(0, int(self.settings.get(_sx(336), 0)) - self.selected_headstarts)
             self.player.headstart = headstart_duration_for_uses(self.selected_headstarts)
             self.player.y = 2.8
             self.player.vy = 0.0
             self._start_headstart_audio()
         if not self._practice_mode_active and self.selected_score_boosters > 0:
-            self.settings["score_boosters"] = max(
-                0,
-                int(self.settings.get("score_boosters", 0)) - self.selected_score_boosters,
-            )
-            self.audio.play("mission_reward", channel="boost")
-            self.speaker.speak(
-                f"Score booster active. Multiplier starts at x{self.state.multiplier}.",
-                interrupt=False,
-            )
-
-        self.audio.play("slide_letters", channel="intro_ui")
-        self.audio.play("intro_start", channel="ui")
+            self.settings[_sx(337)] = max(0, int(self.settings.get(_sx(337), 0)) - self.selected_score_boosters)
+            self.audio.play(_sx(100), channel=_sx(182))
+            self.speaker.speak(_sx(1505).format(self.state.multiplier), interrupt=False)
+        self.audio.play(_sx(109), channel=_sx(1506))
+        self.audio.play(_sx(102), channel=_sx(180))
         if self.selected_headstarts > 0:
-            self.audio.play("intro_shake", channel="intro_chase")
-            self.audio.play("intro_spray", channel="intro_spray_once")
-        self.audio.music_start("gameplay")
-        event = self._active_event_profile.get("event")
-        event_message = ""
+            self.audio.play(_sx(103), channel=_sx(1750))
+            self.audio.play(_sx(104), channel=_sx(1751))
+        self.audio.music_start(_sx(72))
+        event = self._active_event_profile.get(_sx(610))
+        event_message = _sx(2)
         if not self._practice_mode_active and event is not None:
-            event_label = str(getattr(event, "label", "") or "").strip()
-            if self._active_event_profile.get("featured_character_active"):
-                event_message = f" {event_label} active with bonus multiplier."
+            event_label = str(getattr(event, _sx(571), _sx(2)) or _sx(2)).strip()
+            if self._active_event_profile.get(_sx(612)):
+                event_message = _sx(1507).format(event_label)
             elif event_label:
-                event_message = f" {event_label} active."
+                event_message = _sx(1753).format(event_label)
         if self._practice_mode_active:
-            speed_behavior = "speed scaling on" if practice_speed_scaling_enabled else "fixed speed"
-            self.speaker.speak(
-                f"Practice Lane started. {speed_behavior}. Clear {self._practice_hazard_target} hazards to complete.",
-                interrupt=True,
-            )
+            speed_behavior = _sx(1508) if practice_speed_scaling_enabled else _sx(1509)
+            self.speaker.speak(_sx(1510).format(speed_behavior, self._practice_hazard_target), interrupt=True)
         elif self.selected_headstarts > 0:
-            self.speaker.speak(
-                f"Run started. {active_character.name} active. {active_board.name} board selected.{event_message} Headstart active for {self.selected_headstarts} charge{'s' if self.selected_headstarts != 1 else ''}.",
-                interrupt=True,
-            )
+            self.speaker.speak(_sx(1757).format(active_character.name, active_board.name, event_message, self.selected_headstarts, _sx(294) if self.selected_headstarts != 1 else _sx(2)), interrupt=True)
         else:
-            self.speaker.speak(
-                f"Run started. {active_character.name} active. {active_board.name} board selected.{event_message} Center lane.",
-                interrupt=True,
-            )
-
+            self.speaker.speak(_sx(1758).format(active_character.name, active_board.name, event_message), interrupt=True)
         self.selected_headstarts = 0
         self.selected_score_boosters = 0
         self._pending_practice_setup = False
         self._refresh_loadout_menu_labels()
 
-    def end_run(self, to_menu: bool = True) -> None:
+    def end_run(self, to_menu: bool=True) -> None:
         self._commit_run_rewards()
         self.state.running = False
         self._stop_headstart_audio()
-        self.audio.stop("loop_guard")
-        self.audio.stop("loop_magnet")
-        self.audio.stop("loop_jetpack")
+        self.audio.stop(_sx(194))
+        self.audio.stop(_sx(198))
+        self.audio.stop(_sx(197))
         self._stop_spatial_audio()
         self.spatial_audio.reset()
         if to_menu:
-            self._update_game_over_summary("Returned to main menu")
+            self._update_game_over_summary(_sx(1511))
             if self._should_offer_publish_prompt():
                 self._open_publish_confirmation(return_menu=self.main_menu, start_index=0)
                 self._sync_music_context()
@@ -6806,70 +5052,68 @@ class SubwayBlindGame:
             return
         if key == pygame.K_r:
             if self._coin_counters_enabled():
-                self.speaker.speak(f"Coins collected: {self.state.coins}.", interrupt=False)
+                self.speaker.speak(_sx(1759).format(self.state.coins), interrupt=False)
             return
         if key == pygame.K_t:
-            self.speaker.speak(f"Play time: {format_play_time(self.state.time)}.", interrupt=False)
+            self.speaker.speak(_sx(1512).format(format_play_time(self.state.time)), interrupt=False)
             return
-
         if self.state.paused or self.player.jetpack > 0 or self.player.headstart > 0:
             return
-
         self.player.lane = normalize_lane(self.player.lane)
         if key == pygame.K_LEFT:
-            lane_step = 2 if self.player.hover_active > 0 and selected_board_definition(self.settings).power_key == "zap_sideways" else 1
+            lane_step = 2 if self.player.hover_active > 0 and selected_board_definition(self.settings).power_key == _sx(231) else 1
             target_lane = normalize_lane(self.player.lane - lane_step)
             if target_lane != self.player.lane:
                 move_count = abs(target_lane - self.player.lane)
                 self.player.lane = target_lane
-                if self._special_active("afterimage_dash"):
-                    window = self._special_timer("afterimage_window")
-                    charges = int(self._special_effect_timers.get("afterimage_charges", 0) or 0)
+                if self._special_active(_sx(1761)):
+                    window = self._special_timer(_sx(1839))
+                    charges = int(self._special_effect_timers.get(_sx(1866), 0) or 0)
                     if window > 0 and charges > 0:
                         extra_lane = normalize_lane(self.player.lane - 1)
                         if extra_lane != self.player.lane:
                             self.player.lane = extra_lane
                             move_count += 1
-                            self._special_effect_timers["afterimage_charges"] = max(0, charges - 1)
-                            self._mark_special_item_consumed("afterimage_dash")
+                            self._special_effect_timers[_sx(1866)] = max(0, charges - 1)
+                            self._mark_special_item_consumed(_sx(1761))
                     else:
-                        self._set_special_timer("afterimage_window", 1.2)
-                        self._special_effect_timers["afterimage_charges"] = 2
-                if self._special_active("phantom_step"):
-                    self._set_special_timer("phantom_step", 8.0 * self._special_duration_scale())
-                self._record_mission_event("dodges", move_count)
-                self.audio.play("dodge", pan=lane_to_pan(self.player.lane), channel="move")
-                if self.settings.get("announce_lane", True):
+                        self._set_special_timer(_sx(1839), 1.2)
+                        self._special_effect_timers[_sx(1866)] = 2
+                if self._special_active(_sx(1556)):
+                    self._set_special_timer(_sx(1556), 8.0 * self._special_duration_scale())
+                self._record_mission_event(_sx(366), move_count)
+                self.audio.play(_sx(15), pan=lane_to_pan(self.player.lane), channel=_sx(42))
+                if self.settings.get(_sx(319), True):
                     self.speaker.speak(lane_name(self.player.lane), interrupt=False)
             else:
-                self.audio.play("menuedge", channel="ui")
+                self.audio.play(_sx(52), channel=_sx(180))
         elif key == pygame.K_RIGHT:
-            lane_step = 2 if self.player.hover_active > 0 and selected_board_definition(self.settings).power_key == "zap_sideways" else 1
+            lane_step = 2 if self.player.hover_active > 0 and selected_board_definition(self.settings).power_key == _sx(231) else 1
             target_lane = normalize_lane(self.player.lane + lane_step)
             if target_lane != self.player.lane:
                 move_count = abs(target_lane - self.player.lane)
                 self.player.lane = target_lane
-                if self._special_active("afterimage_dash"):
-                    window = self._special_timer("afterimage_window")
-                    charges = int(self._special_effect_timers.get("afterimage_charges", 0) or 0)
+                if self._special_active(_sx(1761)):
+                    window = self._special_timer(_sx(1839))
+                    charges = int(self._special_effect_timers.get(_sx(1866), 0) or 0)
                     if window > 0 and charges > 0:
                         extra_lane = normalize_lane(self.player.lane + 1)
                         if extra_lane != self.player.lane:
                             self.player.lane = extra_lane
                             move_count += 1
-                            self._special_effect_timers["afterimage_charges"] = max(0, charges - 1)
-                            self._mark_special_item_consumed("afterimage_dash")
+                            self._special_effect_timers[_sx(1866)] = max(0, charges - 1)
+                            self._mark_special_item_consumed(_sx(1761))
                     else:
-                        self._set_special_timer("afterimage_window", 1.2)
-                        self._special_effect_timers["afterimage_charges"] = 2
-                if self._special_active("phantom_step"):
-                    self._set_special_timer("phantom_step", 8.0 * self._special_duration_scale())
-                self._record_mission_event("dodges", move_count)
-                self.audio.play("dodge", pan=lane_to_pan(self.player.lane), channel="move")
-                if self.settings.get("announce_lane", True):
+                        self._set_special_timer(_sx(1839), 1.2)
+                        self._special_effect_timers[_sx(1866)] = 2
+                if self._special_active(_sx(1556)):
+                    self._set_special_timer(_sx(1556), 8.0 * self._special_duration_scale())
+                self._record_mission_event(_sx(366), move_count)
+                self.audio.play(_sx(15), pan=lane_to_pan(self.player.lane), channel=_sx(42))
+                if self.settings.get(_sx(319), True):
                     self.speaker.speak(lane_name(self.player.lane), interrupt=False)
             else:
-                self.audio.play("menuedge", channel="ui")
+                self.audio.play(_sx(52), channel=_sx(180))
         elif key == pygame.K_UP:
             self._try_jump()
         elif key == pygame.K_DOWN:
@@ -6877,147 +5121,128 @@ class SubwayBlindGame:
         elif key == pygame.K_SPACE:
             self._try_hoverboard()
         elif key == pygame.K_m:
-            self.settings["speech_enabled"] = not self.settings["speech_enabled"]
-            if self.settings["speech_enabled"]:
+            self.settings[_sx(117)] = not self.settings[_sx(117)]
+            if self.settings[_sx(117)]:
                 self._apply_speaker_settings()
-                self.speaker.speak("Speech enabled", interrupt=True)
+                self.speaker.speak(_sx(1891), interrupt=True)
             else:
-                self.speaker.speak("Speech disabled", interrupt=True)
+                self.speaker.speak(_sx(1892), interrupt=True)
                 self._apply_speaker_settings()
 
     def _try_jump(self) -> None:
         board = selected_board_definition(self.settings)
-        hover_power = board.power_key if self.player.hover_active > 0 else "standard"
-        can_double_jump = (
-            self.player.hover_active > 0
-            and hover_power == "double_jump"
-            and self.player.y > 0.01
-            and self.player.board_extra_jump_available
-            and self.player.jetpack <= 0
-            and self.player.headstart <= 0
-        )
+        hover_power = board.power_key if self.player.hover_active > 0 else _sx(206)
+        can_double_jump = self.player.hover_active > 0 and hover_power == _sx(211) and (self.player.y > 0.01) and self.player.board_extra_jump_available and (self.player.jetpack <= 0) and (self.player.headstart <= 0)
         if self.player.rolling > 0:
             return
-        if self.player.y > 0.01 and not can_double_jump:
+        if self.player.y > 0.01 and (not can_double_jump):
             return
         base_jump = 13.0 if self.player.super_sneakers > 0 else 10.5
-        if hover_power == "super_jump":
+        if hover_power == _sx(216):
             base_jump += 2.4
-        elif hover_power == "smooth_drift":
+        elif hover_power == _sx(226):
             base_jump += 1.1
         self.player.vy = base_jump
-        self._record_mission_event("jumps")
-        if self.player.hover_active > 0 and hover_power == "double_jump":
+        self._record_mission_event(_sx(364))
+        if self.player.hover_active > 0 and hover_power == _sx(211):
             if self.player.y <= 0.01:
                 self.player.board_extra_jump_available = True
             else:
                 self.player.board_extra_jump_available = False
-        sound_key = "sneakers_jump" if self.player.super_sneakers > 0 else "jump"
-        self.audio.play(sound_key, pan=lane_to_pan(self.player.lane), channel="act")
+        sound_key = _sx(13) if self.player.super_sneakers > 0 else _sx(12)
+        self.audio.play(sound_key, pan=lane_to_pan(self.player.lane), channel=_sx(43))
 
     def _try_roll(self) -> None:
         if self.player.y > 0.01:
             return
         board = selected_board_definition(self.settings)
-        roll_duration = 1.05 if self.player.hover_active > 0 and board.power_key == "stay_low" else 0.7
-        if self._special_active("hyper_sneakers") and self.player.super_sneakers > 0:
+        roll_duration = 1.05 if self.player.hover_active > 0 and board.power_key == _sx(236) else 0.7
+        if self._special_active(_sx(1513)) and self.player.super_sneakers > 0:
             roll_duration *= 0.65
-            self._mark_special_item_consumed("hyper_sneakers")
+            self._mark_special_item_consumed(_sx(1513))
         self.player.rolling = roll_duration
-        self._record_mission_event("rolls")
-        self.audio.play("roll", pan=lane_to_pan(self.player.lane), channel="act")
+        self._record_mission_event(_sx(365))
+        self.audio.play(_sx(14), pan=lane_to_pan(self.player.lane), channel=_sx(43))
 
     def _try_hoverboard(self) -> None:
         if self._practice_mode_active:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("Hoverboard is disabled in Practice Lane.", interrupt=False)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1514), interrupt=False)
             return
         if self.player.hover_active > 0:
             return
         if int(self.state.hoverboards_used) >= HOVERBOARD_MAX_USES_PER_RUN:
-            self.speaker.speak(
-                f"Hoverboard limit reached. You can use {HOVERBOARD_MAX_USES_PER_RUN} per run.",
-                interrupt=False,
-            )
-            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(_sx(1515).format(HOVERBOARD_MAX_USES_PER_RUN), interrupt=False)
+            self.audio.play(_sx(52), channel=_sx(180))
             return
         if self.player.hoverboards <= 0:
-            self.speaker.speak("No hoverboards available.", interrupt=False)
-            self.audio.play("menuedge", channel="ui")
+            self.speaker.speak(_sx(1516), interrupt=False)
+            self.audio.play(_sx(52), channel=_sx(180))
             return
         self.player.hoverboards -= 1
-        self.settings["hoverboards"] = max(0, int(self.settings.get("hoverboards", 0)) - 1)
+        self.settings[_sx(335)] = max(0, int(self.settings.get(_sx(335), 0)) - 1)
         self.state.hoverboards_used += 1
         self.player.hover_active = HOVERBOARD_DURATION + self._active_character_bonuses.hoverboard_duration_bonus
         self.player.board_extra_jump_available = False
-        self._record_run_powerup("hoverboard")
-        self.audio.play("powerup", channel="act")
+        self._record_run_powerup(_sx(594))
+        self.audio.play(_sx(19), channel=_sx(43))
         board = selected_board_definition(self.settings)
-        if board.power_key == "standard":
-            self.speaker.speak(f"{board.name} hoverboard active.", interrupt=False)
+        if board.power_key == _sx(206):
+            self.speaker.speak(_sx(1517).format(board.name), interrupt=False)
         else:
-            self.speaker.speak(f"{board.name} hoverboard active. {board.power_label}.", interrupt=False)
+            self.speaker.speak(_sx(1518).format(board.name, board.power_label), interrupt=False)
 
     def _update_game(self, delta_time: float) -> None:
         self.player.lane = normalize_lane(self.player.lane)
         self.state.time += delta_time
-        if self._practice_mode_active and not self._practice_speed_scaling_active:
+        if self._practice_mode_active and (not self._practice_speed_scaling_active):
             base_speed = self.speed_profile.base_speed
         else:
             base_speed = self.speed_profile.speed_for_elapsed(self.state.time)
         self.state.speed = base_speed + HEADSTART_SPEED_BONUS if self.player.headstart > 0 else base_speed
         active_board = selected_board_definition(self.settings)
-        if self.player.hover_active > 0 and active_board.power_key == "super_speed":
+        if self.player.hover_active > 0 and active_board.power_key == _sx(221):
             self.state.speed += 3.0
-        speed_factor = (
-            0.0
-            if self._practice_mode_active and not self._practice_speed_scaling_active
-            else self.speed_profile.progress(self.state.time)
-        )
+        speed_factor = 0.0 if self._practice_mode_active and (not self._practice_speed_scaling_active) else self.speed_profile.progress(self.state.time)
         self.speaker.set_speed_factor(speed_factor)
         self.state.distance += self.state.speed * delta_time
         if not self._practice_mode_active:
-            self.state.score += (self.state.speed * delta_time) * self._score_multiplier()
-
-        if self.player.jetpack <= 0 and self.player.y <= 0.01 and self.player.rolling <= 0:
+            self.state.score += self.state.speed * delta_time * self._score_multiplier()
+        if self.player.jetpack <= 0 and self.player.y <= 0.01 and (self.player.rolling <= 0):
             self._footstep_timer -= delta_time
             if self._footstep_timer <= 0:
                 self._footstep_timer = 0.33
                 self._left_foot_next = not self._left_foot_next
                 if self.player.super_sneakers > 0:
-                    sound_key = "sneakers_left" if self._left_foot_next else "sneakers_right"
+                    sound_key = _sx(9) if self._left_foot_next else _sx(11)
                 else:
-                    sound_key = "left_foot" if self._left_foot_next else "right_foot"
+                    sound_key = _sx(8) if self._left_foot_next else _sx(10)
                 if sound_key in self.audio.sounds:
-                    self.audio.play(sound_key, pan=lane_to_pan(self.player.lane), channel="foot")
+                    self.audio.play(sound_key, pan=lane_to_pan(self.player.lane), channel=_sx(190))
         else:
             self._footstep_timer = 0.0
-
         if self.player.jetpack <= 0 and self.player.headstart <= 0 and (self.player.y > 0 or self.player.vy != 0):
-            gravity = 18.0 if self.player.hover_active > 0 and active_board.power_key == "smooth_drift" else 25.0
+            gravity = 18.0 if self.player.hover_active > 0 and active_board.power_key == _sx(226) else 25.0
             self.player.vy -= gravity * delta_time
             self.player.y = max(0.0, self.player.y + self.player.vy * delta_time)
             if self.player.y <= 0.0 and self.player.vy < 0:
                 self.player.y = 0.0
                 self.player.vy = 0.0
-                sound_key = "land_h" if self.player.super_sneakers > 0 or self.player.pogo_active > 0 else "landing"
-                self.audio.play(sound_key, pan=lane_to_pan(self.player.lane), channel="act")
-
+                sound_key = _sx(17) if self.player.super_sneakers > 0 or self.player.pogo_active > 0 else _sx(16)
+                self.audio.play(sound_key, pan=lane_to_pan(self.player.lane), channel=_sx(43))
         if self.player.rolling > 0:
             self.player.rolling = max(0.0, self.player.rolling - delta_time)
-
         self._tick_powerups(delta_time)
         self._spawn_things(delta_time)
-
         if self._coin_pitch_timer > 0:
             self._coin_pitch_timer = max(0.0, self._coin_pitch_timer - delta_time)
             if self._coin_pitch_timer <= 0:
-                if self._special_active("combo_battery"):
+                if self._special_active(_sx(1766)):
                     grace = 0.85
-                    if self._season_imprint_matches("streak_guard"):
+                    if self._season_imprint_matches(_sx(1840)):
                         grace += 0.25
                     self._coin_streak_grace_timer = max(self._coin_streak_grace_timer, grace)
-                    self._mark_special_item_consumed("combo_battery")
+                    self._mark_special_item_consumed(_sx(1766))
                 else:
                     self._coin_pitch_index = 0
                     self._coin_streak = 0
@@ -7026,27 +5251,22 @@ class SubwayBlindGame:
             if self._coin_streak_grace_timer <= 0:
                 self._coin_pitch_index = 0
                 self._coin_streak = 0
-
         for obstacle in self.obstacles:
             obstacle.z -= self.state.speed * delta_time
-
         self._update_near_miss_audio()
-
         if self.player.jetpack > 0 or self.player.headstart > 0:
             self._stop_spatial_audio()
             self.spatial_audio.reset()
         else:
             self.spatial_audio.update(delta_time, self.player.lane, self.state.speed, self.obstacles, self.audio, self.speaker)
-
         self._handle_obstacles()
         self._update_practice_lane_progress()
         self.obstacles = [obstacle for obstacle in self.obstacles if obstacle.z > -5]
-
         milestone = int(self.state.distance // 250)
         if self._meters_enabled() and milestone > self.state.milestone:
             self.state.milestone = milestone
-            self.audio.play("mission_reward", channel="ui")
-            self.speaker.speak(f"{milestone * 250:.0f} meters", interrupt=False)
+            self.audio.play(_sx(100), channel=_sx(180))
+            self.speaker.speak(_sx(1519).format(milestone * 250), interrupt=False)
 
     def _score_multiplier(self) -> int:
         multiplier = self.state.multiplier
@@ -7071,130 +5291,109 @@ class SubwayBlindGame:
             return
         if self._practice_hazards_cleared >= self._practice_next_progress_announcement:
             remaining = max(0, self._practice_hazard_target - self._practice_hazards_cleared)
-            self.speaker.speak(
-                f"Practice progress {self._practice_hazards_cleared} of {self._practice_hazard_target}. {remaining} hazards left.",
-                interrupt=False,
-            )
+            self.speaker.speak(_sx(1520).format(self._practice_hazards_cleared, self._practice_hazard_target, remaining), interrupt=False)
             self._practice_next_progress_announcement += PRACTICE_PROGRESS_STEP
 
     def _complete_practice_lane_run(self) -> None:
         if not self.state.running:
             return
-        for quest in record_quest_metric(self.settings, "practice_runs_completed", 1):
+        for quest in record_quest_metric(self.settings, _sx(1134), 1):
             if self._quest_changes_enabled():
-                self.audio.play("mission_reward", channel="ui3")
-                self.speaker.speak(f"Quest ready: {quest.label}.", interrupt=False)
+                self.audio.play(_sx(100), channel=_sx(1231))
+                self.speaker.speak(_sx(1358).format(quest.label), interrupt=False)
         self._refresh_quest_menu_labels()
         self._refresh_missions_hub_menu_labels()
         self.state.paused = False
         self._stop_spatial_audio()
-        self.audio.play("mission_reward", channel="ui")
-        self.audio.play("unlock", channel="ui2")
-        self.speaker.speak(
-            f"Practice Lane complete. Cleared {self._practice_hazard_target} hazards.",
-            interrupt=True,
-        )
+        self.audio.play(_sx(100), channel=_sx(180))
+        self.audio.play(_sx(108), channel=_sx(1250))
+        self.speaker.speak(_sx(1135).format(self._practice_hazard_target), interrupt=True)
         self._commit_run_rewards()
-        self.audio.stop("loop_guard")
-        self.audio.stop("loop_magnet")
-        self.audio.stop("loop_jetpack")
+        self.audio.stop(_sx(194))
+        self.audio.stop(_sx(198))
+        self.audio.stop(_sx(197))
         self._stop_spatial_audio()
         self.spatial_audio.reset()
-        self._open_game_over_dialog(
-            f"Practice complete. Hazards cleared: {self._practice_hazard_target}."
-        )
+        self._open_game_over_dialog(_sx(1136).format(self._practice_hazard_target))
 
     def _tick_powerups(self, delta_time: float) -> None:
+
         def decay(attribute: str) -> None:
             current_value = getattr(self.player, attribute)
             if current_value > 0:
                 setattr(self.player, attribute, max(0.0, current_value - delta_time))
-
         for timer_key in list(self._special_effect_timers.keys()):
             current = float(self._special_effect_timers.get(timer_key, 0.0) or 0.0)
             if current <= 0:
                 self._special_effect_timers[timer_key] = 0.0
                 continue
             self._special_effect_timers[timer_key] = max(0.0, current - delta_time)
-
         previous_headstart = self.player.headstart
-        decay("headstart")
+        decay(_sx(595))
         if previous_headstart > 0 and self.player.headstart <= 0:
             self._stop_headstart_audio()
             self.player.y = 0.0
             self.player.vy = 0.0
-            self.audio.play("land_h", channel="headstart_end")
-            self.audio.play("powerup", channel="headstart_reward")
+            self.audio.play(_sx(17), channel=_sx(45))
+            self.audio.play(_sx(19), channel=_sx(46))
             self._apply_power_reward(pick_headstart_end_reward(), from_headstart=True)
         elif previous_headstart <= 0 and self.player.headstart > 0:
             self._start_headstart_audio()
-
         if self.player.headstart <= 0 and self.player.jetpack <= 0:
-            decay("hover_active")
+            decay(_sx(1524))
         if self.player.hover_active <= 0:
             self.player.board_extra_jump_available = False
         previous_sneakers = self.player.super_sneakers
         if self.player.jetpack <= 0 and self.player.headstart <= 0:
-            decay("super_sneakers")
+            decay(_sx(1525))
         sneakers_expired = previous_sneakers > 0 and self.player.super_sneakers <= 0
-
         previous_magnet = self.player.magnet
         if self.player.jetpack <= 0 and self.player.headstart <= 0:
-            decay("magnet")
+            decay(_sx(633))
         magnet_expired = previous_magnet > 0 and self.player.magnet <= 0
         if previous_magnet > 0 and self.player.magnet <= 0:
-            self.audio.stop("loop_magnet")
+            self.audio.stop(_sx(198))
             self._magnet_loop_active = False
-            if self._special_active("magnet_echo"):
-                self._set_special_timer("magnet_echo", 3.0 * self._special_duration_scale())
-                self._mark_special_item_consumed("magnet_echo")
-            self.audio.play("powerdown", channel="act")
-            self.speaker.speak("Magnet expired.", interrupt=False)
-        elif self.player.magnet > 0 and not self._magnet_loop_active:
-            self.audio.play("magnet_loop", loop=True, channel="loop_magnet")
+            if self._special_active(_sx(1526)):
+                self._set_special_timer(_sx(1526), 3.0 * self._special_duration_scale())
+                self._mark_special_item_consumed(_sx(1526))
+            self.audio.play(_sx(20), channel=_sx(43))
+            self.speaker.speak(_sx(1527), interrupt=False)
+        elif self.player.magnet > 0 and (not self._magnet_loop_active):
+            self.audio.play(_sx(94), loop=True, channel=_sx(198))
             self._magnet_loop_active = True
-
         previous_jetpack = self.player.jetpack
-        decay("jetpack")
+        decay(_sx(1017))
         jetpack_expired = previous_jetpack > 0 and self.player.jetpack <= 0
         if previous_jetpack > 0 and self.player.jetpack <= 0:
-            self.audio.stop("loop_jetpack")
+            self.audio.stop(_sx(197))
             self._jetpack_loop_active = False
-            if self._special_active("quiet_jet"):
-                self._set_special_timer("quiet_jet_buffer", 2.0 * self._special_duration_scale())
-                self._mark_special_item_consumed("quiet_jet")
-            self.audio.play("powerdown", channel="act")
-            self.speaker.speak("Jetpack expired.", interrupt=False)
-        elif self.player.jetpack > 0 and not self._jetpack_loop_active:
-            self.audio.play("jetpack_loop", loop=True, channel="loop_jetpack")
+            if self._special_active(_sx(1528)):
+                self._set_special_timer(_sx(1769), 2.0 * self._special_duration_scale())
+                self._mark_special_item_consumed(_sx(1528))
+            self.audio.play(_sx(20), channel=_sx(43))
+            self.speaker.speak(_sx(1529), interrupt=False)
+        elif self.player.jetpack > 0 and (not self._jetpack_loop_active):
+            self.audio.play(_sx(95), loop=True, channel=_sx(197))
             self._jetpack_loop_active = True
-
         previous_multiplier = self.player.mult2x
         if self.player.jetpack <= 0 and self.player.headstart <= 0:
-            decay("mult2x")
+            decay(_sx(634))
         mult_expired = previous_multiplier > 0 and self.player.mult2x <= 0
         if previous_multiplier > 0 and self.player.mult2x <= 0:
-            self.audio.play("powerdown", channel="act")
-            self.speaker.speak("Score boost expired.", interrupt=False)
-
+            self.audio.play(_sx(20), channel=_sx(43))
+            self.speaker.speak(_sx(1530), interrupt=False)
         previous_pogo = self.player.pogo_active
-        decay("pogo_active")
+        decay(_sx(1137))
         pogo_expired = previous_pogo > 0 and self.player.pogo_active <= 0
         if previous_pogo > 0 and self.player.pogo_active <= 0:
-            self.audio.play("powerdown", channel="act")
-            self.speaker.speak("Pogo stick expired.", interrupt=False)
+            self.audio.play(_sx(20), channel=_sx(43))
+            self.speaker.speak(_sx(1531), interrupt=False)
         elif self.player.pogo_active > 0:
             self._launch_pogo_bounce()
-
-        if self._special_active("chain_saver") and "chain_saver_used" not in self._special_run_used_flags:
+        if self._special_active(_sx(1532)) and _sx(1533) not in self._special_run_used_flags:
             if any((magnet_expired, mult_expired, sneakers_expired, pogo_expired, jetpack_expired)):
-                remaining_chain = max(
-                    float(self.player.magnet),
-                    float(self.player.mult2x),
-                    float(self.player.super_sneakers),
-                    float(self.player.pogo_active),
-                    float(self.player.jetpack),
-                )
+                remaining_chain = max(float(self.player.magnet), float(self.player.mult2x), float(self.player.super_sneakers), float(self.player.pogo_active), float(self.player.jetpack))
                 if remaining_chain <= 0:
                     restore_duration = 1.8 * self._special_duration_scale()
                     if magnet_expired:
@@ -7207,16 +5406,15 @@ class SubwayBlindGame:
                         self.player.super_sneakers = max(self.player.super_sneakers, restore_duration)
                     elif pogo_expired:
                         self.player.pogo_active = max(self.player.pogo_active, restore_duration)
-                    self._special_run_used_flags.add("chain_saver_used")
-                    self._mark_special_item_consumed("chain_saver")
-                    self.audio.play("powerup", channel="act2")
-                    self.speaker.speak("Chain Saver activated.", interrupt=False)
-
+                    self._special_run_used_flags.add(_sx(1533))
+                    self._mark_special_item_consumed(_sx(1532))
+                    self.audio.play(_sx(19), channel=_sx(44))
+                    self.speaker.speak(_sx(1842), interrupt=False)
         self._guard_loop_timer = max(0.0, self._guard_loop_timer - delta_time)
-        if self.state.running and not self.state.paused and self._guard_loop_timer > 0:
-            self.audio.play("guard_loop", loop=True, channel="loop_guard", gain=0.72)
+        if self.state.running and (not self.state.paused) and (self._guard_loop_timer > 0):
+            self.audio.play(_sx(93), loop=True, channel=_sx(194), gain=0.72)
         else:
-            self.audio.stop("loop_guard")
+            self.audio.stop(_sx(194))
 
     def _spawn_things(self, delta_time: float) -> None:
         self.state.next_spawn -= delta_time
@@ -7224,11 +5422,10 @@ class SubwayBlindGame:
         self.state.next_support -= delta_time
         if self._practice_mode_active:
             progress = self.speed_profile.progress(self.state.time) if self._practice_speed_scaling_active else 0.0
-            difficulty = "easy"
+            difficulty = _sx(199)
         else:
             progress = self.speed_profile.progress(self.state.time)
             difficulty = self._difficulty_key()
-
         if self.state.next_spawn <= 0:
             if self.spawn_director.should_delay_spawn(self.obstacles):
                 self.state.next_spawn = 0.3
@@ -7239,38 +5436,21 @@ class SubwayBlindGame:
                 else:
                     chosen_pattern, distance = pattern
                     self._spawn_pattern(chosen_pattern, distance)
-                    minimum_gap = 1.05 if difficulty == "easy" else 0.85
+                    minimum_gap = 1.05 if difficulty == _sx(199) else 0.85
                     spawn_gap_scale = 1.0
-                    if self._special_timer("crowd_jammer") > 0:
+                    if self._special_timer(_sx(1562)) > 0:
                         spawn_gap_scale *= 1.22
-                    if self._season_imprint_matches("spawn_calm"):
+                    if self._season_imprint_matches(_sx(1776)):
                         spawn_gap_scale *= 1.08
-                    self.state.next_spawn = max(
-                        minimum_gap,
-                        self.spawn_director.next_encounter_gap(progress, difficulty=difficulty),
-                    ) * spawn_gap_scale
-
+                    self.state.next_spawn = max(minimum_gap, self.spawn_director.next_encounter_gap(progress, difficulty=difficulty)) * spawn_gap_scale
         if not self._practice_mode_active and self.state.next_coinline <= 0:
             lane = self.spawn_director.choose_coin_lane(self.player.lane)
-            self._spawn_coin_line(
-                lane,
-                start_distance=self.spawn_director.base_spawn_distance(
-                    progress,
-                    self.state.speed,
-                    difficulty=difficulty,
-                )
-                - 7.5,
-            )
+            self._spawn_coin_line(lane, start_distance=self.spawn_director.base_spawn_distance(progress, self.state.speed, difficulty=difficulty) - 7.5)
             self.state.next_coinline = max(1.55, self.spawn_director.next_coin_gap(progress, difficulty=difficulty))
-
         if not self._practice_mode_active and self.state.next_support <= 0:
             kind = self._choose_support_spawn_kind()
             lane = self.spawn_director.support_lane(self.player.lane)
-            distance = self.spawn_director.base_spawn_distance(
-                progress,
-                self.state.speed,
-                difficulty=difficulty,
-            ) + 1.5
+            distance = self.spawn_director.base_spawn_distance(progress, self.state.speed, difficulty=difficulty) + 1.5
             self._spawn_support_collectible(kind, lane, distance)
             self.state.next_support = max(5.5, self.spawn_director.next_support_gap(progress, difficulty=difficulty))
 
@@ -7280,47 +5460,42 @@ class SubwayBlindGame:
                 continue
             self.obstacles.append(Obstacle(kind=entry.kind, lane=entry.lane, z=base_distance + entry.z_offset))
 
-    def _choose_playable_pattern(self, progress: float, difficulty: str | None = None) -> Optional[tuple[RoutePattern, float]]:
+    def _choose_playable_pattern(self, progress: float, difficulty: str | None=None) -> Optional[tuple[RoutePattern, float]]:
         selected_difficulty = difficulty or self._difficulty_key()
         for pattern in self.spawn_director.candidate_patterns(progress, difficulty=selected_difficulty):
             distance = self.spawn_director.base_spawn_distance(progress, self.state.speed, difficulty=selected_difficulty)
-            if not self.spawn_director.pattern_is_playable(
-                pattern,
-                distance,
-                self.obstacles,
-                current_lane=self.player.lane,
-            ):
+            if not self.spawn_director.pattern_is_playable(pattern, distance, self.obstacles, current_lane=self.player.lane):
                 continue
             self.spawn_director.accept_pattern(pattern)
-            return pattern, distance
+            return (pattern, distance)
         return None
 
     def _spawn_coin_line(self, lane: int, start_distance: float) -> None:
         start_distance = max(18.0, start_distance)
         for index in range(6):
-            self.obstacles.append(Obstacle(kind="coin", lane=lane, z=start_distance + index * 2.2, value=1))
+            self.obstacles.append(Obstacle(kind=_sx(18), lane=lane, z=start_distance + index * 2.2, value=1))
 
     def _spawn_support_collectible(self, kind: str, lane: int, distance: float) -> None:
-        if kind == "word":
+        if kind == _sx(1138):
             next_letter = self._next_word_letter()
             if next_letter:
-                self.obstacles.append(Obstacle(kind="word", lane=lane, z=distance, label=next_letter))
+                self.obstacles.append(Obstacle(kind=_sx(1138), lane=lane, z=distance, label=next_letter))
                 return
-            kind = "power"
-        if kind == "season_token":
-            self.obstacles.append(Obstacle(kind="season_token", lane=lane, z=distance, label="S"))
+            kind = _sx(1012)
+        if kind == _sx(1139):
+            self.obstacles.append(Obstacle(kind=_sx(1139), lane=lane, z=distance, label=_sx(1843)))
             return
-        if kind == "multiplier":
-            self.obstacles.append(Obstacle(kind="multiplier", lane=lane, z=distance, label="2X"))
+        if kind == _sx(1140):
+            self.obstacles.append(Obstacle(kind=_sx(1140), lane=lane, z=distance, label=_sx(1844)))
             return
-        if kind == "super_box":
-            self.obstacles.append(Obstacle(kind="super_box", lane=lane, z=distance, label="?"))
+        if kind == _sx(598):
+            self.obstacles.append(Obstacle(kind=_sx(598), lane=lane, z=distance, label=_sx(1845)))
             return
-        if kind == "pogo":
-            self.obstacles.append(Obstacle(kind="pogo", lane=lane, z=distance, label="P"))
+        if kind == _sx(1141):
+            self.obstacles.append(Obstacle(kind=_sx(1141), lane=lane, z=distance, label=_sx(1846)))
             return
-        if kind == "power":
-            obstacle_kind = "box" if random.random() < 0.22 else "power"
+        if kind == _sx(1012):
+            obstacle_kind = _sx(1013) if random.random() < 0.22 else _sx(1012)
         else:
             obstacle_kind = kind
         self.obstacles.append(Obstacle(kind=obstacle_kind, lane=lane, z=distance))
@@ -7328,9 +5503,8 @@ class SubwayBlindGame:
     def _handle_obstacles(self) -> None:
         hit_distance = 2.1
         pickup_distance = 2.2
-
         for obstacle in self.obstacles:
-            if obstacle.kind == "coin" and -0.5 < obstacle.z < pickup_distance:
+            if obstacle.kind == _sx(18) and -0.5 < obstacle.z < pickup_distance:
                 if self.player.jetpack > 0:
                     self._collect_coin(obstacle)
                     obstacle.z = -999
@@ -7339,90 +5513,77 @@ class SubwayBlindGame:
                 elif obstacle.lane == self.player.lane:
                     self._collect_coin(obstacle)
                     obstacle.z = -999
-                elif (
-                    self.player.magnet > 0
-                    or (
-                        self._special_timer("magnet_echo") > 0
-                        and abs(obstacle.lane - self.player.lane) <= 1
-                        and random.random() < 0.45
-                    )
-                ) and abs(obstacle.lane - self.player.lane) <= 1:
+                elif (self.player.magnet > 0 or (self._special_timer(_sx(1526)) > 0 and abs(obstacle.lane - self.player.lane) <= 1 and (random.random() < 0.45))) and abs(obstacle.lane - self.player.lane) <= 1:
                     self._collect_coin(obstacle)
                     obstacle.z = -999
-
-            if obstacle.kind in ("power", "box", "key", "word", "season_token", "multiplier", "super_box", "pogo") and -0.8 < obstacle.z < 2.4:
+            if obstacle.kind in (_sx(1012), _sx(1013), _sx(569), _sx(1138), _sx(1139), _sx(1140), _sx(598), _sx(1141)) and -0.8 < obstacle.z < 2.4:
                 if self.player.jetpack > 0:
                     continue
                 if self.player.headstart > 0:
                     obstacle.z = -999
                     continue
                 if obstacle.lane == self.player.lane:
-                    if obstacle.kind == "power":
+                    if obstacle.kind == _sx(1012):
                         self._collect_power()
-                    elif obstacle.kind == "key":
+                    elif obstacle.kind == _sx(569):
                         self._collect_key()
-                    elif obstacle.kind == "word":
+                    elif obstacle.kind == _sx(1138):
                         self._collect_word_letter(obstacle)
-                    elif obstacle.kind == "season_token":
+                    elif obstacle.kind == _sx(1139):
                         self._collect_season_token()
-                    elif obstacle.kind == "multiplier":
+                    elif obstacle.kind == _sx(1140):
                         self._collect_multiplier_pickup()
-                    elif obstacle.kind == "super_box":
+                    elif obstacle.kind == _sx(598):
                         self._collect_super_mysterizer()
-                    elif obstacle.kind == "pogo":
+                    elif obstacle.kind == _sx(1141):
                         self._collect_pogo_stick()
                     else:
                         self._collect_box()
                     obstacle.z = -999
-
-            if obstacle.kind in ("train", "low", "high", "bush") and -0.8 < obstacle.z < hit_distance:
+            if obstacle.kind in (_sx(643), _sx(644), _sx(97), _sx(645)) and -0.8 < obstacle.z < hit_distance:
                 if self.player.jetpack > 0 or self.player.headstart > 0 or obstacle.lane != self.player.lane:
                     continue
                 if self.player.pogo_active > 0 and self.player.y > 1.0:
                     continue
-                if obstacle.kind in ("low", "bush") and self.player.y > 0.6:
+                if obstacle.kind in (_sx(644), _sx(645)) and self.player.y > 0.6:
                     continue
-                if obstacle.kind == "high" and self.player.rolling > 0:
+                if obstacle.kind == _sx(97) and self.player.rolling > 0:
                     continue
-                if self._special_timer("quiet_jet_buffer") > 0:
+                if self._special_timer(_sx(1769)) > 0:
                     continue
                 self._on_hit(obstacle.kind)
                 obstacle.z = -999
 
     def _collect_coin(self, obstacle: Obstacle) -> None:
         self._add_run_coins(1)
-        self._record_mission_event("coins")
+        self._record_mission_event(_sx(363))
         self._coin_streak += 1
         if self._coin_streak % 7 == 0:
             self._coin_pitch_index = min(self._coin_pitch_index + 1, 12)
         pitch = 1.0 + self._coin_pitch_index * 0.08
         self._coin_pitch_timer = 3.0
         self._coin_streak_grace_timer = 0.0
-        self.audio.play("coin", pan=lane_to_pan(obstacle.lane), channel="coin", pitch=pitch)
-        announce_every = int(self.settings.get("announce_coins_every", 10) or 0)
-        if self._coin_counters_enabled() and announce_every and self.state.coins % announce_every == 0:
-            self.speaker.speak(f"{self.state.coins} coins", interrupt=False)
+        self.audio.play(_sx(18), pan=lane_to_pan(obstacle.lane), channel=_sx(18), pitch=pitch)
+        announce_every = int(self.settings.get(_sx(320), 10) or 0)
+        if self._coin_counters_enabled() and announce_every and (self.state.coins % announce_every == 0):
+            self.speaker.speak(_sx(1534).format(self.state.coins), interrupt=False)
 
     def _collect_power(self) -> None:
-        self._record_mission_event("powerups")
-        self.audio.play("powerup", channel="act")
-        reward = random.choices(
-            ["magnet", "jetpack", "mult2x", "sneakers"],
-            weights=[0.35, 0.20, 0.30, 0.15],
-            k=1,
-        )[0]
+        self._record_mission_event(_sx(367))
+        self.audio.play(_sx(19), channel=_sx(43))
+        reward = random.choices([_sx(633), _sx(1017), _sx(634), _sx(635)], weights=[0.35, 0.2, 0.3, 0.15], k=1)[0]
         self._apply_power_reward(reward, from_headstart=False)
 
     def _collect_multiplier_pickup(self) -> None:
-        self._record_mission_event("powerups")
-        self._record_run_powerup("mult2x")
-        self.audio.play("powerup", channel="act")
-        self.player.mult2x = max(self.player.mult2x, self._powerup_duration("mult2x"))
-        self.speaker.speak("2x multiplier.", interrupt=False)
+        self._record_mission_event(_sx(367))
+        self._record_run_powerup(_sx(634))
+        self.audio.play(_sx(19), channel=_sx(43))
+        self.player.mult2x = max(self.player.mult2x, self._powerup_duration(_sx(634)))
+        self.speaker.speak(_sx(1142), interrupt=False)
 
     def _collect_super_mysterizer(self) -> None:
-        self._record_mission_event("boxes")
-        self._open_super_mystery_box("Super Mysterizer")
+        self._record_mission_event(_sx(368))
+        self._open_super_mystery_box(_sx(619))
 
     def _launch_pogo_bounce(self) -> None:
         if self.player.pogo_active <= 0 or self.player.jetpack > 0 or self.player.headstart > 0:
@@ -7431,78 +5592,74 @@ class SubwayBlindGame:
             return
         self.player.rolling = 0.0
         self.player.vy = 14.6
-        self.audio.play("sneakers_jump", channel="act")
+        self.audio.play(_sx(13), channel=_sx(43))
 
     def _collect_pogo_stick(self) -> None:
-        self._record_mission_event("powerups")
-        self._record_run_powerup("pogo")
-        self.audio.play("powerup", channel="act")
+        self._record_mission_event(_sx(367))
+        self._record_run_powerup(_sx(1141))
+        self.audio.play(_sx(19), channel=_sx(43))
         self.player.pogo_active = max(self.player.pogo_active, POGO_STICK_DURATION)
         self._launch_pogo_bounce()
-        self.speaker.speak("Pogo stick.", interrupt=False)
+        self.speaker.speak(_sx(1143), interrupt=False)
 
     def _pick_track_box_reward(self) -> str:
-        if self._special_active("jackpot_fuse"):
+        if self._special_active(_sx(1016)):
             self._box_high_tier_meter += 1
             bonus = min(0.5, 0.08 * self._box_high_tier_meter)
-            if self._season_imprint_matches("fortune_line"):
+            if self._season_imprint_matches(_sx(1309)):
                 bonus = min(0.6, bonus + 0.07)
             if random.random() < bonus:
                 self._box_high_tier_meter = 0
-                self._mark_special_item_consumed("jackpot_fuse")
-                return random.choice(["hover", "key", "headstart", "score_booster"])
-        if self._active_event_profile.get("jackpot_bonus"):
-            return random.choices(
-                ["coins", "hover", "mult", "key", "headstart", "score_booster", "nothing"],
-                weights=[52, 16, 12, 8, 6, 4, 2],
-                k=1,
-            )[0]
+                self._mark_special_item_consumed(_sx(1016))
+                return random.choice([_sx(636), _sx(569), _sx(595), _sx(596)])
+        if self._active_event_profile.get(_sx(617)):
+            return random.choices([_sx(363), _sx(636), _sx(637), _sx(569), _sx(595), _sx(596), _sx(638)], weights=[52, 16, 12, 8, 6, 4, 2], k=1)[0]
         return pick_mystery_box_reward()
 
     def _collect_box(self) -> None:
-        self._record_mission_event("boxes")
-        self._record_achievement_metric("total_boxes_opened", 1)
+        self._record_mission_event(_sx(368))
+        self._record_achievement_metric(_sx(373), 1)
         reward = self._pick_track_box_reward()
-        self.speaker.speak("Opening Mystery Box.", interrupt=True)
-        self.audio.play("mystery_box_open", channel="act")
-        if reward == "coins":
+        self.speaker.speak(_sx(1046), interrupt=True)
+        self.audio.play(_sx(98), channel=_sx(43))
+        if reward == _sx(363):
             gain = random.randint(10, 40)
             self._add_run_coins(gain)
-            self.speaker.speak(f"Mystery box: {gain} coins.", interrupt=False)
-            self.audio.play("gui_cash", channel="ui")
-        elif reward == "hover":
-            self.settings["hoverboards"] = int(self.settings.get("hoverboards", 0)) + 1
+            self.speaker.speak(_sx(1348).format(gain), interrupt=False)
+            self.audio.play(_sx(105), channel=_sx(180))
+        elif reward == _sx(636):
+            self.settings[_sx(335)] = int(self.settings.get(_sx(335), 0)) + 1
             self.player.hoverboards += 1
-            self.speaker.speak("Mystery box: hoverboard.", interrupt=False)
-            self.audio.play("unlock", channel="ui")
-        elif reward == "mult":
+            self.speaker.speak(_sx(1771), interrupt=False)
+            self.audio.play(_sx(108), channel=_sx(180))
+        elif reward == _sx(637):
             self.state.multiplier = min(10, self.state.multiplier + 1)
-            self.speaker.speak(f"Mystery box: multiplier {self.state.multiplier}.", interrupt=False)
-            self.audio.play("mission_reward", channel="ui")
-        elif reward == "key":
-            self.settings["keys"] = int(self.settings.get("keys", 0)) + 1
-            self.speaker.speak("Mystery box: key.", interrupt=False)
-            self.audio.play("unlock", channel="ui")
-        elif reward == "headstart":
-            self.settings["headstarts"] = int(self.settings.get("headstarts", 0)) + 1
-            self.speaker.speak("Mystery box: headstart.", interrupt=False)
-            self.audio.play("mystery_combo", channel="ui")
-        elif reward == "score_booster":
-            self.settings["score_boosters"] = int(self.settings.get("score_boosters", 0)) + 1
-            self.speaker.speak("Mystery box: score booster.", interrupt=False)
-            self.audio.play("mystery_combo", channel="ui")
+            self.speaker.speak(_sx(1847).format(self.state.multiplier), interrupt=False)
+            self.audio.play(_sx(100), channel=_sx(180))
+        elif reward == _sx(569):
+            self.settings[_sx(334)] = int(self.settings.get(_sx(334), 0)) + 1
+            self.speaker.speak(_sx(1868), interrupt=False)
+            self.audio.play(_sx(108), channel=_sx(180))
+        elif reward == _sx(595):
+            self.settings[_sx(336)] = int(self.settings.get(_sx(336), 0)) + 1
+            self.speaker.speak(_sx(1876), interrupt=False)
+            self.audio.play(_sx(110), channel=_sx(180))
+        elif reward == _sx(596):
+            self.settings[_sx(337)] = int(self.settings.get(_sx(337), 0)) + 1
+            self.speaker.speak(_sx(1886), interrupt=False)
+            self.audio.play(_sx(110), channel=_sx(180))
         else:
-            self.speaker.speak("Mystery box: empty.", interrupt=False)
+            self.speaker.speak(_sx(1047), interrupt=False)
 
     def _collect_key(self) -> None:
-        self.settings["keys"] = int(self.settings.get("keys", 0)) + 1
-        if self._special_active("overclock_key"):
-            chance = 0.35 + (0.1 if self._season_imprint_matches("fortune_line") else 0.0)
+        self.settings[_sx(334)] = int(self.settings.get(_sx(334), 0)) + 1
+        if self._special_active(_sx(1144)):
+            chance = 0.35 + (0.1 if self._season_imprint_matches(_sx(1309)) else 0.0)
             if random.random() < chance:
                 self._pending_overclock_keys += 1
-                self._mark_special_item_consumed("overclock_key")
-        self.audio.play("unlock", channel="ui")
-        self.speaker.speak(f"Key collected. Total keys: {self.settings['keys']}.", interrupt=False)
+                self._mark_special_item_consumed(_sx(1144))
+        self.audio.play(_sx(108), channel=_sx(180))
+        self.speaker.speak(_sx(1145).format(self.settings[_sx(334)]), interrupt=False)
 
     def _collect_word_letter(self, obstacle: Obstacle) -> None:
         expected_letter = self._next_word_letter()
@@ -7511,32 +5668,32 @@ class SubwayBlindGame:
         letter, completed = register_word_letter(self.settings)
         if not letter:
             return
-        self.audio.play("slide_letters", channel="ui")
+        self.audio.play(_sx(109), channel=_sx(180))
         if completed:
-            self.speaker.speak(f"Letter {letter}.", interrupt=False)
+            self.speaker.speak(_sx(1536).format(letter), interrupt=False)
             self._complete_word_hunt()
             return
         remaining_letters = len(self._remaining_word_letters())
-        self.speaker.speak(f"Letter {letter}. {remaining_letters} letters left.", interrupt=False)
+        self.speaker.speak(_sx(1146).format(letter, remaining_letters), interrupt=False)
 
     def _collect_season_token(self) -> None:
         tokens, next_threshold = register_season_token(self.settings)
-        self._record_achievement_metric("total_season_tokens", 1)
-        self.audio.play("coin_gui", channel="ui")
+        self._record_achievement_metric(_sx(376), 1)
+        self.audio.play(_sx(90), channel=_sx(180))
         if can_claim_season_reward(self.settings):
-            self.speaker.speak("Season token. Reward unlocked.", interrupt=False)
+            self.speaker.speak(_sx(1539), interrupt=False)
             self._claim_season_reward()
             return
         if next_threshold is None:
-            self.speaker.speak(f"Season token. Total {tokens}.", interrupt=False)
+            self.speaker.speak(_sx(1540).format(tokens), interrupt=False)
             return
-        self.speaker.speak(f"Season token. {tokens} of {next_threshold}.", interrupt=False)
+        self.speaker.speak(_sx(1147).format(tokens, next_threshold), interrupt=False)
 
     def _activate_magnet(self, duration: float) -> None:
         was_inactive = self.player.magnet <= 0
         self.player.magnet = max(self.player.magnet, float(duration))
-        if was_inactive and self.player.jetpack <= 0 and self.player.headstart <= 0:
-            self.audio.play("magnet_loop", loop=True, channel="loop_magnet")
+        if was_inactive and self.player.jetpack <= 0 and (self.player.headstart <= 0):
+            self.audio.play(_sx(94), loop=True, channel=_sx(198))
             self._magnet_loop_active = True
 
     def _activate_jetpack(self, duration: float) -> None:
@@ -7544,35 +5701,35 @@ class SubwayBlindGame:
         self.player.jetpack = max(self.player.jetpack, float(duration))
         self.player.y = 2.0
         self.player.vy = 0.0
-        if was_inactive and self.state.running and not self.state.paused:
-            self.audio.play("jetpack_loop", loop=True, channel="loop_jetpack")
+        if was_inactive and self.state.running and (not self.state.paused):
+            self.audio.play(_sx(95), loop=True, channel=_sx(197))
             self._jetpack_loop_active = True
 
     def _character_adjusted_power_duration(self, duration: float) -> float:
         return float(duration) * self._active_character_bonuses.power_duration_multiplier
 
     def _apply_power_reward(self, reward: str, from_headstart: bool) -> None:
-        if reward == "magnet":
-            self._record_run_powerup("magnet")
-            self._activate_magnet(self._powerup_duration("magnet"))
-            message = "Headstart reward: magnet." if from_headstart else "Magnet."
+        if reward == _sx(633):
+            self._record_run_powerup(_sx(633))
+            self._activate_magnet(self._powerup_duration(_sx(633)))
+            message = _sx(1542) if from_headstart else _sx(1543)
             self.speaker.speak(message, interrupt=False)
             return
-        if reward == "jetpack":
-            self._record_run_powerup("jetpack")
-            self._activate_jetpack(self._powerup_duration("jetpack"))
-            self.speaker.speak("Jetpack.", interrupt=False)
+        if reward == _sx(1017):
+            self._record_run_powerup(_sx(1017))
+            self._activate_jetpack(self._powerup_duration(_sx(1017)))
+            self.speaker.speak(_sx(1544), interrupt=False)
             return
-        if reward == "mult2x":
-            self._record_run_powerup("mult2x")
-            self.player.mult2x = max(self.player.mult2x, self._powerup_duration("mult2x"))
-            message = "Headstart reward: double score." if from_headstart else "Double score."
+        if reward == _sx(634):
+            self._record_run_powerup(_sx(634))
+            self.player.mult2x = max(self.player.mult2x, self._powerup_duration(_sx(634)))
+            message = _sx(1545) if from_headstart else _sx(1546)
             self.speaker.speak(message, interrupt=False)
             return
-        if reward == "sneakers":
-            self._record_run_powerup("sneakers")
-            self.player.super_sneakers = self._powerup_duration("sneakers")
-            message = "Headstart reward: super sneakers." if from_headstart else "Super sneakers."
+        if reward == _sx(635):
+            self._record_run_powerup(_sx(635))
+            self.player.super_sneakers = self._powerup_duration(_sx(635))
+            message = _sx(1547) if from_headstart else _sx(1548)
             self.speaker.speak(message, interrupt=False)
 
     def _queue_revive_or_finish(self) -> None:
@@ -7583,35 +5740,29 @@ class SubwayBlindGame:
             self._finish_run_loss()
             return
         cost = revive_cost(self.state.revives_used)
-        if int(self.settings.get("keys", 0)) < cost:
+        if int(self.settings.get(_sx(334), 0)) < cost:
             self._finish_run_loss()
             return
         self.state.paused = True
-        self.audio.play("guard_catch", channel="act2")
-        self.audio.play("gui_close", channel="ui")
+        self.audio.play(_sx(28), channel=_sx(44))
+        self.audio.play(_sx(106), channel=_sx(180))
         self._refresh_revive_menu_label()
         self._set_active_menu(self.revive_menu)
-        self.speaker.speak(
-            f"You can revive for {cost} key{'s' if cost != 1 else ''}.",
-            interrupt=True,
-        )
+        self.speaker.speak(_sx(1148).format(cost, _sx(294) if cost != 1 else _sx(2)), interrupt=True)
 
     def _revive_run(self) -> None:
         if int(self.state.revives_used) >= REVIVE_MAX_USES_PER_RUN:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak(
-                f"Revive limit reached. Only {REVIVE_MAX_USES_PER_RUN} revives work in one run.",
-                interrupt=True,
-            )
-            self._finish_run_loss("Run ended after crash")
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1550).format(REVIVE_MAX_USES_PER_RUN), interrupt=True)
+            self._finish_run_loss(_sx(1009))
             return
         cost = revive_cost(self.state.revives_used)
-        owned = int(self.settings.get("keys", 0))
+        owned = int(self.settings.get(_sx(334), 0))
         if owned < cost:
-            self.audio.play("menuedge", channel="ui")
-            self.speaker.speak("Not enough keys.", interrupt=True)
+            self.audio.play(_sx(52), channel=_sx(180))
+            self.speaker.speak(_sx(1551), interrupt=True)
             return
-        self.settings["keys"] = owned - cost
+        self.settings[_sx(334)] = owned - cost
         self.state.revives_used += 1
         self.state.paused = False
         self.player.stumbles = 0
@@ -7621,87 +5772,80 @@ class SubwayBlindGame:
         self.player.hover_active = max(self.player.hover_active, 3.5)
         self._guard_loop_timer = 0.0
         self._set_active_menu(None)
-        self.audio.play("unlock", channel="ui")
-        self.audio.play("powerup", channel="act")
-        self.speaker.speak("Revived. Temporary shield active.", interrupt=True)
+        self.audio.play(_sx(108), channel=_sx(180))
+        self.audio.play(_sx(19), channel=_sx(43))
+        self.speaker.speak(_sx(1149), interrupt=True)
 
-    def _finish_run_loss(self, death_reason: Optional[str] = None) -> None:
+    def _finish_run_loss(self, death_reason: Optional[str]=None) -> None:
         self.state.paused = False
         self._stop_spatial_audio()
-        self.audio.play("kick", channel="player_kick")
-        self.audio.play("death_hitcam", channel="player_death_cam")
-        self.audio.play("death_bodyfall", channel="player_death_fall")
-        self.audio.play("death", channel="act")
-        self.audio.play("guard_catch", channel="act2")
-        summary_reason = death_reason or self._last_death_reason or "Run ended after crash"
-        self.speaker.speak(f"Run over. Score {int(self.state.score)}. {summary_reason}.", interrupt=True)
+        self.audio.play(_sx(27), channel=_sx(41))
+        self.audio.play(_sx(92), channel=_sx(1552))
+        self.audio.play(_sx(91), channel=_sx(1553))
+        self.audio.play(_sx(26), channel=_sx(43))
+        self.audio.play(_sx(28), channel=_sx(44))
+        summary_reason = death_reason or self._last_death_reason or _sx(1009)
+        self.speaker.speak(_sx(1150).format(int(self.state.score), summary_reason), interrupt=True)
         self._commit_run_rewards()
-        self.audio.stop("loop_guard")
-        self.audio.stop("loop_magnet")
-        self.audio.stop("loop_jetpack")
+        self.audio.stop(_sx(194))
+        self.audio.stop(_sx(198))
+        self.audio.stop(_sx(197))
         self._stop_spatial_audio()
         self.spatial_audio.reset()
         self._open_game_over_dialog(summary_reason)
 
     def _stop_spatial_audio(self) -> None:
         for lane in LANES:
-            self.audio.stop(f"spatial_{lane}")
+            self.audio.stop(_sx(1555).format(lane))
 
     @staticmethod
     def _stumble_sound_for_variant(variant: str) -> str:
-        return {
-            "train": "stumble_side",
-            "bush": "stumble_bush",
-            "low": "stumble",
-            "high": "stumble",
-        }.get(variant, "stumble")
+        return {_sx(643): _sx(23), _sx(645): _sx(24), _sx(644): _sx(22), _sx(97): _sx(22)}.get(variant, _sx(22))
 
-    def _on_hit(self, variant: str = "train") -> None:
-        if self._special_timer("phantom_step") > 0:
-            self._set_special_timer("phantom_step", 0.0)
-            self._mark_special_item_consumed("phantom_step")
-            self.audio.play("swish_mid", channel="act")
-            self.speaker.speak("Phantom Step dodge.", interrupt=False)
+    def _on_hit(self, variant: str=_sx(643)) -> None:
+        if self._special_timer(_sx(1556)) > 0:
+            self._set_special_timer(_sx(1556), 0.0)
+            self._mark_special_item_consumed(_sx(1556))
+            self.audio.play(_sx(112), channel=_sx(43))
+            self.speaker.speak(_sx(1557), interrupt=False)
             return
         if self.player.hover_active > 0:
             self.player.hover_active = 0.0
-            self.audio.play("crash", channel="act")
-            self.audio.play("powerdown", channel="act2")
-            self.speaker.speak("Hoverboard destroyed.", interrupt=True)
+            self.audio.play(_sx(25), channel=_sx(43))
+            self.audio.play(_sx(20), channel=_sx(44))
+            self.speaker.speak(_sx(1558), interrupt=True)
             return
-
         self._last_death_reason = self._death_reason_for_variant(variant)
-        if self._special_active("impact_foam") and "impact_foam_used" not in self._special_run_used_flags:
-            self._special_run_used_flags.add("impact_foam_used")
-            self._mark_special_item_consumed("impact_foam")
+        if self._special_active(_sx(1559)) and _sx(1560) not in self._special_run_used_flags:
+            self._special_run_used_flags.add(_sx(1560))
+            self._mark_special_item_consumed(_sx(1559))
             self.player.stumbles = max(0, self.player.stumbles)
-            self.audio.play("stumble", channel="act")
-            self.speaker.speak("Impact Foam consumed.", interrupt=True)
+            self.audio.play(_sx(22), channel=_sx(43))
+            self.speaker.speak(_sx(1561), interrupt=True)
             return
         self.player.stumbles += 1
         if self.player.stumbles >= 2:
             self._guard_loop_timer = 0.0
             self._queue_revive_or_finish()
             return
-
         self._guard_loop_timer = GUARD_LOOP_DURATION
-        self.audio.play(self._stumble_sound_for_variant(variant), channel="act")
-        self.speaker.speak("You crashed. One chance left.", interrupt=True)
+        self.audio.play(self._stumble_sound_for_variant(variant), channel=_sx(43))
+        self.speaker.speak(_sx(1151), interrupt=True)
 
     def _update_near_miss_audio(self) -> None:
         active_signatures: set[tuple[str, int]] = set()
         for obstacle in self.obstacles:
-            if obstacle.kind not in {"train", "low", "high", "bush"}:
+            if obstacle.kind not in {_sx(643), _sx(644), _sx(97), _sx(645)}:
                 continue
-            if not (-0.2 <= obstacle.z <= 2.1):
+            if not -0.2 <= obstacle.z <= 2.1:
                 continue
             lane_delta = abs(obstacle.lane - self.player.lane)
             if lane_delta > 1:
                 continue
             if lane_delta == 0:
-                if obstacle.kind in {"low", "bush"} and self.player.y > 0.6:
+                if obstacle.kind in {_sx(644), _sx(645)} and self.player.y > 0.6:
                     pass
-                elif obstacle.kind == "high" and self.player.rolling > 0:
+                elif obstacle.kind == _sx(97) and self.player.rolling > 0:
                     pass
                 else:
                     continue
@@ -7709,26 +5853,26 @@ class SubwayBlindGame:
             active_signatures.add(signature)
             if signature in self._near_miss_signatures:
                 continue
-            if obstacle.kind == "train":
-                sound_key = "swish_long"
+            if obstacle.kind == _sx(643):
+                sound_key = _sx(113)
             elif lane_delta == 0:
-                sound_key = "swish_mid"
+                sound_key = _sx(112)
             else:
-                sound_key = "swish_short"
-            self._record_run_metric("clean_escapes")
-            if self._special_active("crowd_jammer"):
+                sound_key = _sx(111)
+            self._record_run_metric(_sx(966))
+            if self._special_active(_sx(1562)):
                 crowd_duration = 4.0 * self._special_duration_scale()
-                if self._season_imprint_matches("spawn_calm"):
+                if self._season_imprint_matches(_sx(1776)):
                     crowd_duration += 1.0
-                self._extend_special_timer("crowd_jammer", crowd_duration)
-                self._mark_special_item_consumed("crowd_jammer")
-            if self._special_active("risk_converter"):
+                self._extend_special_timer(_sx(1562), crowd_duration)
+                self._mark_special_item_consumed(_sx(1562))
+            if self._special_active(_sx(1563)):
                 gain = 1
-                if self._season_imprint_matches("risk_bloom"):
+                if self._season_imprint_matches(_sx(1777)):
                     gain = 2
-                self.settings["event_state"]["event_coins"] = int(self.settings["event_state"].get("event_coins", 0)) + gain
-                self._mark_special_item_consumed("risk_converter")
-            self.audio.play(sound_key, channel=f"near_{obstacle.lane}")
+                self.settings[_sx(352)][_sx(597)] = int(self.settings[_sx(352)].get(_sx(597), 0)) + gain
+                self._mark_special_item_consumed(_sx(1563))
+            self.audio.play(sound_key, channel=_sx(1778).format(obstacle.lane))
         self._near_miss_signatures = active_signatures
 
     def _draw_menu(self, menu: Menu) -> None:
@@ -7736,25 +5880,14 @@ class SubwayBlindGame:
         self.screen.fill((10, 10, 15))
         title_surface = self.big.render(menu.title, True, (240, 240, 240))
         self.screen.blit(title_surface, (40, 32))
-
         list_top = 110
         row_height = 38
         visible_rows = 9 if menu == self.learn_sounds_menu else 10
         max_start_index = max(0, len(menu.items) - visible_rows)
-        start_index = max(0, min(menu.index - (visible_rows // 2), max_start_index))
-        visible_items = menu.items[start_index : start_index + visible_rows]
+        start_index = max(0, min(menu.index - visible_rows // 2, max_start_index))
+        visible_items = menu.items[start_index:start_index + visible_rows]
         y_position = list_top
-        if menu in {
-            self.shop_menu,
-            self.me_menu,
-            self.character_menu,
-            self.character_detail_menu,
-            self.board_menu,
-            self.board_detail_menu,
-            self.item_upgrade_menu,
-            self.item_upgrade_detail_menu,
-            self.collection_menu,
-        }:
+        if menu in {self.shop_menu, self.me_menu, self.character_menu, self.character_detail_menu, self.board_menu, self.board_detail_menu, self.item_upgrade_menu, self.item_upgrade_detail_menu, self.collection_menu}:
             coins_surface = self.font.render(self._shop_coins_label(), True, (220, 220, 220))
             self.screen.blit(coins_surface, (70, y_position))
             y_position += 40
@@ -7764,61 +5897,51 @@ class SubwayBlindGame:
             label_surface = self.font.render(item.label, True, color)
             self.screen.blit(label_surface, (70, y_position))
             y_position += row_height
-
         if start_index > 0:
-            top_more = self.font.render("...", True, (160, 160, 160))
+            top_more = self.font.render(_sx(1450), True, (160, 160, 160))
             self.screen.blit(top_more, (40, list_top - 28))
         if start_index + len(visible_items) < len(menu.items):
-            bottom_more = self.font.render("...", True, (160, 160, 160))
+            bottom_more = self.font.render(_sx(1450), True, (160, 160, 160))
             self.screen.blit(bottom_more, (40, y_position - 8))
-
         hint_text = self._menu_navigation_hint()
         if menu == self.learn_sounds_menu:
             description_lines = textwrap.wrap(self._learn_sound_description, width=62)[:3]
             description_top = min(height - 132, y_position + 18)
-            prompt_surface = self.font.render("Select a sound to hear its gameplay cue.", True, (205, 205, 205))
+            prompt_surface = self.font.render(_sx(1564), True, (205, 205, 205))
             self.screen.blit(prompt_surface, (40, description_top))
             for line_index, line in enumerate(description_lines):
                 line_surface = self.font.render(line, True, (180, 180, 180))
-                self.screen.blit(line_surface, (40, description_top + 32 + (line_index * 26)))
+                self.screen.blit(line_surface, (40, description_top + 32 + line_index * 26))
             hint_text = self._menu_navigation_hint()
         elif menu == self.update_menu:
             description_lines = textwrap.wrap(self._update_status_message, width=62)[:2]
             release_note_lines = textwrap.wrap(self._update_release_notes, width=62)[:5]
             description_top = min(height - 176, y_position + 14)
-            prompt_surface = self.font.render("Update required before you can continue.", True, (205, 205, 205))
+            prompt_surface = self.font.render(_sx(1779), True, (205, 205, 205))
             self.screen.blit(prompt_surface, (40, description_top))
             for line_index, line in enumerate(description_lines):
                 line_surface = self.font.render(line, True, (180, 180, 180))
-                self.screen.blit(line_surface, (40, description_top + 32 + (line_index * 26)))
-            if self._update_progress_stage in {"download", "extract", "ready", "error"}:
-                progress_surface = self.font.render(
-                    f"Status: {self._update_progress_message or self._update_status_message}",
-                    True,
-                    (190, 210, 190) if self._update_progress_stage == "ready" else (180, 180, 180),
-                )
+                self.screen.blit(line_surface, (40, description_top + 32 + line_index * 26))
+            if self._update_progress_stage in {_sx(761), _sx(1849), _sx(769), _sx(1007)}:
+                progress_surface = self.font.render(_sx(729).format(self._update_progress_message or self._update_status_message), True, (190, 210, 190) if self._update_progress_stage == _sx(769) else (180, 180, 180))
                 self.screen.blit(progress_surface, (40, description_top + 88))
-                percent_surface = self.font.render(
-                    f"Progress: {int(self._update_progress_percent)}%",
-                    True,
-                    (220, 220, 120),
-                )
+                percent_surface = self.font.render(_sx(1850).format(int(self._update_progress_percent)), True, (220, 220, 120))
                 self.screen.blit(percent_surface, (40, description_top + 116))
                 notes_top = description_top + 150
             else:
                 notes_top = description_top + 88
-            notes_label_surface = self.font.render("Release Notes:", True, (205, 205, 205))
+            notes_label_surface = self.font.render(_sx(1780), True, (205, 205, 205))
             self.screen.blit(notes_label_surface, (40, notes_top))
             for line_index, line in enumerate(release_note_lines):
                 line_surface = self.font.render(line, True, (180, 180, 180))
-                self.screen.blit(line_surface, (40, notes_top + 28 + (line_index * 24)))
+                self.screen.blit(line_surface, (40, notes_top + 28 + line_index * 24))
             hint_text = self._menu_navigation_hint()
         elif menu == self.help_topic_menu and self._selected_help_topic is not None:
-            prompt_surface = self.font.render("Use Up and Down to select a line. Press Enter to copy it. Copy All is at the end.", True, (205, 205, 205))
+            prompt_surface = self.font.render(_sx(1851), True, (205, 205, 205))
             self.screen.blit(prompt_surface, (40, max(height - 100, y_position + 18)))
             hint_text = self._menu_navigation_hint()
         elif menu == self.whats_new_menu and self._selected_info_dialog is not None:
-            prompt_surface = self.font.render("Use Up and Down to select a line. Press Enter to copy it. Copy All is at the end.", True, (205, 205, 205))
+            prompt_surface = self.font.render(_sx(1851), True, (205, 205, 205))
             self.screen.blit(prompt_surface, (40, max(height - 100, y_position + 18)))
             hint_text = self._menu_navigation_hint()
         elif menu == self.main_menu:
@@ -7826,34 +5949,31 @@ class SubwayBlindGame:
             if selected_description:
                 description_lines = textwrap.wrap(selected_description, width=62)[:3]
                 description_top = min(height - 132, y_position + 18)
-                prompt_surface = self.font.render("Selected item", True, (205, 205, 205))
+                prompt_surface = self.font.render(_sx(1887), True, (205, 205, 205))
                 self.screen.blit(prompt_surface, (40, description_top))
                 for line_index, line in enumerate(description_lines):
                     line_surface = self.font.render(line, True, (180, 180, 180))
-                    self.screen.blit(line_surface, (40, description_top + 32 + (line_index * 26)))
+                    self.screen.blit(line_surface, (40, description_top + 32 + line_index * 26))
         elif menu == self.issue_compose_menu:
             description_top = min(height - 180, y_position + 18)
-            prompt_surface = self.font.render("Edit title and message here. Windows text input opens inside this game window.", True, (205, 205, 205))
+            prompt_surface = self.font.render(_sx(1888), True, (205, 205, 205))
             self.screen.blit(prompt_surface, (40, description_top))
             for line_index, line in enumerate(self._issue_draft_preview_lines()):
                 line_surface = self.font.render(line, True, (180, 180, 180))
-                self.screen.blit(line_surface, (40, description_top + 32 + (line_index * 26)))
+                self.screen.blit(line_surface, (40, description_top + 32 + line_index * 26))
         elif menu in {self.options_menu, self.sapi_menu, self.announcements_menu}:
-            hint_text = f"{self._menu_navigation_hint()} {self._option_adjustment_hint()}"
+            hint_text = _sx(3).format(self._menu_navigation_hint(), self._option_adjustment_hint())
         elif menu in {self.keyboard_bindings_menu, self.controller_bindings_menu} and self._binding_capture is not None:
-            if self._binding_capture.device == "keyboard":
+            if self._binding_capture.device == _sx(563):
                 if self._keyboard_binding_hold is None:
-                    capture_prompt = f"Press key(s) for {action_label(self._binding_capture.action_key)}, then hold 3 seconds. Escape cancels."
+                    capture_prompt = _sx(1894).format(action_label(self._binding_capture.action_key))
                 else:
                     remaining = max(0.0, self._keyboard_binding_hold.remaining_seconds)
-                    capture_prompt = (
-                        f"Keep holding keys... {remaining:.1f}s left for {action_label(self._binding_capture.action_key)}. Escape cancels."
-                    )
+                    capture_prompt = _sx(1895).format(remaining, action_label(self._binding_capture.action_key))
             else:
-                capture_prompt = f"Press a controller input for {action_label(self._binding_capture.action_key)}. Escape cancels."
+                capture_prompt = _sx(1893).format(action_label(self._binding_capture.action_key))
             prompt_surface = self.font.render(capture_prompt, True, (255, 220, 120))
             self.screen.blit(prompt_surface, (40, max(height - 80, y_position + 18)))
-
         hint_surface = self.font.render(hint_text, True, (180, 180, 180))
         hint_rect = hint_surface.get_rect(left=40, bottom=max(40, height - 20))
         self.screen.blit(hint_surface, hint_rect)
@@ -7861,13 +5981,11 @@ class SubwayBlindGame:
     def _draw_game(self) -> None:
         width, height = self.screen.get_size()
         self.screen.fill((5, 5, 10))
-
         lane_width = width // 3
         for index in range(3):
             x = index * lane_width
             pygame.draw.rect(self.screen, (18, 18, 28), (x + 2, 0, lane_width - 4, height))
             pygame.draw.line(self.screen, (40, 40, 60), (x, 0), (x, height), 2)
-
         for obstacle in self.obstacles:
             if obstacle.z > 60 or obstacle.z < -1:
                 continue
@@ -7876,99 +5994,78 @@ class SubwayBlindGame:
             center_x = lane_index * lane_width + lane_width // 2
             center_y = int(height - 80 - (60 - obstacle.z) * 6)
             color = (200, 80, 80)
-            if obstacle.kind == "coin":
+            if obstacle.kind == _sx(18):
                 color = (240, 200, 40)
                 size = max(8, size // 2)
-            elif obstacle.kind == "power":
+            elif obstacle.kind == _sx(1012):
                 color = (60, 200, 220)
-            elif obstacle.kind == "box":
+            elif obstacle.kind == _sx(1013):
                 color = (160, 100, 220)
-            elif obstacle.kind == "key":
+            elif obstacle.kind == _sx(569):
                 color = (80, 220, 255)
                 size = max(10, size // 2)
-            elif obstacle.kind == "word":
+            elif obstacle.kind == _sx(1138):
                 color = (250, 235, 90)
                 size = max(12, size // 2)
-            elif obstacle.kind == "season_token":
+            elif obstacle.kind == _sx(1139):
                 color = (255, 145, 60)
                 size = max(12, size // 2)
-            elif obstacle.kind == "multiplier":
+            elif obstacle.kind == _sx(1140):
                 color = (255, 210, 70)
                 size = max(14, size // 2)
-            elif obstacle.kind == "super_box":
+            elif obstacle.kind == _sx(598):
                 color = (245, 120, 255)
                 size = max(14, size // 2)
-            elif obstacle.kind == "pogo":
+            elif obstacle.kind == _sx(1141):
                 color = (110, 235, 210)
                 size = max(14, size // 2)
-            elif obstacle.kind == "high":
+            elif obstacle.kind == _sx(97):
                 color = (220, 120, 60)
-            elif obstacle.kind == "low":
+            elif obstacle.kind == _sx(644):
                 color = (60, 220, 120)
-            elif obstacle.kind == "bush":
+            elif obstacle.kind == _sx(645):
                 color = (40, 160, 60)
-            elif obstacle.kind == "train":
+            elif obstacle.kind == _sx(643):
                 color = (180, 180, 180)
             pygame.draw.rect(self.screen, color, (center_x - size // 2, center_y - size // 2, size, size))
             if obstacle.label:
                 glyph_surface = self.font.render(obstacle.label, True, (20, 20, 20))
                 glyph_rect = glyph_surface.get_rect(center=(center_x, center_y))
                 self.screen.blit(glyph_surface, glyph_rect)
-
         player_x = (self.player.lane + 1) * lane_width + lane_width // 2
         player_y = height - 120 - int(self.player.y * 40)
         player_height = 50 if self.player.rolling <= 0 else 28
         pygame.draw.rect(self.screen, (80, 160, 255), (player_x - 18, player_y - player_height, 36, player_height))
-
-        hud_parts = [
-            f"Score: {int(self.state.score)}",
-            f"Multiplier: x{self._score_multiplier()}",
-            f"Speed: {self.state.speed:.1f}",
-            f"Boards: {self.player.hoverboards}",
-            f"Keys: {int(self.settings.get('keys', 0))}",
-        ]
+        hud_parts = [_sx(748).format(int(self.state.score)), _sx(1152).format(self._score_multiplier()), _sx(1153).format(self.state.speed), _sx(1154).format(self.player.hoverboards), _sx(1155).format(int(self.settings.get(_sx(334), 0)))]
         if self._coin_counters_enabled():
-            hud_parts.insert(0, f"Coins: {self.state.coins}")
-        hud = "   ".join(hud_parts)
+            hud_parts.insert(0, _sx(666).format(self.state.coins))
+        hud = _sx(877).join(hud_parts)
         if self.player.hover_active > 0:
-            hud += "   [Hoverboard]"
+            hud += _sx(1156)
         if self.player.headstart > 0:
-            hud += "   [Headstart]"
+            hud += _sx(1157)
         if self.player.magnet > 0:
-            hud += "   [Magnet]"
+            hud += _sx(1158)
         if self.player.jetpack > 0:
-            hud += "   [Jetpack]"
+            hud += _sx(1159)
         if self.player.mult2x > 0:
-            hud += "   [2x]"
+            hud += _sx(1160)
         if self.player.super_sneakers > 0:
-            hud += "   [Super Sneakers]"
+            hud += _sx(1161)
         if self._practice_mode_active:
             remaining_hazards = max(0, self._practice_hazard_target - self._practice_hazards_cleared)
-            hud += f"   [Practice Lane {self._practice_hazards_cleared}/{self._practice_hazard_target}   Left: {remaining_hazards}]"
+            hud += _sx(1162).format(self._practice_hazards_cleared, self._practice_hazard_target, remaining_hazards)
         hud_surface = self.font.render(hud, True, (230, 230, 230))
         self.screen.blit(hud_surface, (15, 10))
-
         if self._quest_changes_enabled():
             next_threshold = next_season_reward_threshold(self.settings)
             word = self._current_word()
-            found_letters = str(self.settings.get("word_hunt_letters", ""))
-            season_progress = (
-                f"{int(self.settings.get('season_tokens', 0))}/{next_threshold}"
-                if next_threshold is not None
-                else f"{int(self.settings.get('season_tokens', 0))}/done"
-            )
-            meta_hud = (
-                f"{self._mission_status_text()}   "
-                f"Word Hunt: {found_letters or '-'} / {word}   "
-                f"Season Hunt: {season_progress}"
-            )
+            found_letters = str(self.settings.get(_sx(343), _sx(2)))
+            season_progress = _sx(1248).format(int(self.settings.get(_sx(347), 0)), next_threshold) if next_threshold is not None else _sx(1572).format(int(self.settings.get(_sx(347), 0)))
+            meta_hud = _sx(1163).format(self._mission_status_text(), found_letters or _sx(554), word, season_progress)
             meta_surface = self.font.render(meta_hud, True, (205, 205, 205))
             self.screen.blit(meta_surface, (15, 36))
-
         if self.state.paused:
             overlay = pygame.Surface((width, height), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 160))
             self.screen.blit(overlay, (0, 0))
-
-
-

@@ -1,21 +1,16 @@
 from __future__ import annotations
-
+from subway_blind.strings import sx as _sx
 from dataclasses import dataclass
-
 LANES = (-1, 0, 1)
-
 
 def normalize_lane(lane: int) -> int:
     return max(LANES[0], min(LANES[-1], int(lane)))
 
-
 def lane_to_pan(lane: int) -> float:
     return float(normalize_lane(lane)) * 0.9
 
-
 def lane_name(lane: int) -> str:
-    return {-1: "Left lane", 0: "Center lane", 1: "Right lane"}.get(normalize_lane(lane), "Lane")
-
+    return {-1: _sx(2013), 0: _sx(2014), 1: _sx(2015)}.get(normalize_lane(lane), _sx(2012))
 
 @dataclass
 class Obstacle:
@@ -24,8 +19,7 @@ class Obstacle:
     z: float
     warned: bool = False
     value: int = 0
-    label: str = ""
-
+    label: str = _sx(2)
 
 @dataclass
 class Player:
@@ -43,7 +37,6 @@ class Player:
     mult2x: float = 0.0
     pogo_active: float = 0.0
     board_extra_jump_available: bool = False
-
 
 @dataclass
 class RunState:

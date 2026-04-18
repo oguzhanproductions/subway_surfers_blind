@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from subway_blind.strings import sx as _sx
 import audioop
 import hashlib
 import os
@@ -8,12 +8,11 @@ import tempfile
 import uuid
 import wave
 from pathlib import Path
-
 from subway_blind.config import BASE_DIR, resource_path
 
-
 class OpenALHrtfEngine:
-    def __init__(self, sfx_volume: float, output_device_name: str | None = None):
+
+    def __init__(self, sfx_volume: float, output_device_name: str | None=None):
         self.available = False
         self._al = None
         self._device = None
@@ -23,7 +22,7 @@ class OpenALHrtfEngine:
         self._sources: dict[str, object] = {}
         self._channel_keys: dict[str, str] = {}
         self._listener_gain = max(0.0, min(1.0, float(sfx_volume)))
-        self._output_device_name = str(output_device_name or "").strip()
+        self._output_device_name = str(output_device_name or _sx(2)).strip()
         try:
             import pyopenalsoft as openal
         except Exception:
@@ -43,24 +42,17 @@ class OpenALHrtfEngine:
             self.available = False
 
     def _configure_openal_soft(self) -> None:
-        config_root = BASE_DIR / "data" / "openal"
+        config_root = BASE_DIR / _sx(377) / _sx(1903)
         config_root.mkdir(parents=True, exist_ok=True)
-        config_path = config_root / "alsoft.ini"
-        config_path.write_text(
-            "[general]\n"
-            "stereo-mode = headphones\n"
-            "hrtf = true\n"
-            "sources = 128\n"
-            "slots = 16\n",
-            encoding="utf-8",
-        )
-        os.environ["ALSOFT_CONF"] = str(config_path)
+        config_path = config_root / _sx(1904)
+        config_path.write_text(_sx(1905), encoding=_sx(386))
+        os.environ[_sx(1906)] = str(config_path)
 
     @staticmethod
     def _buffer_cache_key(key: str, spatialize: bool) -> str:
-        return f"{key}::{'spatial' if spatialize else 'direct'}"
+        return _sx(1902).format(key, _sx(1917) if spatialize else _sx(1918))
 
-    def register_sound(self, key: str, path: str, spatialize: bool = False) -> str | None:
+    def register_sound(self, key: str, path: str, spatialize: bool=False) -> str | None:
         if not self.available or self._al is None:
             return None
         source_path = Path(path)
@@ -88,17 +80,17 @@ class OpenALHrtfEngine:
         self._buffer_paths[buffer_key] = prepared_path
         return buffer_key
 
-    def _prepare_openal_path(self, source: Path, refresh: bool = False, spatialize: bool = False) -> str:
-        if source.suffix.lower() == ".wav":
+    def _prepare_openal_path(self, source: Path, refresh: bool=False, spatialize: bool=False) -> str:
+        if source.suffix.lower() == _sx(69):
             return self._prepare_wav_path(source, refresh=refresh, spatialize=spatialize)
         if self._is_ascii_safe_path(source):
             return str(source)
         return self._stage_original_asset(source, refresh=refresh)
 
-    def _prepare_wav_path(self, source: Path, refresh: bool = False, spatialize: bool = False) -> str:
+    def _prepare_wav_path(self, source: Path, refresh: bool=False, spatialize: bool=False) -> str:
         requires_ascii_cache = not self._is_ascii_safe_path(source)
         try:
-            with wave.open(str(source), "rb") as reader:
+            with wave.open(str(source), _sx(189)) as reader:
                 channels = reader.getnchannels()
                 sample_width = reader.getsampwidth()
                 frame_rate = reader.getframerate()
@@ -107,34 +99,24 @@ class OpenALHrtfEngine:
             if requires_ascii_cache:
                 return self._stage_original_asset(source, refresh=refresh)
             return str(source)
-
         if not spatialize:
             if requires_ascii_cache:
                 return self._stage_original_asset(source, refresh=refresh)
             return str(source)
-
-        if channels == 1 and not requires_ascii_cache:
+        if channels == 1 and (not requires_ascii_cache):
             return str(source)
-
         fingerprint = self._source_fingerprint(source)
-        cache_suffix = ".wav"
-        stem_suffix = "_mono" if channels != 1 else ""
-        cache_path = self._openal_cache_root() / f"{self._ascii_file_stem(source.stem)}_{fingerprint}{stem_suffix}{cache_suffix}"
+        cache_suffix = _sx(69)
+        stem_suffix = _sx(1908) if channels != 1 else _sx(2)
+        cache_path = self._openal_cache_root() / _sx(1909).format(self._ascii_file_stem(source.stem), fingerprint, stem_suffix, cache_suffix)
         if not refresh and self._is_valid_cached_wav(cache_path, expected_channels=1):
             return str(cache_path)
-
         try:
             if channels == 1:
                 self._copy_file_atomically(source, cache_path)
             else:
                 mono_frames = self._downmix_to_mono(frames, channels, sample_width)
-                self._write_wav_atomically(
-                    cache_path,
-                    channels=1,
-                    sample_width=sample_width,
-                    frame_rate=frame_rate,
-                    frames=mono_frames,
-                )
+                self._write_wav_atomically(cache_path, channels=1, sample_width=sample_width, frame_rate=frame_rate, frames=mono_frames)
             return str(cache_path)
         except Exception:
             return str(source)
@@ -144,27 +126,23 @@ class OpenALHrtfEngine:
             return frames
         if channels == 2:
             return audioop.tomono(frames, sample_width, 0.5, 0.5)
-
         frame_step = sample_width * channels
         mono_chunks: list[bytes] = []
         for offset in range(0, len(frames), frame_step):
-            frame = frames[offset : offset + frame_step]
+            frame = frames[offset:offset + frame_step]
             if len(frame) < frame_step:
                 break
-            mono = audioop.tomono(frame[: sample_width * 2], sample_width, 0.5, 0.5)
+            mono = audioop.tomono(frame[:sample_width * 2], sample_width, 0.5, 0.5)
             mono_chunks.append(mono)
-        return b"".join(mono_chunks)
+        return b''.join(mono_chunks)
 
     def _openal_cache_root(self) -> Path:
-        preferred_root = BASE_DIR / "data" / "openal_cache"
+        preferred_root = BASE_DIR / _sx(377) / _sx(1910)
         candidates = [preferred_root]
-
-        program_data = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
-        candidates.append(program_data / "VireonInteractive" / "SubwaySurfersBlindEdition" / "openal_cache")
-
+        program_data = Path(os.environ.get(_sx(1914), _sx(1915)))
+        candidates.append(program_data / _sx(1922) / _sx(1919) / _sx(1910))
         temp_root = Path(tempfile.gettempdir())
-        candidates.append(temp_root / "VireonInteractive" / "SubwaySurfersBlindEdition" / "openal_cache")
-
+        candidates.append(temp_root / _sx(1922) / _sx(1919) / _sx(1910))
         for candidate in candidates:
             if not self._is_ascii_safe_path(candidate):
                 continue
@@ -176,8 +154,8 @@ class OpenALHrtfEngine:
         preferred_root.mkdir(parents=True, exist_ok=True)
         return preferred_root
 
-    def _stage_original_asset(self, source: Path, refresh: bool = False) -> str:
-        cache_path = self._openal_cache_root() / f"{self._ascii_file_stem(source.stem)}_{self._source_fingerprint(source)}{source.suffix.lower()}"
+    def _stage_original_asset(self, source: Path, refresh: bool=False) -> str:
+        cache_path = self._openal_cache_root() / _sx(1911).format(self._ascii_file_stem(source.stem), self._source_fingerprint(source), source.suffix.lower())
         if not refresh and self._is_usable_cached_asset(cache_path):
             return str(cache_path)
         try:
@@ -192,9 +170,7 @@ class OpenALHrtfEngine:
             resolved_source = source.resolve()
         except Exception:
             resolved_source = source
-        return hashlib.sha1(
-            f"{resolved_source}::{stats.st_mtime_ns}::{stats.st_size}".encode("utf-8")
-        ).hexdigest()[:16]
+        return hashlib.sha1(_sx(1923).format(resolved_source, stats.st_mtime_ns, stats.st_size).encode(_sx(386))).hexdigest()[:16]
 
     def _is_ascii_safe_path(self, path: Path) -> bool:
         try:
@@ -204,8 +180,8 @@ class OpenALHrtfEngine:
         return value.isascii()
 
     def _ascii_file_stem(self, value: str) -> str:
-        sanitized = "".join(character if character.isascii() and character.isalnum() else "_" for character in value)
-        return sanitized.strip("_") or "sound"
+        sanitized = _sx(2).join((character if character.isascii() and character.isalnum() else _sx(553) for character in value))
+        return sanitized.strip(_sx(553)) or _sx(1912)
 
     def _is_usable_cached_asset(self, path: Path) -> bool:
         try:
@@ -217,14 +193,14 @@ class OpenALHrtfEngine:
         if not self._is_usable_cached_asset(path):
             return False
         try:
-            with wave.open(str(path), "rb") as reader:
+            with wave.open(str(path), _sx(189)) as reader:
                 return reader.getnchannels() == expected_channels and reader.getnframes() >= 0
         except Exception:
             return False
 
     def _copy_file_atomically(self, source: Path, destination: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = destination.with_name(f"{destination.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        temp_path = destination.with_name(_sx(1913).format(destination.name, os.getpid(), uuid.uuid4().hex))
         try:
             shutil.copyfile(source, temp_path)
             os.replace(temp_path, destination)
@@ -235,18 +211,11 @@ class OpenALHrtfEngine:
                 except Exception:
                     pass
 
-    def _write_wav_atomically(
-        self,
-        destination: Path,
-        channels: int,
-        sample_width: int,
-        frame_rate: int,
-        frames: bytes,
-    ) -> None:
+    def _write_wav_atomically(self, destination: Path, channels: int, sample_width: int, frame_rate: int, frames: bytes) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = destination.with_name(f"{destination.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        temp_path = destination.with_name(_sx(1913).format(destination.name, os.getpid(), uuid.uuid4().hex))
         try:
-            with wave.open(str(temp_path), "wb") as writer:
+            with wave.open(str(temp_path), _sx(1920)) as writer:
                 writer.setnchannels(channels)
                 writer.setsampwidth(sample_width)
                 writer.setframerate(frame_rate)
@@ -274,23 +243,11 @@ class OpenALHrtfEngine:
         except Exception:
             return
 
-    def update_source(
-        self,
-        channel: str,
-        x: float,
-        y: float,
-        z: float,
-        gain: float,
-        pitch: float = 1.0,
-        relative: bool = False,
-        velocity_x: float = 0.0,
-        velocity_y: float = 0.0,
-        velocity_z: float = 0.0,
-    ) -> bool:
+    def update_source(self, channel: str, x: float, y: float, z: float, gain: float, pitch: float=1.0, relative: bool=False, velocity_x: float=0.0, velocity_y: float=0.0, velocity_z: float=0.0) -> bool:
         if not self.available:
             return False
         source = self._sources.get(channel)
-        if source is None or not getattr(source, "playing", False):
+        if source is None or not getattr(source, _sx(1921), False):
             return False
         source.relative = relative
         source.gain = max(0.0, min(1.2, self._listener_gain * float(gain)))
@@ -299,23 +256,7 @@ class OpenALHrtfEngine:
         source.set_velocity(float(velocity_x), float(velocity_y), float(velocity_z))
         return True
 
-    def play_sound(
-        self,
-        key: str,
-        path: str,
-        channel: str,
-        x: float,
-        y: float,
-        z: float,
-        gain: float,
-        pitch: float = 1.0,
-        loop: bool = False,
-        relative: bool = False,
-        velocity_x: float = 0.0,
-        velocity_y: float = 0.0,
-        velocity_z: float = 0.0,
-        spatialize: bool = False,
-    ) -> bool:
+    def play_sound(self, key: str, path: str, channel: str, x: float, y: float, z: float, gain: float, pitch: float=1.0, loop: bool=False, relative: bool=False, velocity_x: float=0.0, velocity_y: float=0.0, velocity_z: float=0.0, spatialize: bool=False) -> bool:
         if not self.available or self._al is None:
             return False
         buffer_key = self.register_sound(key, path, spatialize=spatialize)
@@ -378,7 +319,7 @@ class OpenALHrtfEngine:
         self._device = None
         if self._al is None:
             return
-        quit_openal = getattr(self._al, "quit", None)
+        quit_openal = getattr(self._al, _sx(768), None)
         if callable(quit_openal):
             try:
                 quit_openal()

@@ -1,7 +1,7 @@
 from __future__ import annotations
-
-APP_NAME = "Subway Surfers Blind Edition"
-APP_WINDOW_TITLE = "Subway Surfers Blind"
-APP_VERSION = "1.1.5"
-GITHUB_OWNER = "oguzhanproductions"
-GITHUB_REPOSITORY = "subway_surfers_blind"
+from subway_blind.strings import sx as _sx
+APP_NAME = _sx(1303)
+APP_WINDOW_TITLE = _sx(2224)
+APP_VERSION = _sx(2225)
+GITHUB_OWNER = _sx(2226)
+GITHUB_REPOSITORY = _sx(2227)
