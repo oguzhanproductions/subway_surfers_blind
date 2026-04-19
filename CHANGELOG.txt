@@ -5,6 +5,7 @@ Date: 2026-04-03
 Version: 1.1.5
 
 Update Summary
+- Added translation request support to streamline localization update workflows.
 - Added automatic keyboard layout localization that detects the active system keyboard layout on every startup and stores a stable layout signature in settings.
 - Added startup-safe control synchronization that keeps existing key bindings untouched when the detected keyboard layout is unchanged and refreshes layout-specific shortcut characters only when the layout changes.
 - Added keyboard binding capture support for modifier combinations such as Shift + S, Ctrl + key, Alt + key, and Meta + key.
