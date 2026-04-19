@@ -1,5 +1,6 @@
 from __future__ import annotations
 from subway_blind.strings import sx as _sx
+from subway_blind.translation import translate_text
 from dataclasses import dataclass
 from typing import Callable, Optional
 import pygame
@@ -45,12 +46,26 @@ class Menu:
             self.index = 0
         if play_sound:
             self._play_menu_sound(_sx(54))
-        self.speaker.speak(self._opening_announcement(), interrupt=True)
+        self._speak_segments(self._opening_segments())
 
-    def _opening_announcement(self) -> str:
-        if not self.items:
-            return self.title
-        return _sx(988).format(self.title, self._current_announcement_text())
+    def _opening_segments(self) -> tuple[str, ...]:
+        segments: list[str] = [self._translated_text(self.title)]
+        if self.items:
+            segments.extend(self._item_announcement_segments(self.items[self.index]))
+        return tuple(segment for segment in segments if segment)
+
+    @staticmethod
+    def _translated_text(value: str) -> str:
+        return translate_text(value)
+
+    def _speak_segments(self, segments: tuple[str, ...]) -> None:
+        first_segment = True
+        for segment in segments:
+            spoken = str(segment).strip()
+            if not spoken:
+                continue
+            self.speaker.speak(spoken, interrupt=first_segment)
+            first_segment = False
 
     def _descriptions_enabled(self) -> bool:
         if self.description_enabled is None:
@@ -60,21 +75,27 @@ class Menu:
         except Exception:
             return False
 
-    def _item_announcement_text(self, item: MenuItem) -> str:
+    def _item_announcement_segments(self, item: MenuItem) -> tuple[str, ...]:
         description = item.description.strip()
+        segments: list[str] = [self._translated_text(item.label)]
         if description and self._descriptions_enabled():
-            return _sx(988).format(item.label, description)
-        return item.label
+            segments.append(self._translated_text(description))
+        return tuple(segment for segment in segments if segment)
 
     def _current_announcement_text(self) -> str:
         if not self.items:
             return _sx(2)
-        return self._item_announcement_text(self.items[self.index])
+        segments = self._item_announcement_segments(self.items[self.index])
+        if not segments:
+            return _sx(2)
+        if len(segments) == 1:
+            return segments[0]
+        return _sx(988).format(*segments)
 
     def _announce_current(self) -> None:
         if not self.items:
             return
-        self.speaker.speak(self._current_announcement_text(), interrupt=True)
+        self._speak_segments(self._item_announcement_segments(self.items[self.index]))
 
     def _wrapping_enabled(self) -> bool:
         try:
