@@ -226,7 +226,50 @@ class LeaderboardServiceTests(unittest.TestCase):
 
         self.assertEqual(suspicious["verification_status"], "suspicious")
         self.assertTrue(suspicious["verification_reasons"])
-        self.assertEqual(leaderboard["entries"][0]["verification_status"], "suspicious")
+        self.assertEqual(leaderboard["total_players"], 0)
+        self.assertEqual(leaderboard["entries"], [])
+
+    def test_submit_score_flags_hoverboard_uses_above_game_limit_as_suspicious(self):
+        result = self.service.login_or_create_account("runner01", "secret123", "a" * 64)
+
+        suspicious = self.service.submit_score(
+            result["principal"],
+            score=2200,
+            coins=22,
+            play_time_seconds=180,
+            game_version="1.1.3",
+            difficulty="normal",
+            distance_meters=2500,
+            clean_escapes=14,
+            revives_used=1,
+            powerup_usage={"hoverboard": 5},
+        )
+
+        self.assertEqual(suspicious["verification_status"], "suspicious")
+        self.assertTrue(
+            any("Hoverboard activations exceed the in-game run limit" in reason for reason in suspicious["verification_reasons"])
+        )
+
+    def test_submit_score_flags_revives_above_game_limit_as_suspicious(self):
+        result = self.service.login_or_create_account("runner01", "secret123", "a" * 64)
+
+        suspicious = self.service.submit_score(
+            result["principal"],
+            score=1800,
+            coins=12,
+            play_time_seconds=160,
+            game_version="1.1.3",
+            difficulty="normal",
+            distance_meters=2100,
+            clean_escapes=11,
+            revives_used=4,
+            powerup_usage={"magnet": 2},
+        )
+
+        self.assertEqual(suspicious["verification_status"], "suspicious")
+        self.assertTrue(
+            any("Revive count exceeds the in-game run limit" in reason for reason in suspicious["verification_reasons"])
+        )
 
 
 class SecureChannelTests(unittest.TestCase):

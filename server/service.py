@@ -11,7 +11,7 @@ import uuid
 from argon2 import PasswordHasher
 
 from subway_blind.balance import SPEED_PROFILES, speed_profile_for_difficulty
-from subway_blind.features import HEADSTART_SPEED_BONUS
+from subway_blind.features import HEADSTART_SPEED_BONUS, HOVERBOARD_MAX_USES_PER_RUN, REVIVE_MAX_USES_PER_RUN
 
 from server.database import LeaderboardDatabase
 from server.security import (
@@ -32,6 +32,8 @@ MAX_DISTANCE_METERS = 5_000_000
 MAX_CLEAN_ESCAPES = 250_000
 MAX_REVIVES_USED = 250
 MAX_POWERUP_ACTIVATIONS = 100_000
+EXPECTED_HOVERBOARD_USES_PER_RUN = HOVERBOARD_MAX_USES_PER_RUN
+EXPECTED_REVIVES_PER_RUN = REVIVE_MAX_USES_PER_RUN
 LEADERBOARD_PERIODS = ("season",)
 LEADERBOARD_DIFFICULTY_FILTERS = ("all", "easy", "normal", "hard")
 RUN_DIFFICULTIES = tuple(sorted(SPEED_PROFILES.keys()))
@@ -525,6 +527,7 @@ class LeaderboardService:
             normalized_difficulty,
             alias="s",
             current_season=current_season,
+            verified_only=True,
         )
         rows = self.database.fetchall(
             f"""
@@ -684,7 +687,7 @@ class LeaderboardService:
                         ORDER BY s.score DESC, s.coins DESC, s.play_time_seconds DESC, s.published_at_epoch ASC
                     ) AS account_rank
                 FROM submissions s
-                WHERE s.published_at_epoch >= ? AND s.published_at_epoch < ?
+                WHERE s.published_at_epoch >= ? AND s.published_at_epoch < ? AND s.verification_status = 'verified'
             ),
             ranked AS (
                 SELECT
@@ -929,7 +932,7 @@ class LeaderboardService:
                             ORDER BY s.score DESC, s.coins DESC, s.play_time_seconds DESC, s.published_at_epoch ASC
                         ) AS account_rank
                     FROM submissions s
-                    WHERE s.published_at_epoch >= ? AND s.published_at_epoch < ?
+                    WHERE s.published_at_epoch >= ? AND s.published_at_epoch < ? AND s.verification_status = 'verified'
                 ),
                 ranked AS (
                     SELECT
@@ -1708,9 +1711,13 @@ class LeaderboardService:
         difficulty: str,
         alias: str,
         current_season: SeasonDefinition | None = None,
+        verified_only: bool = False,
     ) -> tuple[str, tuple[object, ...]]:
         parts: list[str] = []
         parameters: list[object] = []
+        if verified_only:
+            parts.append(f"{alias}.verification_status = ?")
+            parameters.append("verified")
         if period == "season":
             season = current_season or self._ensure_season_state_current()
             parts.append(f"{alias}.published_at_epoch >= ?")
@@ -1767,6 +1774,13 @@ class LeaderboardService:
                 reasons.append("Clean escape count is outside the expected range for the recorded distance.")
         if revives_used is not None and revives_used > 25:
             reasons.append("Revive count is unusually high for a single published run.")
+        if revives_used is not None and revives_used > EXPECTED_REVIVES_PER_RUN:
+            reasons.append(f"Revive count exceeds the in-game run limit ({EXPECTED_REVIVES_PER_RUN}).")
+        hoverboard_uses = int(powerup_usage.get("hoverboard", 0) or 0)
+        if hoverboard_uses > EXPECTED_HOVERBOARD_USES_PER_RUN:
+            reasons.append(
+                f"Hoverboard activations exceed the in-game run limit ({EXPECTED_HOVERBOARD_USES_PER_RUN})."
+            )
         if powerup_usage and play_time_seconds >= 0:
             total_powerups = sum(powerup_usage.values())
             if total_powerups > max(12, (play_time_seconds // 3) + 6):
