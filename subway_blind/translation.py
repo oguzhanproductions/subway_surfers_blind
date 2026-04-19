@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
 import sys
@@ -25,6 +26,23 @@ class _LanguagePack:
         self.pattern_entries = pattern_entries
 
 
+@dataclass(frozen=True)
+class _LanguageSource:
+    key: str
+    display_name: str
+    lng_path: Path | None
+    version: str
+    author: str
+
+
+@dataclass(frozen=True)
+class LanguageEntry:
+    key: str
+    name: str
+    version: str
+    author: str
+
+
 _ACTIVE_PACK = _LanguagePack("english", {}, ())
 
 
@@ -38,21 +56,128 @@ def _langs_dir() -> Path:
     return _resource_base_dir() / "langs"
 
 
-def available_languages() -> list[str]:
+def _normalize_language_key(value: object) -> str:
+    normalized = str(value or "english").strip().lower()
+    return normalized or "english"
+
+
+def _default_display_name(language_key: str) -> str:
+    normalized = _normalize_language_key(language_key)
+    return normalized.replace("_", " ").replace("-", " ").title()
+
+
+def _safe_manifest_text(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _load_manifest(manifest_path: Path) -> dict[str, object] | None:
+    try:
+        raw = manifest_path.read_text(encoding="utf-8-sig")
+        decoded = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(decoded, dict):
+        return None
+    return decoded
+
+
+def _find_language_file_in_directory(directory: Path, preferred_name: str | None) -> Path | None:
+    if preferred_name:
+        preferred_path = directory / preferred_name
+        if preferred_path.exists() and preferred_path.is_file():
+            return preferred_path
+    lng_files = sorted(path for path in directory.glob("*.lng") if path.is_file())
+    if not lng_files:
+        return None
+    return lng_files[0]
+
+
+def _discover_language_sources() -> dict[str, _LanguageSource]:
+    sources: dict[str, _LanguageSource] = {
+        "english": _LanguageSource(
+            key="english",
+            display_name="English",
+            lng_path=None,
+            version="",
+            author="",
+        )
+    }
     langs_path = _langs_dir()
     if not langs_path.exists() or not langs_path.is_dir():
-        return ["english"]
-    names = sorted({item.stem.strip().lower() for item in langs_path.glob("*.lng") if item.stem.strip()})
-    if "english" not in names:
-        names.insert(0, "english")
-    return names
+        return sources
+    for item in sorted((path for path in langs_path.iterdir() if path.is_dir()), key=lambda path: path.name.casefold()):
+        manifest_path = item / "manifest.json"
+        manifest = _load_manifest(manifest_path)
+        language_key = _normalize_language_key(manifest.get("id") if manifest is not None else item.name)
+        language_file_name = (
+            _safe_manifest_text(manifest.get("language_file")) if manifest is not None else ""
+        ) or (
+            _safe_manifest_text(manifest.get("lng_file")) if manifest is not None else ""
+        )
+        lng_path = _find_language_file_in_directory(item, language_file_name or None)
+        if language_key == "english" or lng_path is None:
+            continue
+        display_name = (
+            _safe_manifest_text(manifest.get("name")) if manifest is not None else ""
+        ) or _default_display_name(language_key)
+        version = _safe_manifest_text(manifest.get("version")) if manifest is not None else ""
+        author = _safe_manifest_text(manifest.get("author")) if manifest is not None else ""
+        sources[language_key] = _LanguageSource(
+            key=language_key,
+            display_name=display_name,
+            lng_path=lng_path,
+            version=version,
+            author=author,
+        )
+    for item in sorted(langs_path.glob("*.lng"), key=lambda path: path.name.casefold()):
+        language_key = _normalize_language_key(item.stem)
+        if language_key in {"", "english"} or language_key in sources:
+            continue
+        sources[language_key] = _LanguageSource(
+            key=language_key,
+            display_name=_default_display_name(language_key),
+            lng_path=item,
+            version="",
+            author="",
+        )
+    return sources
+
+
+def available_languages() -> list[str]:
+    sources = _discover_language_sources()
+    discovered = sorted(
+        (key for key in sources.keys() if key != "english"),
+        key=lambda key: (sources[key].display_name.casefold(), key),
+    )
+    return ["english", *discovered]
+
+
+def available_language_entries() -> list[LanguageEntry]:
+    sources = _discover_language_sources()
+    ordered_keys = available_languages()
+    entries: list[LanguageEntry] = []
+    for key in ordered_keys:
+        source = sources.get(key)
+        if source is None:
+            entries.append(LanguageEntry(key=key, name=_default_display_name(key), version="", author=""))
+            continue
+        entries.append(
+            LanguageEntry(
+                key=source.key,
+                name=source.display_name,
+                version=source.version,
+                author=source.author,
+            )
+        )
+    return entries
 
 
 def language_display_name(language_name: str) -> str:
-    normalized = str(language_name or "english").strip().lower()
-    if not normalized:
-        normalized = "english"
-    return normalized.replace("_", " ").replace("-", " ").title()
+    normalized = _normalize_language_key(language_name)
+    source = _discover_language_sources().get(normalized)
+    if source is not None:
+        return source.display_name
+    return _default_display_name(normalized)
 
 
 def current_language() -> str:
@@ -60,18 +185,16 @@ def current_language() -> str:
 
 
 def set_language(language_name: str | None) -> str:
-    normalized = str(language_name or "english").strip().lower()
-    if not normalized:
-        normalized = "english"
+    normalized = _normalize_language_key(language_name)
     if normalized == "english":
         _set_active_pack(_LanguagePack("english", {}, ()))
         return "english"
-    candidate_path = _langs_dir() / f"{normalized}.lng"
-    if not candidate_path.exists() or not candidate_path.is_file():
+    source = _discover_language_sources().get(normalized)
+    if source is None or source.lng_path is None:
         _set_active_pack(_LanguagePack("english", {}, ()))
         return "english"
     try:
-        contents = candidate_path.read_text(encoding="utf-8")
+        contents = source.lng_path.read_text(encoding="utf-8")
     except Exception:
         _set_active_pack(_LanguagePack("english", {}, ()))
         return "english"

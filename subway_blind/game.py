@@ -10,6 +10,7 @@ import re
 import threading
 import time
 from typing import Callable, Optional
+import webbrowser
 import pygame
 from subway_blind import config as config_module
 from subway_blind.audio import Audio, Speaker, SAPI_RATE_MAX, SAPI_RATE_MIN, SAPI_PITCH_MAX, SAPI_PITCH_MIN, SAPI_VOICE_UNAVAILABLE_LABEL, SAPI_VOLUME_MAX, SAPI_VOLUME_MIN, SYSTEM_DEFAULT_OUTPUT_LABEL
@@ -34,7 +35,7 @@ from subway_blind.spatial_audio import SpatialThreatAudio
 from subway_blind.updater import GitHubReleaseUpdater, UpdateCheckResult, UpdateInstallProgress, UpdateInstallResult, version_key
 from subway_blind.version import APP_VERSION
 from subway_blind.strings import ACTIVE_GAMEPLAY_SOUND_KEYS, DIFFICULTY_LABELS, HelpTopic, HOW_TO_TOPICS, ISSUE_STATUS_LABELS, ISSUE_STATUS_ORDER, LEADERBOARD_DIFFICULTY_FILTER_LABELS, LEADERBOARD_DIFFICULTY_FILTER_ORDER, LEADERBOARD_PERIOD_LABELS, LEADERBOARD_PERIOD_ORDER, LEADERBOARD_VERIFICATION_LABELS, LearnSoundEntry, LEARN_SOUND_LIBRARY, RUN_POWERUP_LABELS, SEASON_IMPRINT_TEXT, SPECIAL_ITEM_EFFECT_TEXT, SPECIAL_ITEM_LABELS, SPECIAL_ITEM_ORDER, TEXT, UPGRADE_HELP_TOPICS, sx as _sx
-from subway_blind.translation import available_languages, language_display_name, set_language, translate_text
+from subway_blind.translation import available_language_entries, set_language, translate_text
 LEADERBOARD_CACHE_TTL_SECONDS = 45.0
 GUARD_LOOP_DURATION = 1.35
 POGO_STICK_DURATION = 5.5
@@ -65,6 +66,9 @@ EVENT_SHOP_SUPER_BOX_COST = 30
 BINDING_CAPTURE_HOLD_SECONDS = 3.0
 BINDING_CAPTURE_DING_PITCHES = {3: 1.0, 2: 1.15, 1: 1.3}
 LANGUAGE_OPTION_ACTION = "__option_language__"
+LANGUAGE_SELECT_ACTION_PREFIX = "__language_select__:"
+LANGUAGE_PUBLISH_ACTION = "__language_publish__"
+TRANSLATION_PUBLISH_URL = "https://vireon-interactive.com/subway-surfers-blind/translation"
 
 @dataclass(frozen=True)
 class BindingCaptureRequest:
@@ -373,6 +377,7 @@ class SubwayBlindGame:
         self.quests_menu = Menu(self.speaker, self.audio, _sx(807), [])
         self.me_menu = Menu(self.speaker, self.audio, _sx(808), [])
         self.options_menu = Menu(self.speaker, self.audio, _sx(479), self._build_options_menu_items())
+        self.language_menu = Menu(self.speaker, self.audio, "Language", [])
         self.sapi_menu = Menu(self.speaker, self.audio, _sx(671), [MenuItem(self._sapi_speech_option_label(), _sx(1121)), MenuItem(self._sapi_volume_option_label(), _sx(1122)), MenuItem(self._sapi_voice_option_label(), _sx(1123)), MenuItem(self._sapi_rate_option_label(), _sx(1124)), MenuItem(self._sapi_pitch_option_label(), _sx(1125)), MenuItem(TEXT[_sx(429)], _sx(429))])
         self.announcements_menu = Menu(self.speaker, self.audio, _sx(809), [MenuItem(self._meter_option_label(), _sx(1130)), MenuItem(self._coin_counter_option_label(), _sx(1131)), MenuItem(self._quest_changes_option_label(), _sx(1132)), MenuItem(self._pause_on_focus_loss_option_label(), _sx(1133)), MenuItem(TEXT[_sx(429)], _sx(429))])
         self.controls_menu = Menu(self.speaker, self.audio, _sx(754), [])
@@ -414,6 +419,7 @@ class SubwayBlindGame:
         self._refresh_mission_set_menu_labels()
         self._refresh_quest_menu_labels()
         self._refresh_me_menu_labels()
+        self._refresh_language_menu_labels()
         self._refresh_issue_menu()
         self._refresh_control_menus()
         self._refresh_game_over_menu()
@@ -497,8 +503,21 @@ class SubwayBlindGame:
         return _sx(679).format(difficulty)
 
     def _language_option_label(self) -> str:
-        language_name = language_display_name(str(self.settings.get("language", "english")))
-        return "Language: {0}".format(language_name)
+        language_name = str(self.settings.get("language", "english")).strip().lower() or "english"
+        return "Language: {0}".format(self._language_entry_label(language_name))
+
+    @staticmethod
+    def _language_entry_label(language_key: str) -> str:
+        normalized = str(language_key or "english").strip().lower() or "english"
+        for entry in available_language_entries():
+            if entry.key == normalized:
+                parts = [entry.key]
+                if entry.version:
+                    parts.append(entry.version)
+                if entry.author:
+                    parts.append(entry.author)
+                return ": ".join(parts)
+        return normalized
 
     def _meter_option_label(self) -> str:
         return _sx(680).format(_sx(1598) if self._meters_enabled() else _sx(1599))
@@ -954,6 +973,22 @@ class SubwayBlindGame:
         self.options_menu.items = self._build_options_menu_items()
         if selected_action:
             self.options_menu.index = self._update_option_index(selected_action)
+
+    def _refresh_language_menu_labels(self) -> None:
+        selected_action = LANGUAGE_PUBLISH_ACTION
+        if self.language_menu.items:
+            selected_action = self.language_menu.items[min(self.language_menu.index, len(self.language_menu.items) - 1)].action
+        items = [MenuItem("Publish your own language", LANGUAGE_PUBLISH_ACTION)]
+        for entry in available_language_entries():
+            items.append(MenuItem(self._language_entry_label(entry.key), "{0}{1}".format(LANGUAGE_SELECT_ACTION_PREFIX, entry.key)))
+        items.append(MenuItem(TEXT[_sx(429)], _sx(429)))
+        self.language_menu.items = items
+        for index, item in enumerate(self.language_menu.items):
+            if item.action == selected_action:
+                self.language_menu.index = index
+                break
+        else:
+            self.language_menu.index = 0
 
     def _build_options_menu_items(self) -> list[MenuItem]:
         items = [MenuItem(self._sfx_option_label(), _sx(1114)), MenuItem(self._music_option_label(), _sx(1115)), MenuItem(self._updates_option_label(), _sx(1116)), MenuItem(self._audio_output_option_label(), _sx(1117)), MenuItem(self._menu_sound_hrtf_option_label(), _sx(1118)), MenuItem(self._menu_wrap_option_label(), _sx(1119)), MenuItem(self._speech_option_label(), _sx(1120)), MenuItem(self._sapi_menu_entry_label(), _sx(1194)), MenuItem(self._difficulty_option_label(), _sx(1126)), MenuItem(self._language_option_label(), LANGUAGE_OPTION_ACTION), MenuItem(self._main_menu_description_option_label(), _sx(1127)), MenuItem(self._leaderboard_account_option_label(), _sx(1195))]
@@ -2981,7 +3016,7 @@ class SubwayBlindGame:
                 return True
             if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 selected_action = self.options_menu.items[self.options_menu.index].action
-                if selected_action in {_sx(429), _sx(1384), _sx(1194), _sx(1383), _sx(1195), _sx(1382)}:
+                if selected_action in {_sx(429), _sx(1384), _sx(1194), _sx(1383), _sx(1195), _sx(1382), LANGUAGE_OPTION_ACTION}:
                     return self._handle_menu_action(selected_action)
                 return True
         if self.active_menu == self.sapi_menu:
@@ -3059,6 +3094,10 @@ class SubwayBlindGame:
             if self.active_menu == self.sapi_menu:
                 self._refresh_options_menu_labels()
                 self._set_active_menu(self.options_menu, start_index=self._update_option_index(_sx(1194)))
+                return True
+            if self.active_menu == self.language_menu:
+                self._refresh_options_menu_labels()
+                self._set_active_menu(self.options_menu, start_index=self._update_option_index(LANGUAGE_OPTION_ACTION))
                 return True
             if self.active_menu == self.announcements_menu:
                 self._refresh_options_menu_labels()
@@ -3458,6 +3497,10 @@ class SubwayBlindGame:
                 return True
             return True
         if self.active_menu == self.options_menu:
+            if action == LANGUAGE_OPTION_ACTION:
+                self._refresh_language_menu_labels()
+                self._set_active_menu(self.language_menu)
+                return True
             if action == _sx(1195):
                 self._prompt_and_authenticate_leaderboard_account()
                 return True
@@ -3488,6 +3531,33 @@ class SubwayBlindGame:
             if action == _sx(429):
                 self._refresh_options_menu_labels()
                 self._set_active_menu(self.options_menu, start_index=self._update_option_index(_sx(1194)))
+                return True
+            return True
+        if self.active_menu == self.language_menu:
+            if action == LANGUAGE_PUBLISH_ACTION:
+                opened = False
+                try:
+                    opened = bool(webbrowser.open(TRANSLATION_PUBLISH_URL, new=2))
+                except Exception:
+                    opened = False
+                if opened:
+                    self._play_menu_feedback(_sx(56))
+                    self.speaker.speak("Translation page opened in your browser.", interrupt=True)
+                else:
+                    self._play_menu_feedback(_sx(52))
+                    self.speaker.speak("Could not open the browser.", interrupt=True)
+                return True
+            if action.startswith(LANGUAGE_SELECT_ACTION_PREFIX):
+                selected_language = action.split(":", 1)[1]
+                self.settings["language"] = set_language(selected_language)
+                self._play_menu_feedback(_sx(56))
+                self._refresh_options_menu_labels()
+                self._refresh_language_menu_labels()
+                self.speaker.speak("Language: {0}".format(self._language_entry_label(selected_language)), interrupt=True)
+                return True
+            if action == _sx(429):
+                self._refresh_options_menu_labels()
+                self._set_active_menu(self.options_menu, start_index=self._update_option_index(LANGUAGE_OPTION_ACTION))
                 return True
             return True
         if self.active_menu == self.announcements_menu:
@@ -4904,19 +4974,7 @@ class SubwayBlindGame:
             self.speaker.speak(self.options_menu.items[self._update_option_index(_sx(1126))].label, interrupt=True)
             return
         if selected_action == LANGUAGE_OPTION_ACTION:
-            language_options = available_languages()
-            if not language_options:
-                language_options = ["english"]
-            current_language = str(self.settings.get("language", "english")).strip().lower() or "english"
-            try:
-                current_index = language_options.index(current_language)
-            except ValueError:
-                current_index = language_options.index("english") if "english" in language_options else 0
-            selected_language = language_options[(current_index + direction) % len(language_options)]
-            self.settings["language"] = set_language(selected_language)
-            self._play_menu_feedback(_sx(56))
-            self._refresh_options_menu_labels()
-            self.speaker.speak(self.options_menu.items[self._update_option_index(LANGUAGE_OPTION_ACTION)].label, interrupt=True)
+            self._play_menu_feedback(_sx(52))
             return
         if selected_action == _sx(1127):
             self.settings[_sx(327)] = direction > 0

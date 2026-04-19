@@ -1,26 +1,47 @@
 ﻿# Translation Guide
-A complete beginner-friendly guide for creating and maintaining `.lng` language files.
+A complete beginner-friendly guide for creating and maintaining translation packs.
 
 ## 1. What This System Does
-The game loads translations from files in the `langs` folder.
+The game loads translations from pack folders in the `langs` directory.
 
-- Each language file uses the `.lng` extension.
+- Each language is a folder under `langs`.
+- Each pack contains a `manifest.json` and one `.lng` file.
 - English is built into the game by default.
-- Players can switch language in `Options -> Language`.
+- Players can switch language in `Options -> Language` and press Enter.
+- Language list entries are shown like `turkish: 1.1.0: vireon-interactive`.
+- The first item in the language menu is `Publish your own language`, which opens the translation page in your default browser.
 - If a line is missing in your language file, the game shows the original English text.
 
 ## 2. File Location and Naming
-Put your translation file inside:
+Create a folder for each language pack:
 
-- `langs/`
+- `langs/turkish/`
+- `langs/spanish/`
+- `langs/french/`
 
-Examples:
+Inside each folder:
 
-- `turkish.lng`
-- `spanish.lng`
-- `french.lng`
+- `manifest.json`
+- `<language>.lng`
 
-Use lowercase names when possible.
+Use lowercase folder and file names when possible.
+
+Example:
+
+- `langs/turkish/manifest.json`
+- `langs/turkish/turkish.lng`
+
+`manifest.json` format:
+
+```json
+{
+  "id": "turkish",
+  "name": "Turkish",
+  "version": "1.1.0",
+  "author": "vireon-interactive",
+  "language_file": "turkish.lng"
+}
+```
 
 ## 3. Required Line Format
 Each translation entry must be exactly this format:
@@ -93,14 +114,16 @@ Runtime:
 - Output: `kuzey yönüne ilerliyorsun.`
 
 ## 8. Step-by-Step Workflow
-1. Create a new file in `langs/`.
-2. Add basic UI entries first (`Back`, `Yes`, `No`, menu labels).
-3. Add gameplay-critical lines (warnings, failures, rewards).
-4. Add `%1/%2` parameter lines.
-5. Add `%t1` helper lines (directions/states).
-6. Save file as UTF-8.
-7. Start game and select your language.
-8. Review menus and gameplay; patch missing lines.
+1. Create a new folder in `langs/`.
+2. Add `manifest.json` with `id`, `name`, `version`, `author`, `language_file`.
+3. Create the `.lng` file referenced by `language_file`.
+4. Add basic UI entries first (`Back`, `Yes`, `No`, menu labels).
+5. Add gameplay-critical lines (warnings, failures, rewards).
+6. Add `%1/%2` parameter lines.
+7. Add `%t1` helper lines (directions/states).
+8. Save file as UTF-8.
+9. Start game, go to `Options -> Language`, press Enter, and select your pack.
+10. Review menus and gameplay; patch missing lines.
 
 ## 9. UTF-8 Requirements
 Your file must be UTF-8 encoded.
@@ -184,8 +207,10 @@ turn left [=] sola geç
 ## 14. Troubleshooting
 Language does not appear:
 
-- Ensure file is in `langs/`
-- Ensure extension is `.lng`
+- Ensure the pack folder is in `langs/`
+- Ensure `manifest.json` exists
+- Ensure `language_file` points to a real `.lng` file in the same folder
+- Ensure `id` is unique and lowercase
 - Restart game if needed
 
 Text stays English:

@@ -168,7 +168,16 @@ The game supports keyboard plus SDL-compatible Xbox and PlayStation controllers 
 
 The game supports external language files under the `langs` folder.
 
-- Files must use the `.lng` extension (`langs/turkish.lng`, `langs/spanish.lng`, and so on)
+- Each translation must be a folder under `langs` (for example `langs/turkish`)
+- Every translation folder must include:
+  - `manifest.json`
+  - A `.lng` file referenced by `manifest.json`
+- `manifest.json` supports:
+  - `id`: language key used by the game (for example `turkish`)
+  - `name`: display name shown in language selection
+  - `version`: translation version
+  - `author`: translation creator
+  - `language_file`: relative file name of the `.lng` file in the same folder
 - Each translation line uses `English text [=] Your translation`
 - Lines that start with `;` are comments
 - Matching is case-insensitive
@@ -179,8 +188,8 @@ You can switch active language from `Options -> Language`.
 
 Included examples:
 
-- `langs/english.lng`
-- `langs/turkish.lng`
+- `langs/turkish/manifest.json`
+- `langs/turkish/turkish.lng`
 
 ## Menu Surface
 
