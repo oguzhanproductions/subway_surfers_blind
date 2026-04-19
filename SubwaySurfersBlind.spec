@@ -14,6 +14,8 @@ hiddenimports += collect_submodules('accessible_output2.outputs')
 
 def collect_project_asset_files(asset_root: str) -> list[tuple[str, str]]:
     root = Path(asset_root)
+    if not root.is_dir():
+        return []
     return [
         (str(path), str(Path(asset_root) / path.relative_to(root).parent))
         for path in root.rglob('*')
@@ -76,6 +78,7 @@ def collect_ucrt_binaries() -> list[tuple[str, str]]:
 
 datas = [('server.json', '.')]
 datas += collect_project_asset_files('assets')
+datas += collect_project_asset_files('langs')
 binaries += collect_python_runtime_binaries()
 binaries += collect_ucrt_binaries()
 
