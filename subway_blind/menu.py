@@ -54,6 +54,14 @@ class Menu:
             segments.extend(self._item_announcement_segments(self.items[self.index]))
         return tuple(segment for segment in segments if segment)
 
+    def _opening_announcement(self) -> str:
+        segments = self._opening_segments()
+        if not segments:
+            return _sx(2)
+        if len(segments) == 1:
+            return segments[0]
+        return _sx(988).format(*segments)
+
     @staticmethod
     def _translated_text(value: str) -> str:
         return translate_text(value)
