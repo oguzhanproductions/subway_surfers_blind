@@ -1,3 +1,11 @@
+## Notice
+
+This game will no longer be open source soon.
+
+The repository may become private or stop receiving public source code updates in the near future. Existing releases published under the current license will remain subject to that license, but future versions may be distributed under a different model.
+
+Thank you to everyone who has followed or supported the project.
+
 # Subway Surfers Blind Edition
 
 Accessible endless runner inspired by the lane-based rhythm and reaction loop of Subway Surfers, built for keyboard-first play with speech feedback, spatial audio, HRTF support, and Windows-friendly screen reader integration.
